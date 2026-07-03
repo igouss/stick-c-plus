@@ -13,7 +13,9 @@ pub struct EspClock {
 impl EspClock {
     /// Anchor the clock at the current instant (call once, after `esp_hal::init`).
     pub fn start() -> Self {
-        Self { start: Instant::now() }
+        Self {
+            start: Instant::now(),
+        }
     }
 }
 

@@ -4,7 +4,7 @@
 //! one responsibility per file. Nothing here leaks back into `led-core`.
 
 mod clock;
-mod strip;
+mod ws2812;
 
 pub use clock::EspClock;
-pub use strip::Ws2812Strip;
+pub use ws2812::{buffer_size, Ws2812Rmt, RMT_FREQ_MHZ};

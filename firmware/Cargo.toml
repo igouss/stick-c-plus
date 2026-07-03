@@ -13,11 +13,12 @@ path = "src/main.rs"
 # The pure domain (host-tested up in the root workspace).
 led-core = { path = "../domain" }
 
-# Hardware boundary. esp-hal is pinned to 1.0.x transitively by
-# esp-hal-smartled (`~1.0`); `unstable` unlocks the RMT peripheral.
-esp-hal = { version = "1.0.0", features = ["esp32", "unstable"] }
-esp-hal-smartled = { version = "0.17.0", features = ["esp32"] }
-smart-leds = "0.4"
+# Hardware boundary. Pinned to esp-hal 1.1 — the floor the WiFi/OTA stack
+# (esp-radio, esp-rtos, esp-storage, esp-bootloader-esp-idf) requires. We drive
+# the WS2812 strip off the RMT peripheral directly (see adapters::ws2812) rather
+# than through esp-hal-smartled, which caps esp-hal at ~1.0. `unstable` unlocks
+# the RMT peripheral.
+esp-hal = { version = "1.1", features = ["esp32", "unstable"] }
 
 # Diagnostics: panic handler + serial logging.
 esp-backtrace = { version = "0.19", features = ["esp32", "panic-handler", "println"] }

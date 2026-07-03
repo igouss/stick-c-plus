@@ -9,10 +9,9 @@
 
 mod adapters;
 
-use adapters::{EspClock, Ws2812Strip};
+use adapters::{buffer_size, EspClock, Ws2812Rmt, RMT_FREQ_MHZ};
 use esp_backtrace as _;
-use esp_hal::{rmt::Rmt, time::Rate, Config};
-use esp_hal_smartled::{smart_led_buffer, SmartLedsAdapter};
+use esp_hal::{delay::Delay, rmt::Rmt, time::Rate, Config};
 use esp_println::println;
 use led_core::{Animator, Clock, Rainbow, Rgb};
 
@@ -20,7 +19,6 @@ use led_core::{Animator, Clock, Rainbow, Rgb};
 const LED_COUNT: usize = 30;
 
 /// Data line into the strip. GPIO32 is the M5StickC Plus Grove port pin.
-/// (The pin is chosen below; this constant documents the wiring.)
 const DATA_PIN: &str = "GPIO32";
 
 #[esp_hal::main]
@@ -29,16 +27,19 @@ fn main() -> ! {
     println!("stick-led-firmware: booting — {LED_COUNT} LEDs on {DATA_PIN}");
 
     // --- Driven adapters (boundary) ---
-    let rmt = Rmt::new(peripherals.RMT, Rate::from_mhz(80)).expect("RMT init failed");
-    let mut rmt_buffer = smart_led_buffer!(LED_COUNT);
-    let sink = SmartLedsAdapter::new(rmt.channel0, peripherals.GPIO32, &mut rmt_buffer);
-    let mut strip = Ws2812Strip::new(sink);
+    let rmt = Rmt::new(peripherals.RMT, Rate::from_mhz(RMT_FREQ_MHZ)).expect("RMT init failed");
+    let mut strip = Ws2812Rmt::<{ buffer_size(LED_COUNT) }>::new(rmt.channel0, peripherals.GPIO32);
     let clock = EspClock::start();
 
     // --- Domain wiring (control) ---
-    let mut animator = Animator::new(Rainbow { spatial: 8, speed: 40, sat: 255, val: 128 });
+    let mut animator = Animator::new(Rainbow {
+        spatial: 8,
+        speed: 40,
+        sat: 255,
+        val: 128,
+    });
     let mut frame = [Rgb::BLACK; LED_COUNT];
-    let delay = esp_hal::delay::Delay::new();
+    let delay = Delay::new();
 
     // --- Render loop (~50 fps) ---
     loop {
