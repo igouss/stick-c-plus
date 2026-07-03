@@ -81,7 +81,12 @@ mod tests {
         let clock = FixedClock(Duration::from_millis(250));
         let mut buf = [Rgb::BLACK; 1];
         let mut out = Recorder { last: Vec::new() };
-        let mut anim = Animator::new(Rainbow { spatial: 10, speed: 100, sat: 255, val: 255 });
+        let mut anim = Animator::new(Rainbow {
+            spatial: 10,
+            speed: 100,
+            sat: 255,
+            val: 255,
+        });
 
         anim.tick(clock.now(), &mut buf, &mut out).unwrap();
 

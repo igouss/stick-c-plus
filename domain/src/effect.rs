@@ -97,7 +97,13 @@ mod tests {
     #[test]
     fn rainbow_spreads_distinct_hues() {
         let mut frame = [Rgb::BLACK; 2];
-        Rainbow { spatial: 85, speed: 0, sat: 255, val: 255 }.render(Duration::ZERO, &mut frame);
+        Rainbow {
+            spatial: 85,
+            speed: 0,
+            sat: 255,
+            val: 255,
+        }
+        .render(Duration::ZERO, &mut frame);
         assert_ne!(frame[0], frame[1]);
     }
 

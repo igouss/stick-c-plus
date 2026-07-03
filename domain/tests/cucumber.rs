@@ -42,9 +42,13 @@ fn render(world: &mut StripWorld, ms: u64) {
     let t = Duration::from_millis(ms);
     match world.chosen.expect("a scenario must choose an effect") {
         Chosen::SolidRed => SolidColor::new(RED).render(t, &mut world.frame),
-        Chosen::Rainbow => {
-            Rainbow { spatial: 85, speed: 0, sat: 255, val: 255 }.render(t, &mut world.frame)
+        Chosen::Rainbow => Rainbow {
+            spatial: 85,
+            speed: 0,
+            sat: 255,
+            val: 255,
         }
+        .render(t, &mut world.frame),
     }
 }
 
