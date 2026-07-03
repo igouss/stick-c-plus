@@ -1,0 +1,13 @@
+[build]
+target = "xtensa-esp32-none-elf"
+
+[target.xtensa-esp32-none-elf]
+runner = "espflash flash --monitor"
+rustflags = ["-C", "link-arg=-nostartfiles"]
+
+# No prebuilt xtensa core ships with the esp toolchain, so build it from source.
+[unstable]
+build-std = ["alloc", "core"]
+
+[env]
+ESP_LOG = "info"

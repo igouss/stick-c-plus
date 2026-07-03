@@ -1,0 +1,4 @@
+# Xtensa needs the `esp` rustc fork (installed via espup). Resolved per-directory,
+# so `cargo` inside firmware/ uses this while the host workspace stays on stable.
+[toolchain]
+channel = "esp"

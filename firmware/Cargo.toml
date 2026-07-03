@@ -1,0 +1,36 @@
+[package]
+name = "stick-led-firmware"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "M5StickC Plus firmware: drives a WS2812 strip with led-core effects."
+
+[[bin]]
+name = "stick-led-firmware"
+path = "src/main.rs"
+
+[dependencies]
+# The pure domain (host-tested up in the root workspace).
+led-core = { path = "../domain" }
+
+# Hardware boundary. esp-hal is pinned to 1.0.x transitively by
+# esp-hal-smartled (`~1.0`); `unstable` unlocks the RMT peripheral.
+esp-hal = { version = "1.0.0", features = ["esp32", "unstable"] }
+esp-hal-smartled = { version = "0.17.0", features = ["esp32"] }
+smart-leds = "0.4"
+
+# Diagnostics: panic handler + serial logging.
+esp-backtrace = { version = "0.19", features = ["esp32", "panic-handler", "println"] }
+esp-println = { version = "0.17", features = ["esp32"] }
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+
+[profile.dev]
+opt-level = "s"      # -O0 overflows IRAM on esp32; keep the debug build small.
+
+# Detach from the root host workspace so this crate keeps its own Xtensa target
+# and `esp` toolchain without infecting `cargo test` up there.
+[workspace]
