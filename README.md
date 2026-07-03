@@ -18,11 +18,25 @@ stick-c-plus/
 │  ├─ src/animator.rs #   Control   — Animator: render → push, over ports
 │  ├─ src/ports.rs    #   Ports     — Clock, LedOutput (implemented outward)
 │  └─ tests/          #   Gherkin plumbing (cucumber) over the effects
-└─ firmware/          # stick-led-firmware: the Xtensa boundary. Detached workspace.
-   ├─ src/main.rs             #   Composition root — wire adapters, run the loop
-   ├─ src/adapters/clock.rs   #   Boundary — Clock  via esp-hal monotonic timer
-   └─ src/adapters/strip.rs   #   Boundary — LedOutput via RMT WS2812 (smart-leds)
+├─ firmware/          # stick-led-firmware: the Xtensa boundary. Detached workspace.
+│  ├─ src/main.rs             #   Composition root — wire adapters, run the loop
+│  ├─ src/adapters/clock.rs   #   Boundary — Clock  via esp-hal monotonic timer
+│  └─ src/adapters/strip.rs   #   Boundary — LedOutput via RMT WS2812 (smart-leds)
+└─ kb/                # Knowledge base — board facts, sources, findings (kbe-style)
+   ├─ sources/        #   Raw: datasheets + the M5 factory firmware (submodule)
+   ├─ experiments/    #   Raw: what we probed on the metal (+ results)
+   ├─ findings/       #   Derived: falsifiable board facts, one per file
+   └─ guides/         #   Derived: toolchain, flashing, pin map
 ```
+
+`kb/` is a [`~/kbe`](../../../kbe/README.md)-style knowledge base for everything we
+learn about this board — cited sources, on-device experiments, and the findings
+distilled from them. It never compiles into the firmware; the boundary only
+*mirrors* what the hardware sources teach. Its headline source is M5Stack's shipped
+**FactoryTest** app ([`m5stack/M5StickC-Plus`](https://github.com/m5stack/M5StickC-Plus),
+a pinned submodule) — the AXP192 / ST7789 bring-up we port into `firmware/`,
+**verified to be the exact app on our board**. Start at [`kb/INDEX.md`](kb/INDEX.md).
+Fresh checkouts: `git submodule update --init`.
 
 The two build under **different toolchains**, on purpose:
 

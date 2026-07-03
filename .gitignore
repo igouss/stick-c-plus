@@ -7,5 +7,9 @@
 !**/proptest-regressions/
 
 # Datasheets are large immutable binaries — fetched locally, not committed.
-# The index and docs/datasheets/fetch.sh reproduce them.
-/docs/datasheets/*.pdf
+# The source note + kb/sources/m5stickc-plus-datasheets/fetch.sh reproduce them.
+/kb/sources/m5stickc-plus-datasheets/*.pdf
+
+# Flash dumps pulled off the board for reference/verification — large, re-fetchable
+# via espflash read-flash (see kb/experiments). Keep the recipe, not the bytes.
+/kb/**/*.bin

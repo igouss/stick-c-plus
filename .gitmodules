@@ -1,0 +1,3 @@
+[submodule "kb/sources/m5stack-m5stickc-plus"]
+	path = kb/sources/m5stack-m5stickc-plus
+	url = https://github.com/m5stack/M5StickC-Plus

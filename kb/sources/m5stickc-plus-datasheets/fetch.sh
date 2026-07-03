@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Fetch the M5StickC Plus reference PDFs into this directory.
-# Idempotent: existing valid PDFs are skipped. See README.md for what each covers.
+# Idempotent: existing valid PDFs are skipped. See ../m5stickc-plus-datasheets.md
+# for what each covers.
 set -euo pipefail
 cd "$(dirname "$0")"
 
