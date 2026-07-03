@@ -5,3 +5,7 @@
 
 # proptest regression seeds are worth committing; keep them.
 !**/proptest-regressions/
+
+# Datasheets are large immutable binaries — fetched locally, not committed.
+# The index and docs/datasheets/fetch.sh reproduce them.
+/docs/datasheets/*.pdf
