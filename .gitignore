@@ -13,3 +13,6 @@
 # Flash dumps pulled off the board for reference/verification — large, re-fetchable
 # via espflash read-flash (see kb/experiments). Keep the recipe, not the bytes.
 /kb/**/*.bin
+# EXCEPTION: the factory image is NOT re-fetchable once we flash our own firmware —
+# it is the one irreplaceable capture here, so it IS committed. Keep what you can't reobtain.
+!/kb/sources/m5stickc-plus-factory-image/factory-full-4MB.bin
