@@ -57,6 +57,11 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
   `high` · opening the port reboots the ESP32 (FT232 auto-reset) and the port is
   single-owner, so a shared console must fan out from **one** holder — never
   `ttyd espflash monitor` (one child per browser tab = reset + byte race).
+- `guide` [rust-driver-crates](guides/rust-driver-crates.md) — the `no_std` crate
+  per component (esp-hal 1.1 / embedded-hal 1.0), with the **eh-1.0 vs eh-0.2**
+  column that decides drop-in vs work: `axp192`/`mipidsi`/`pcf8563`/`smart-leds`
+  ready; MPU6886 + IR have **no eh-1.0 driver**, so (greenfield, no legacy compat)
+  we own thin drivers. Share the I2C bus with `embedded-hal-bus`.
 - `guide` [sharing-the-serial-console](guides/sharing-the-serial-console.md) — let
   many viewers (or the web) watch the UART at once: tmux-mirror (recommended),
   `ser2net`, or `conserver`, fronted by the host's `ttyd`/`oauth2-proxy` stack.
