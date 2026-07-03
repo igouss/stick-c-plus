@@ -1,0 +1,23 @@
+# ESP-IDF partition table — dual-OTA, 4 MB flash (M5StickC Plus, ESP32-PICO-D4).
+#
+# Two app slots (ota_0 / ota_1) so an OTA update writes the *inactive* slot and
+# the ESP-IDF second-stage bootloader A/B-boots whichever `otadata` selects,
+# with rollback if the freshly-flashed slot fails to mark itself valid.
+#
+# NOT yet wired into the espflash runner (.cargo/config.toml still does a plain
+# single-image flash). Flashing THIS table overwrites the factory app/otadata —
+# the factory image is preserved at kb/sources/m5stickc-plus-factory-image.md
+# (restore with `espflash write-bin 0x0 factory-full-4MB.bin`). It lands with the
+# OTA slot-writer work; see the OTA epic in beads.
+#
+# Layout (4 MB = 0x400000; app slots 64 KB-aligned, otadata fixed at 0x2000):
+#   0x00000..0x08000  bootloader + reserved
+#   0x08000..0x09000  partition table
+#   two ~1.94 MB app slots leave the top 64 KB free for a future coredump area.
+#
+# Name,     Type, SubType,  Offset,    Size
+nvs,        data, nvs,      0x9000,    0x4000
+otadata,    data, ota,      0xd000,    0x2000
+phy_init,   data, phy,      0xf000,    0x1000
+ota_0,      app,  ota_0,    0x10000,   0x1F0000
+ota_1,      app,  ota_1,    0x200000,  0x1F0000
