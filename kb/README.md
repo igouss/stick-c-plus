@@ -3,7 +3,7 @@
 A lab notebook for this board: what we read or download, what we test on the
 metal, and the durable knowledge we distill from both. Plain markdown + YAML
 frontmatter + git. No database — greppable, diffable, survives neglect. Modelled
-on [`~/kbe`](../../../kbe/README.md); read that for the full rationale.
+on `~/kbe` (see its own `README.md` for the full rationale).
 
 ## The one rule: two voices, never mixed
 

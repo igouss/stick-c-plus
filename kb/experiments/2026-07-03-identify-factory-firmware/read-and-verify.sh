@@ -27,7 +27,7 @@ for s in "${strings_to_check[@]}"; do
 done
 
 echo "== build fingerprint =="
-strings -n 5 "$DUMP" | grep -iE "arduino-lib-builder|v4\.4\.1|Apr 20 2022" | sort -u
+strings -n 5 "$DUMP" | grep -iE "arduino-lib-builder|v4\.4\.1|Apr 20 2022" | sort -u || true
 
 if grep -a -q "1bc68b2a-f3e3-11e9-81b4-2a2ae2dbcce4" "$DUMP"; then
   echo "RESULT: CONFIRMED — this board runs FactoryTest."
