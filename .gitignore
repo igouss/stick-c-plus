@@ -20,3 +20,6 @@
 # EXCEPTION: the factory image is NOT re-fetchable once we flash our own firmware —
 # it is the one irreplaceable capture here, so it IS committed. Keep what you can't reobtain.
 !/kb/sources/m5stickc-plus-factory-image/factory-full-4MB.bin
+
+# bv (beads viewer) local config and caches
+.bv/
