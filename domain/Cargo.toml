@@ -1,0 +1,25 @@
+[package]
+name = "led-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Framework-free LED-strip animation core (NightDriver-inspired) for the M5StickC Plus."
+
+[lib]
+name = "led_core"
+path = "src/lib.rs"
+
+# Pure no_std: the domain pulls in nothing. Hardware, timers and allocation
+# all live behind ports the firmware implements.
+[dependencies]
+
+# Host-only. These link std and never reach the Xtensa build (dev-deps are
+# excluded from a dependent's compilation).
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[[test]]
+name = "cucumber"
+harness = false

@@ -1,0 +1,13 @@
+# Host workspace: framework-free, host-testable crates.
+# The firmware is a *detached* workspace (firmware/Cargo.toml has its own
+# [workspace]) so it can carry the Xtensa target + `esp` toolchain without
+# forcing them on `cargo test` here. It depends on `domain` by path.
+[workspace]
+resolver = "2"
+members = ["domain"]
+# The firmware is its own Xtensa workspace; keep it out of the host one.
+exclude = ["firmware"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"

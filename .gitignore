@@ -1,0 +1,7 @@
+/target
+/firmware/target
+**/*.rs.bk
+*.pdb
+
+# proptest regression seeds are worth committing; keep them.
+!**/proptest-regressions/
