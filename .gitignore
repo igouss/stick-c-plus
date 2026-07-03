@@ -10,6 +10,10 @@
 # The source note + kb/sources/m5stickc-plus-datasheets/fetch.sh reproduce them.
 /kb/sources/m5stickc-plus-datasheets/*.pdf
 
+# The full upstream doc-page snapshot is re-fetchable (fetch.sh) and noisy — keep
+# the hand-transcribed pinmap.md, not the whole page.
+/kb/sources/m5stickc-plus-pinout/*.upstream.md
+
 # Flash dumps pulled off the board for reference/verification — large, re-fetchable
 # via espflash read-flash (see kb/experiments). Keep the recipe, not the bytes.
 /kb/**/*.bin

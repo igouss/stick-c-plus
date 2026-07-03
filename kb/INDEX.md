@@ -32,9 +32,13 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
 - `finding` [ws2812-grb-byte-order](findings/ws2812-grb-byte-order.md) — `high` ·
   WS2812 latches **G-R-B**; our in-tree `Ws2812Rmt` adapter emits the swap — keep
   `Rgb` as RGB in the domain and don't double-swap at the boundary.
+- `source` [m5stickc-plus-pinout](sources/m5stickc-plus-pinout.md) — M5Stack's
+  **official GPIO PinMap** captured verbatim (`pinmap.md`; `fetch.sh` re-diffs it
+  against upstream). The vendor doc that *names the pin numbers*; every one is
+  cross-checked against the factory library's `#define`s and they agree.
 - `guide` [m5stickc-plus-board-reference](guides/m5stickc-plus-board-reference.md)
-  — pin map + I2C addresses; **why the strip defaults to G32** (G2 = buzzer,
-  G0/G34 = mic are taken).
+  — pin map + I2C addresses + the exposed header pins (G0/G25/G26/G36); **why the
+  strip defaults to G32** (G2 = buzzer, G0/G34 = mic are taken).
 
 ## Development — toolchain & flashing
 
