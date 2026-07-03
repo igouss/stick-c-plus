@@ -39,13 +39,15 @@ esp toolchain onto every `cargo test`. So `firmware/Cargo.toml` declares its own
 depends on `domain` by path. Dependencies still point inward — the domain never
 knows the firmware exists.
 
-## Pinning gotcha
+## esp-hal version: 1.1 (the smartled ceiling is gone)
 
-`esp-hal` is pinned to **1.0.x** transitively by `esp-hal-smartled 0.17` (`~1.0`,
-the WS2812/RMT driver), and the RMT peripheral needs `esp-hal`'s **`unstable`**
-feature. Bumping `esp-hal` past what smartled supports breaks the build — see
-`firmware/Cargo.toml` (which documents this) and `firmware/Cargo.lock`. Treat
-smartled's supported `esp-hal` as the ceiling.
+The firmware pins **`esp-hal 1.1`**; the RMT peripheral needs its **`unstable`**
+feature. We used to be capped at 1.0.x because `esp-hal-smartled 0.17` requires
+`esp-hal ~1.0` — but the WiFi/OTA stack (`esp-radio`, `esp-rtos`, `esp-storage`)
+requires `~1.1`, a disjoint range. So we **dropped smartled** and own the WS2812
+RMT encoder in-tree (`firmware/src/adapters/ws2812.rs`). Full compatibility matrix
+and the pinned OTA crate set:
+[esp-rs-ota-version-matrix](../findings/esp-rs-ota-version-matrix.md).
 
 ## Build & flash
 

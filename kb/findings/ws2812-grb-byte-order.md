@@ -1,35 +1,38 @@
 ---
 id: ws2812-grb-byte-order
-title: "WS2812 latches G-R-B on the wire, but smart-leds does the swap — pass RGB, don't double-swap"
+title: "WS2812 latches G-R-B on the wire; our RMT adapter does the swap — pass RGB, don't double-swap"
 confidence: high
 scope: project:stick-c-plus
 derived-from: []
 supersedes: []
 reviewed: 2026-07-03
-check: grep -Eq 'pub r: u8' domain/src/color.rs && grep -Eq 'pub g: u8' domain/src/color.rs
+check: grep -Eq 'pub r: u8' domain/src/color.rs && grep -Eq 'px.g, px.r, px.b' firmware/src/adapters/ws2812.rs
 ---
 
 **Claim:** A WS2812 latches its 24 bits as **green, then red, then blue** — not
-RGB. But in our stack the `smart-leds` + `esp-hal-smartled` RMT path performs that
-reorder for you: you hand it `smart_leds::RGB8` in **R,G,B** order and it emits
-G,R,B on the wire. So the domain's `Rgb { r, g, b }` stays honest RGB, and the
-firmware must **not** pre-swap. Swapping in the domain would produce red↔green
-inverted output — the classic "why is my red green" bug — via a *double* swap.
+RGB. Exactly one place in the stack performs that reorder: the boundary adapter.
+The domain's `Rgb { r, g, b }` stays honest RGB and the firmware must **not**
+pre-swap — a second swap produces red↔green inverted output, the classic "why is
+my red green" bug.
 
 **Evidence:** `domain/src/color.rs` defines `Rgb { r, g, b }` (plain RGB, no
-pre-swap). `firmware/src/main.rs` drives the strip through
-`esp_hal_smartled::SmartLedsAdapter` + `smart_led_buffer!`, whose WS2812 encoder
-owns the GRB ordering. The domain never encodes wire bytes, so the concern lives
-entirely at the boundary adapter.
+pre-swap). `firmware/src/adapters/ws2812.rs` (`Ws2812Rmt::write`) encodes each
+pixel to RMT pulses in the byte order `[px.g, px.r, px.b]` — the swap lives there,
+once, at the boundary. The domain never encodes wire bytes.
 
-**Holds when:** the LED output goes through `smart-leds` / `esp-hal-smartled`
-(our current and intended path).
+> **Changed 2026-07-03:** we now own the RMT encoder in-tree and emit G,R,B
+> ourselves. Previously `esp-hal-smartled` did the swap (you handed it `RGB8` and
+> it reordered). We dropped smartled to reach `esp-hal 1.1` — see
+> [esp-rs-ota-version-matrix](esp-rs-ota-version-matrix.md). The invariant is
+> unchanged; only *who* swaps moved from the crate into our adapter.
 
-**Breaks when:** someone hand-rolls the RMT bit stream (bypassing smart-leds) — then
-*they* must emit G,R,B themselves, and the swap becomes their responsibility. Also
-false for non-WS2812 strips (APA102/SK9822 are RGB/BGR with a clock).
+**Holds when:** the LED output goes through `Ws2812Rmt` (our current and intended
+path) — it emits G,R,B, so the domain stays RGB.
+
+**Breaks when:** a refactor re-introduces a swap in the domain or a wrapping layer
+— then the two swaps cancel wrong and colours permute. Also false for non-WS2812
+strips (APA102/SK9822 are RGB/BGR with a clock).
 
 **How to apply:** Keep colour order out of the domain — `Rgb` is RGB, full stop.
-Do any wire-order concern in the `LedOutput` adapter only, and prefer letting
-`smart-leds` handle it. If output colours look permuted, suspect a double-swap at
-the boundary, not the domain.
+The single wire-order swap belongs in `Ws2812Rmt` and nowhere else. If output
+colours look permuted, suspect a double-swap at the boundary, not the domain.
