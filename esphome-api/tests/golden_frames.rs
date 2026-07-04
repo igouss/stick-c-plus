@@ -16,8 +16,7 @@
 //! two-oracle discipline (see PROVENANCE.md).
 
 use esphome_api::proto::{
-    DeviceInfoResponse, HelloResponse, ListEntitiesSensorResponse, PingRequest,
-    SensorStateResponse,
+    DeviceInfoResponse, HelloResponse, ListEntitiesSensorResponse, PingRequest, SensorStateResponse,
 };
 use esphome_api::{decode_frame, encode_frame_vec, Frame};
 use prost::Message;
@@ -60,7 +59,10 @@ fn goldens() -> Vec<Golden> {
 /// the crate free of a hex dependency for one fixture.
 fn unhex(s: &str) -> Vec<u8> {
     let s: &str = s.trim();
-    assert!(s.len().is_multiple_of(2), "hex must have an even length: {s:?}");
+    assert!(
+        s.len().is_multiple_of(2),
+        "hex must have an even length: {s:?}"
+    );
     (0..s.len())
         .step_by(2)
         .map(|i: usize| u8::from_str_radix(&s[i..i + 2], 16).expect("valid hex byte"))
@@ -164,7 +166,12 @@ fn every_captured_frame_decodes_to_its_type_and_payload() {
         let (frame, consumed): (Frame, usize) = decode_frame(&g.frame)
             .unwrap_or_else(|e: esphome_api::FrameError| panic!("{}: {e}", g.name))
             .unwrap_or_else(|| panic!("{}: frame decoded as incomplete", g.name));
-        assert_eq!(consumed, g.frame.len(), "{}: leftover bytes after decode", g.name);
+        assert_eq!(
+            consumed,
+            g.frame.len(),
+            "{}: leftover bytes after decode",
+            g.name
+        );
         assert_eq!(frame.msg_type, g.msg_type, "{}: wrong type", g.name);
         assert_eq!(frame.payload, g.payload, "{}: wrong payload", g.name);
     }

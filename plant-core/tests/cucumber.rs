@@ -51,7 +51,12 @@ fn parse_batch(text: &str) -> Vec<u16> {
     }
     text.replace(" and ", ", ")
         .split(',')
-        .map(|token: &str| token.trim().parse::<u16>().expect("a reading must be a number"))
+        .map(|token: &str| {
+            token
+                .trim()
+                .parse::<u16>()
+                .expect("a reading must be a number")
+        })
         .collect()
 }
 

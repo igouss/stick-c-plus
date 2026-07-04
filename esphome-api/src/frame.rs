@@ -85,16 +85,25 @@ impl core::fmt::Display for FrameError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             FrameError::RequiresEncryption => {
-                write!(f, "frame is Noise-encrypted (preamble 0x01); plaintext codec cannot decode it")
+                write!(
+                    f,
+                    "frame is Noise-encrypted (preamble 0x01); plaintext codec cannot decode it"
+                )
             }
             FrameError::InvalidPreamble(b) => {
-                write!(f, "invalid frame preamble 0x{b:02x} (expected 0x00 plaintext or 0x01 encrypted)")
+                write!(
+                    f,
+                    "invalid frame preamble 0x{b:02x} (expected 0x00 plaintext or 0x01 encrypted)"
+                )
             }
             FrameError::VarintTooLong => {
                 write!(f, "varuint exceeds the {MAX_VARUINT_BYTES}-byte limit")
             }
             FrameError::FrameTooLarge { length } => {
-                write!(f, "frame length {length} exceeds the {MAX_FRAME_SIZE}-byte limit")
+                write!(
+                    f,
+                    "frame length {length} exceeds the {MAX_FRAME_SIZE}-byte limit"
+                )
             }
         }
     }
@@ -239,7 +248,13 @@ mod tests {
         let (frame, consumed): (Frame, usize) =
             decode_frame(&bytes).unwrap().expect("a whole frame");
         assert_eq!(consumed, bytes.len());
-        assert_eq!(frame, Frame { msg_type: 7, payload: vec![] });
+        assert_eq!(
+            frame,
+            Frame {
+                msg_type: 7,
+                payload: vec![]
+            }
+        );
     }
 
     #[test]
@@ -260,13 +275,25 @@ mod tests {
         encode_frame(7, &[], &mut buf);
         encode_frame(8, &[0x01], &mut buf);
 
-        let (first, consumed): (Frame, usize) =
-            decode_frame(&buf).unwrap().expect("first frame");
-        assert_eq!(first, Frame { msg_type: 7, payload: vec![] });
+        let (first, consumed): (Frame, usize) = decode_frame(&buf).unwrap().expect("first frame");
+        assert_eq!(
+            first,
+            Frame {
+                msg_type: 7,
+                payload: vec![]
+            }
+        );
 
-        let (second, _): (Frame, usize) =
-            decode_frame(&buf[consumed..]).unwrap().expect("second frame");
-        assert_eq!(second, Frame { msg_type: 8, payload: vec![0x01] });
+        let (second, _): (Frame, usize) = decode_frame(&buf[consumed..])
+            .unwrap()
+            .expect("second frame");
+        assert_eq!(
+            second,
+            Frame {
+                msg_type: 8,
+                payload: vec![0x01]
+            }
+        );
     }
 
     #[test]
@@ -294,7 +321,10 @@ mod tests {
 
     #[test]
     fn a_foreign_preamble_is_a_typed_error() {
-        assert_eq!(decode_frame(&[0x42, 0x00, 0x01]), Err(FrameError::InvalidPreamble(0x42)));
+        assert_eq!(
+            decode_frame(&[0x42, 0x00, 0x01]),
+            Err(FrameError::InvalidPreamble(0x42))
+        );
     }
 
     #[test]

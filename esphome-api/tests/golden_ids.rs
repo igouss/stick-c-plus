@@ -34,7 +34,10 @@ fn ids_from_proto() -> Vec<(u32, String)> {
 
     let mut out: Vec<(u32, String)> = Vec::new();
     for (i, (body_start, name)) in decls.iter().enumerate() {
-        let span_end: usize = decls.get(i + 1).map(|d: &(usize, String)| d.0).unwrap_or(PROTO.len());
+        let span_end: usize = decls
+            .get(i + 1)
+            .map(|d: &(usize, String)| d.0)
+            .unwrap_or(PROTO.len());
         if let Some(c) = id_opt.captures(&PROTO[*body_start..span_end]) {
             out.push((c[1].parse::<u32>().unwrap(), name.clone()));
         }
@@ -53,7 +56,8 @@ fn ids_from_fixture() -> Vec<(u32, String)> {
             !t.is_empty() && !t.starts_with('#')
         })
         .map(|line: &str| {
-            let (id, name): (&str, &str) = line.split_once('\t').expect("fixture rows are id<TAB>name");
+            let (id, name): (&str, &str) =
+                line.split_once('\t').expect("fixture rows are id<TAB>name");
             (id.trim().parse::<u32>().unwrap(), name.trim().to_string())
         })
         .collect();
@@ -91,12 +95,22 @@ fn registry_matches_aioesphomeapi_core_table() {
 
 #[test]
 fn the_registry_is_sorted_and_unique_by_id() {
-    let ids: Vec<u32> = MESSAGE_IDS.iter().map(|(id, _): &(u32, &str)| *id).collect();
+    let ids: Vec<u32> = MESSAGE_IDS
+        .iter()
+        .map(|(id, _): &(u32, &str)| *id)
+        .collect();
 
     let mut ordered: Vec<u32> = ids.clone();
     ordered.sort();
-    assert_eq!(ids, ordered, "MESSAGE_IDS must stay sorted by id — message_name() binary-searches it");
+    assert_eq!(
+        ids, ordered,
+        "MESSAGE_IDS must stay sorted by id — message_name() binary-searches it"
+    );
 
     ordered.dedup();
-    assert_eq!(ordered.len(), MESSAGE_IDS.len(), "MESSAGE_IDS has duplicate ids");
+    assert_eq!(
+        ordered.len(),
+        MESSAGE_IDS.len(),
+        "MESSAGE_IDS has duplicate ids"
+    );
 }

@@ -485,7 +485,10 @@ mod tests {
                 assert_eq!(m.key, sensor.key());
                 assert_eq!(m.unit_of_measurement, "%");
                 assert_eq!(m.device_class, "moisture");
-                assert_eq!(m.state_class, proto::SensorStateClass::StateClassMeasurement as i32);
+                assert_eq!(
+                    m.state_class,
+                    proto::SensorStateClass::StateClassMeasurement as i32
+                );
             }
             other => panic!("expected a Sensor list, got {other:?}"),
         }
@@ -565,29 +568,79 @@ mod tests {
         // entry for its prost type — the single source of truth. Constructing
         // every variant also proves the placeholders compile against real types.
         let lists: Vec<(ListMessage, &str)> = vec![
-            (ListMessage::Sensor(Default::default()), "ListEntitiesSensorResponse"),
-            (ListMessage::BinarySensor(Default::default()), "ListEntitiesBinarySensorResponse"),
-            (ListMessage::Switch(Default::default()), "ListEntitiesSwitchResponse"),
-            (ListMessage::Light(Default::default()), "ListEntitiesLightResponse"),
-            (ListMessage::Number(Default::default()), "ListEntitiesNumberResponse"),
-            (ListMessage::Select(Default::default()), "ListEntitiesSelectResponse"),
-            (ListMessage::Cover(Default::default()), "ListEntitiesCoverResponse"),
+            (
+                ListMessage::Sensor(Default::default()),
+                "ListEntitiesSensorResponse",
+            ),
+            (
+                ListMessage::BinarySensor(Default::default()),
+                "ListEntitiesBinarySensorResponse",
+            ),
+            (
+                ListMessage::Switch(Default::default()),
+                "ListEntitiesSwitchResponse",
+            ),
+            (
+                ListMessage::Light(Default::default()),
+                "ListEntitiesLightResponse",
+            ),
+            (
+                ListMessage::Number(Default::default()),
+                "ListEntitiesNumberResponse",
+            ),
+            (
+                ListMessage::Select(Default::default()),
+                "ListEntitiesSelectResponse",
+            ),
+            (
+                ListMessage::Cover(Default::default()),
+                "ListEntitiesCoverResponse",
+            ),
         ];
         for (msg, name) in lists {
-            assert_eq!(msg.wire().0, crate::message_id(name).unwrap(), "list id for {name}");
+            assert_eq!(
+                msg.wire().0,
+                crate::message_id(name).unwrap(),
+                "list id for {name}"
+            );
         }
 
         let states: Vec<(StateMessage, &str)> = vec![
-            (StateMessage::Sensor(Default::default()), "SensorStateResponse"),
-            (StateMessage::BinarySensor(Default::default()), "BinarySensorStateResponse"),
-            (StateMessage::Switch(Default::default()), "SwitchStateResponse"),
-            (StateMessage::Light(Default::default()), "LightStateResponse"),
-            (StateMessage::Number(Default::default()), "NumberStateResponse"),
-            (StateMessage::Select(Default::default()), "SelectStateResponse"),
-            (StateMessage::Cover(Default::default()), "CoverStateResponse"),
+            (
+                StateMessage::Sensor(Default::default()),
+                "SensorStateResponse",
+            ),
+            (
+                StateMessage::BinarySensor(Default::default()),
+                "BinarySensorStateResponse",
+            ),
+            (
+                StateMessage::Switch(Default::default()),
+                "SwitchStateResponse",
+            ),
+            (
+                StateMessage::Light(Default::default()),
+                "LightStateResponse",
+            ),
+            (
+                StateMessage::Number(Default::default()),
+                "NumberStateResponse",
+            ),
+            (
+                StateMessage::Select(Default::default()),
+                "SelectStateResponse",
+            ),
+            (
+                StateMessage::Cover(Default::default()),
+                "CoverStateResponse",
+            ),
         ];
         for (msg, name) in states {
-            assert_eq!(msg.wire().0, crate::message_id(name).unwrap(), "state id for {name}");
+            assert_eq!(
+                msg.wire().0,
+                crate::message_id(name).unwrap(),
+                "state id for {name}"
+            );
         }
 
         // Commands are inbound (HA -> device), so they carry no wire() encoder;

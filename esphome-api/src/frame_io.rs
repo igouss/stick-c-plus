@@ -42,7 +42,10 @@ pub struct FrameReader<R> {
 impl<R: Read> FrameReader<R> {
     /// Wrap a reader.
     pub fn new(inner: R) -> Self {
-        Self { inner, buf: Vec::new() }
+        Self {
+            inner,
+            buf: Vec::new(),
+        }
     }
 
     /// Read the next whole frame, blocking until one arrives.
@@ -157,7 +160,13 @@ mod tests {
         let first: Frame = reader.read_frame().unwrap().expect("first");
         assert_eq!(first.msg_type, 7);
         let second: Frame = reader.read_frame().unwrap().expect("second");
-        assert_eq!(second, Frame { msg_type: 25, payload: vec![0xAA, 0xBB] });
+        assert_eq!(
+            second,
+            Frame {
+                msg_type: 25,
+                payload: vec![0xAA, 0xBB]
+            }
+        );
     }
 
     #[test]
@@ -198,11 +207,17 @@ mod tests {
         let mut reader: FrameReader<&[u8]> = FrameReader::new(sink.as_slice());
         assert_eq!(
             reader.read_frame().unwrap(),
-            Some(Frame { msg_type: 25, payload: vec![0xDE, 0xAD] })
+            Some(Frame {
+                msg_type: 25,
+                payload: vec![0xDE, 0xAD]
+            })
         );
         assert_eq!(
             reader.read_frame().unwrap(),
-            Some(Frame { msg_type: 7, payload: vec![] })
+            Some(Frame {
+                msg_type: 7,
+                payload: vec![]
+            })
         );
         assert_eq!(reader.read_frame().unwrap(), None);
     }

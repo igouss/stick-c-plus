@@ -62,14 +62,12 @@ pub use entity::{
     object_id_key, ApiEntity, CommandMessage, ListMessage, Registry, SensorConfig, SensorEntity,
     StateMessage,
 };
-pub use light::{LightConfig, LightEntity};
-#[cfg(feature = "light")]
-pub use light::LedRender;
-pub use frame::{
-    decode_frame, encode_frame, encode_frame_vec, Frame, FrameError, MAX_FRAME_SIZE,
-};
+pub use frame::{decode_frame, encode_frame, encode_frame_vec, Frame, FrameError, MAX_FRAME_SIZE};
 pub use frame_io::{FrameReader, FrameWriter};
 pub use ids::MESSAGE_IDS;
+#[cfg(feature = "light")]
+pub use light::LedRender;
+pub use light::{LightConfig, LightEntity};
 pub use proto::*;
 
 /// The ESPHome native-API version the vendored proto snapshot targets — the

@@ -39,7 +39,11 @@ struct Rgb01 {
 
 impl Rgb01 {
     /// Full-white — the default before HA sends a colour.
-    const WHITE: Rgb01 = Rgb01 { red: 1.0, green: 1.0, blue: 1.0 };
+    const WHITE: Rgb01 = Rgb01 {
+        red: 1.0,
+        green: 1.0,
+        blue: 1.0,
+    };
 }
 
 /// The immutable configuration of a [`LightEntity`].
@@ -339,11 +343,19 @@ mod tests {
         );
         // Now a command that ONLY changes brightness must leave the effect alone.
         light.handle_command(
-            &Command { key: light.key(), brightness: Some(0.2), ..Default::default() }
-                .into_message(),
+            &Command {
+                key: light.key(),
+                brightness: Some(0.2),
+                ..Default::default()
+            }
+            .into_message(),
         );
         assert_eq!(light.brightness(), 0.2);
-        assert_eq!(light.effect(), "Rainbow", "effect must survive a brightness-only command");
+        assert_eq!(
+            light.effect(),
+            "Rainbow",
+            "effect must survive a brightness-only command"
+        );
         assert!(light.is_on(), "on state must survive too");
     }
 
@@ -374,8 +386,11 @@ mod tests {
     #[test]
     fn a_non_light_command_is_a_no_op() {
         let mut light: LightEntity = light();
-        let switch: CommandMessage =
-            CommandMessage::Switch(proto::SwitchCommandRequest { key: light.key(), state: true, device_id: 0 });
+        let switch: CommandMessage = CommandMessage::Switch(proto::SwitchCommandRequest {
+            key: light.key(),
+            state: true,
+            device_id: 0,
+        });
         assert_eq!(light.handle_command(&switch), None);
         assert!(!light.is_on(), "a switch command must not toggle a light");
     }
@@ -387,8 +402,12 @@ mod tests {
         let key: u32 = light.key();
         registry.register(Box::new(light));
 
-        let command: CommandMessage =
-            Command { key, state: Some(true), ..Default::default() }.into_message();
+        let command: CommandMessage = Command {
+            key,
+            state: Some(true),
+            ..Default::default()
+        }
+        .into_message();
         match registry.apply_command(&command) {
             Some(StateMessage::Light(m)) => assert!(m.state),
             other => panic!("expected the light's new state, got {other:?}"),

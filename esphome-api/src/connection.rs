@@ -68,7 +68,10 @@ pub struct Connection {
 impl Connection {
     /// A fresh connection, awaiting the client's `HelloRequest`.
     pub fn new() -> Self {
-        Self { phase: Phase::AwaitingHello, subscribed: false }
+        Self {
+            phase: Phase::AwaitingHello,
+            subscribed: false,
+        }
     }
 
     /// The current lifecycle phase.
@@ -276,14 +279,21 @@ pub fn handle(
     match inbound {
         Inbound::Hello(_) => {
             let out: Vec<Outbound> = vec![Outbound::Hello(snapshot.hello_response())];
-            (Connection { phase: Phase::Active, ..conn }, out)
+            (
+                Connection {
+                    phase: Phase::Active,
+                    ..conn
+                },
+                out,
+            )
         }
 
         // No password is configured, so authentication always succeeds. Valid
         // in any open phase — the client sends it right after Hello.
         Inbound::Authenticate(_) => {
-            let ok: proto::AuthenticationResponse =
-                proto::AuthenticationResponse { invalid_password: false };
+            let ok: proto::AuthenticationResponse = proto::AuthenticationResponse {
+                invalid_password: false,
+            };
             (conn, vec![Outbound::Authenticated(ok)])
         }
 
@@ -292,12 +302,22 @@ pub fn handle(
         // The client answered our keepalive; nothing to send.
         Inbound::Pong(_) => (conn, Vec::new()),
 
-        Inbound::Disconnect(_) => {
-            (Connection { phase: Phase::Closed, ..conn }, vec![Outbound::DisconnectAck])
-        }
+        Inbound::Disconnect(_) => (
+            Connection {
+                phase: Phase::Closed,
+                ..conn
+            },
+            vec![Outbound::DisconnectAck],
+        ),
 
         // The client acknowledged a disconnect we initiated; close silently.
-        Inbound::DisconnectAck(_) => (Connection { phase: Phase::Closed, ..conn }, Vec::new()),
+        Inbound::DisconnectAck(_) => (
+            Connection {
+                phase: Phase::Closed,
+                ..conn
+            },
+            Vec::new(),
+        ),
 
         Inbound::DeviceInfo(_) => {
             let out: Vec<Outbound> = if conn.phase == Phase::Active {
@@ -322,7 +342,13 @@ pub fn handle(
 
         Inbound::SubscribeStates(_) => {
             if conn.phase == Phase::Active {
-                (Connection { subscribed: true, ..conn }, snapshot.state_stream())
+                (
+                    Connection {
+                        subscribed: true,
+                        ..conn
+                    },
+                    snapshot.state_stream(),
+                )
             } else {
                 (conn, Vec::new())
             }
@@ -363,7 +389,11 @@ mod tests {
 
     /// A one-sensor list, its matching state, and the device info — the plant
     /// monitor's minimal shape.
-    fn one_sensor() -> (proto::DeviceInfoResponse, Vec<ListMessage>, Vec<StateMessage>) {
+    fn one_sensor() -> (
+        proto::DeviceInfoResponse,
+        Vec<ListMessage>,
+        Vec<StateMessage>,
+    ) {
         let list: Vec<ListMessage> = vec![ListMessage::Sensor(proto::ListEntitiesSensorResponse {
             object_id: "soil_moisture".to_string(),
             key: 0x1A2B_3C4D,
@@ -384,7 +414,11 @@ mod tests {
         list: &'a [ListMessage],
         states: &'a [StateMessage],
     ) -> Snapshot<'a> {
-        Snapshot { device_info: info, list, states }
+        Snapshot {
+            device_info: info,
+            list,
+            states,
+        }
     }
 
     #[test]
@@ -419,7 +453,9 @@ mod tests {
         );
         assert_eq!(
             out,
-            vec![Outbound::Authenticated(proto::AuthenticationResponse { invalid_password: false })]
+            vec![Outbound::Authenticated(proto::AuthenticationResponse {
+                invalid_password: false
+            })]
         );
     }
 
@@ -427,7 +463,12 @@ mod tests {
     fn device_info_is_answered_once_active() {
         let info: proto::DeviceInfoResponse = device_info();
         let snap: Snapshot = snapshot(&info, &[], &[]);
-        let active: Connection = handle(Connection::new(), &Inbound::Hello(Default::default()), &snap).0;
+        let active: Connection = handle(
+            Connection::new(),
+            &Inbound::Hello(Default::default()),
+            &snap,
+        )
+        .0;
         let (_, out): (Connection, Vec<Outbound>) =
             handle(active, &Inbound::DeviceInfo(Default::default()), &snap);
         assert_eq!(out, vec![Outbound::DeviceInfo(Box::new(info.clone()))]);
@@ -437,17 +478,30 @@ mod tests {
     fn list_entities_streams_each_entity_then_done() {
         let (info, list, states) = one_sensor();
         let snap: Snapshot = snapshot(&info, &list, &states);
-        let active: Connection = handle(Connection::new(), &Inbound::Hello(Default::default()), &snap).0;
+        let active: Connection = handle(
+            Connection::new(),
+            &Inbound::Hello(Default::default()),
+            &snap,
+        )
+        .0;
         let (_, out): (Connection, Vec<Outbound>) =
             handle(active, &Inbound::ListEntities(Default::default()), &snap);
-        assert_eq!(out, vec![Outbound::List(list[0].clone()), Outbound::ListDone]);
+        assert_eq!(
+            out,
+            vec![Outbound::List(list[0].clone()), Outbound::ListDone]
+        );
     }
 
     #[test]
     fn list_entities_with_no_entities_is_just_done() {
         let info: proto::DeviceInfoResponse = device_info();
         let snap: Snapshot = snapshot(&info, &[], &[]);
-        let active: Connection = handle(Connection::new(), &Inbound::Hello(Default::default()), &snap).0;
+        let active: Connection = handle(
+            Connection::new(),
+            &Inbound::Hello(Default::default()),
+            &snap,
+        )
+        .0;
         let (_, out): (Connection, Vec<Outbound>) =
             handle(active, &Inbound::ListEntities(Default::default()), &snap);
         assert_eq!(out, vec![Outbound::ListDone]);
@@ -469,7 +523,12 @@ mod tests {
             }),
         ];
         let snap: Snapshot = snapshot(&info, &list, &[]);
-        let active: Connection = handle(Connection::new(), &Inbound::Hello(Default::default()), &snap).0;
+        let active: Connection = handle(
+            Connection::new(),
+            &Inbound::Hello(Default::default()),
+            &snap,
+        )
+        .0;
         let (_, out): (Connection, Vec<Outbound>) =
             handle(active, &Inbound::ListEntities(Default::default()), &snap);
         assert_eq!(
@@ -486,7 +545,12 @@ mod tests {
     fn subscribe_streams_initial_states_and_sets_subscribed() {
         let (info, list, states) = one_sensor();
         let snap: Snapshot = snapshot(&info, &list, &states);
-        let active: Connection = handle(Connection::new(), &Inbound::Hello(Default::default()), &snap).0;
+        let active: Connection = handle(
+            Connection::new(),
+            &Inbound::Hello(Default::default()),
+            &snap,
+        )
+        .0;
         let (conn, out): (Connection, Vec<Outbound>) =
             handle(active, &Inbound::SubscribeStates(Default::default()), &snap);
         assert!(conn.is_subscribed());
@@ -497,7 +561,12 @@ mod tests {
     fn ping_is_ponged_and_pong_is_silent() {
         let info: proto::DeviceInfoResponse = device_info();
         let snap: Snapshot = snapshot(&info, &[], &[]);
-        let active: Connection = handle(Connection::new(), &Inbound::Hello(Default::default()), &snap).0;
+        let active: Connection = handle(
+            Connection::new(),
+            &Inbound::Hello(Default::default()),
+            &snap,
+        )
+        .0;
         let (_, pong): (Connection, Vec<Outbound>) =
             handle(active, &Inbound::Ping(Default::default()), &snap);
         assert_eq!(pong, vec![Outbound::Pong]);
@@ -510,7 +579,12 @@ mod tests {
     fn disconnect_is_acked_and_closes() {
         let info: proto::DeviceInfoResponse = device_info();
         let snap: Snapshot = snapshot(&info, &[], &[]);
-        let active: Connection = handle(Connection::new(), &Inbound::Hello(Default::default()), &snap).0;
+        let active: Connection = handle(
+            Connection::new(),
+            &Inbound::Hello(Default::default()),
+            &snap,
+        )
+        .0;
         let (closed, out): (Connection, Vec<Outbound>) =
             handle(active, &Inbound::Disconnect(Default::default()), &snap);
         assert!(closed.is_closed());
@@ -540,7 +614,12 @@ mod tests {
     fn an_unknown_message_is_ignored() {
         let info: proto::DeviceInfoResponse = device_info();
         let snap: Snapshot = snapshot(&info, &[], &[]);
-        let active: Connection = handle(Connection::new(), &Inbound::Hello(Default::default()), &snap).0;
+        let active: Connection = handle(
+            Connection::new(),
+            &Inbound::Hello(Default::default()),
+            &snap,
+        )
+        .0;
         let (conn, out): (Connection, Vec<Outbound>) =
             handle(active, &Inbound::Other { msg_type: 999 }, &snap);
         assert_eq!(conn, active);
@@ -585,7 +664,12 @@ mod tests {
         let snap: Snapshot = snapshot(&info, &list, &states);
 
         // Un-subscribed active connection: no unsolicited state.
-        let active: Connection = handle(Connection::new(), &Inbound::Hello(Default::default()), &snap).0;
+        let active: Connection = handle(
+            Connection::new(),
+            &Inbound::Hello(Default::default()),
+            &snap,
+        )
+        .0;
         assert!(broadcast_states(&active, &states).is_empty());
 
         // After subscribing, a new reading is pushed.
@@ -601,11 +685,17 @@ mod tests {
     fn inbound_decode_maps_types_and_flags_bad_payloads() {
         // A known id with an empty (valid) payload decodes to its variant.
         assert_eq!(
-            Inbound::decode(msg::HELLO_REQUEST, &proto::HelloRequest::default().encode_to_vec()),
+            Inbound::decode(
+                msg::HELLO_REQUEST,
+                &proto::HelloRequest::default().encode_to_vec()
+            ),
             Ok(Inbound::Hello(proto::HelloRequest::default()))
         );
         // An unknown id is Other, not an error.
-        assert_eq!(Inbound::decode(9999, &[]), Ok(Inbound::Other { msg_type: 9999 }));
+        assert_eq!(
+            Inbound::decode(9999, &[]),
+            Ok(Inbound::Other { msg_type: 9999 })
+        );
         // A known id with a truncated/garbage payload is a decode error, never a
         // silent drop.
         assert!(Inbound::decode(msg::HELLO_REQUEST, &[0xFF, 0xFF, 0xFF]).is_err());

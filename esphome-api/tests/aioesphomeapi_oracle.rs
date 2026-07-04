@@ -108,12 +108,10 @@ fn write_all(writer: &mut FrameWriter<TcpStream>, messages: &[Outbound]) -> io::
 #[test]
 #[ignore = "requires aioesphomeapi; set ESPHOME_ORACLE_PYTHON and run with --ignored"]
 fn the_real_ha_client_adopts_and_reads_the_device() {
-    let python: String = std::env::var("ESPHOME_ORACLE_PYTHON").expect(
-        "set ESPHOME_ORACLE_PYTHON to a python interpreter that has aioesphomeapi",
-    );
+    let python: String = std::env::var("ESPHOME_ORACLE_PYTHON")
+        .expect("set ESPHOME_ORACLE_PYTHON to a python interpreter that has aioesphomeapi");
 
-    let listener: TcpListener =
-        TcpListener::bind("127.0.0.1:0").expect("bind loopback listener");
+    let listener: TcpListener = TcpListener::bind("127.0.0.1:0").expect("bind loopback listener");
     let port: u16 = listener.local_addr().unwrap().port();
 
     // The device runs on its own thread; the accept blocks until the client
@@ -136,9 +134,7 @@ fn the_real_ha_client_adopts_and_reads_the_device() {
     let stdout: String = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr: String = String::from_utf8_lossy(&output.stderr).into_owned();
 
-    let server_result: io::Result<()> = server
-        .join()
-        .expect("device thread must not panic");
+    let server_result: io::Result<()> = server.join().expect("device thread must not panic");
 
     assert!(
         output.status.success(),
@@ -155,7 +151,11 @@ fn the_real_ha_client_adopts_and_reads_the_device() {
     assert_eq!(summary["entity_count"], 1);
     assert_eq!(summary["object_id"], "soil_moisture");
     assert!(
-        summary["distinct_states"].as_array().map(|a| a.len()).unwrap_or(0) >= 2,
+        summary["distinct_states"]
+            .as_array()
+            .map(|a| a.len())
+            .unwrap_or(0)
+            >= 2,
         "expected >=2 distinct states in {summary}"
     );
 }
