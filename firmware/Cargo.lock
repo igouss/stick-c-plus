@@ -5,6 +5,11 @@ version = 4
 [[package]]
 name = "adapters"
 version = "0.1.0"
+dependencies = [
+ "esp-idf-hal",
+ "esp-idf-sys",
+ "plant-core",
+]
 
 [[package]]
 name = "aho-corasick"
@@ -1025,6 +1030,7 @@ version = "0.1.0"
 name = "plant-monitor"
 version = "0.1.0"
 dependencies = [
+ "adapters",
  "embuild",
  "esp-idf-hal",
  "esp-idf-svc",

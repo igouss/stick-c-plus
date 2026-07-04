@@ -15,8 +15,21 @@ path = "src/lib.rs"
 [package.metadata.hex-arch]
 role = "driven-adapter"
 
-# qhw.2 scope is the skeleton only. The ADC/SoilSensor adapter (qhw.5), the
-# Clock re-home (qhw.15), the WS2812 RMT encoder (qqh.1) and the ST7789 display
-# arrive in their own beads, pulling esp-idf-hal and the host port crates (by
-# path) then.
+# The Clock re-home (qhw.15), the WS2812 RMT encoder (qqh.1) and the ST7789
+# display arrive in their own beads, pulling their peripherals then.
 [dependencies]
+# The host domain crate whose SoilSensor port the `adc` adapter implements,
+# referenced by path across the host/firmware workspace seam. plant-core is
+# no_std + zero-dep, so it builds on every target — including the host, where the
+# `oversample` reduction is unit-tested.
+plant-core = { path = "../../plant-core" }
+
+# The ESP-IDF HAL only exists on-target, and its -sys build script rejects any
+# other target, so it is gated to `espidf` — mirroring the `adc` module gate in
+# lib.rs. This is what keeps an off-target `cargo test` (the pure `oversample`
+# reduction) from dragging in the on-target HAL. esp-idf-hal supplies the oneshot
+# ADC driver the adapter wraps; esp-idf-sys is named alongside it only for
+# `EspError` (the adapter's port error type), so its version floor stays visible.
+[target.'cfg(target_os = "espidf")'.dependencies]
+esp-idf-hal = "0.46"
+esp-idf-sys = "0.37"
