@@ -1,13 +1,23 @@
 [build]
-target = "xtensa-esp32-none-elf"
+# std/ESP-IDF target (was xtensa-esp32-none-elf under the no_std esp-hal stack).
+target = "xtensa-esp32-espidf"
 
-[target.xtensa-esp32-none-elf]
+[target.xtensa-esp32-espidf]
+# ldproxy forwards the linker args ESP-IDF's build system emits (via build.rs +
+# embuild) to the real linker; a plain linker invocation misses them.
+linker = "ldproxy"
 runner = "espflash flash --monitor"
-rustflags = ["-C", "link-arg=-nostartfiles"]
+# esp-idf-sys >= 0.34 assumes a 64-bit time_t; ESP-IDF 5.x is built that way.
+rustflags = ["--cfg", "espidf_time64"]
 
-# No prebuilt xtensa core ships with the esp toolchain, so build it from source.
+# No prebuilt xtensa std ships with the esp toolchain, so build std from source.
 [unstable]
-build-std = ["alloc", "core"]
+build-std = ["std", "panic_abort"]
 
 [env]
+MCU = "esp32"
+# Exact ESP-IDF tag (acceptance: pin an exact v5.3.x). esp-idf-sys 0.37.0's
+# CHANGELOG deprecates all IDF < 5.3.0, i.e. the floor is v5.3.0 and it supports
+# 5.3.x/5.4.x/5.5.x; v5.3.3 is the latest 5.3 patch, on the floor's own line.
+ESP_IDF_VERSION = "v5.3.3"
 ESP_LOG = "info"

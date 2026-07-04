@@ -1,5 +1,12 @@
 /target
 /firmware/target
+# esp-idf-sys stages the whole ESP-IDF checkout + Xtensa toolchains here (~2 GB,
+# workspace-local install dir). Pure build artifact; re-fetchable from the pins.
+/firmware/.embuild
+# The GENERATED sdkconfig is derived from sdkconfig.defaults each build; the
+# defaults file is the committed source of truth, the generated one is not.
+/firmware/sdkconfig
+/firmware/sdkconfig.old
 **/*.rs.bk
 *.pdb
 

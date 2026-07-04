@@ -3,26 +3,29 @@ name = "stick-led-firmware"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "M5StickC Plus firmware: drives a WS2812 strip with led-core effects."
+# qhw.1 scope: a minimal std/ESP-IDF binary that BOOTS and logs over serial —
+# nothing more. The crate keeps its name for now; the workspace carve (qhw.2)
+# renames/splits it into the plant-monitor and led-driver (fmz.1) binaries, and
+# the re-homed WS2812/Clock adapters return under qqh.1 / qhw.15.
+description = "M5StickC Plus firmware: std/ESP-IDF boot skeleton (qhw.1)."
 
 [[bin]]
 name = "stick-led-firmware"
 path = "src/main.rs"
 
 [dependencies]
-# The pure domain (host-tested up in the root workspace).
-led-core = { path = "../domain" }
+# The std/ESP-IDF stack (supersedes the no_std esp-hal stack; see the KB note
+# kb/sources/rust-on-esp-idf.md). esp-idf-svc re-exports -hal and -sys, but all
+# three are named explicitly so the version floor is visible at a glance.
+esp-idf-svc = "0.52"
+esp-idf-hal = "0.46"
+esp-idf-sys = "0.37"
+log = "0.4"
 
-# Hardware boundary. Pinned to esp-hal 1.1 — the floor the WiFi/OTA stack
-# (esp-radio, esp-rtos, esp-storage, esp-bootloader-esp-idf) requires. We drive
-# the WS2812 strip off the RMT peripheral directly (see adapters::ws2812) rather
-# than through esp-hal-smartled, which caps esp-hal at ~1.0. `unstable` unlocks
-# the RMT peripheral.
-esp-hal = { version = "1.1", features = ["esp32", "unstable"] }
-
-# Diagnostics: panic handler + serial logging.
-esp-backtrace = { version = "0.19", features = ["esp32", "panic-handler", "println"] }
-esp-println = { version = "0.17", features = ["esp32"] }
+[build-dependencies]
+# Emits the sysenv link/search flags ESP-IDF's build produces so the final link
+# finds the ESP-IDF libraries; consumed by build.rs.
+embuild = "0.33"
 
 [profile.release]
 opt-level = "s"

@@ -1,0 +1,24 @@
+# ESP-IDF build-time config overrides (esp-idf-sys feeds this to the IDF build).
+#
+# Acceptance note (qhw.1): a MISTYPED key is silently ignored, so proof is the
+# GENERATED sdkconfig showing these values took effect — not that the line exists
+# here. The stack/socket/optimization keys are core IDF and appear immediately;
+# CONFIG_MDNS_MAX_SERVICES only materializes once the mdns managed component is
+# pulled in (qhw.8) — until then it is expected to be inert.
+
+# Size optimization: flash on this board is tight (4 MB, dual-OTA slots).
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# Main task stack. Default 3584 B is too small once the native-API server and
+# the moisture sampler run on it; give it real headroom.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# Rust std threads run on pthreads; the default pthread stack is likewise tight.
+CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=8192
+
+# lwIP sockets: the HA connection + mDNS + OTA pull + headroom.
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# mDNS services advertised (_esphomelib._tcp and friends). Inert until qhw.8
+# adds the mdns component.
+CONFIG_MDNS_MAX_SERVICES=10

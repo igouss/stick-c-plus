@@ -1,52 +1,30 @@
-//! M5StickC Plus firmware — composition root.
+//! M5StickC Plus firmware — std/ESP-IDF boot skeleton (qhw.1).
 //!
-//! Wires the driven adapters (WS2812 strip, monotonic clock) to the `led-core`
-//! [`Animator`] and runs the render loop. All policy lives in the framework-free
-//! domain; this file only assembles hardware and turns the crank.
+//! Scope is deliberately minimal: bring up the std/ESP-IDF runtime, log over
+//! serial, and stay alive so the board can be proven to boot without looping.
+//! Everything else — the WS2812/Clock adapters (re-homed under qqh.1 / qhw.15),
+//! the workspace carve (qhw.2), WiFi/native-API/plant-monitor — lands later.
+//!
+//! The heartbeat below is the boot-loop probe: a device that reset would restart
+//! the `alive: 1s` count, so a monotonically climbing counter on the serial
+//! monitor is the acceptance signal (runs 60s+ past `main` without a reset).
 
-#![no_std]
-#![no_main]
+use esp_idf_hal::delay::FreeRtos;
+use esp_idf_svc::log::EspLogger;
+use log::info;
 
-mod adapters;
+fn main() {
+    // Patch a few ESP-IDF symbols Rust's std expects, then route `log` records
+    // to the ESP-IDF logger so `info!` reaches the serial monitor.
+    esp_idf_svc::sys::link_patches();
+    EspLogger::initialize_default();
 
-use adapters::{buffer_size, EspClock, Ws2812Rmt, RMT_FREQ_MHZ};
-use esp_backtrace as _;
-use esp_hal::{delay::Delay, rmt::Rmt, time::Rate, Config};
-use esp_println::println;
-use led_core::{Animator, Clock, Rainbow, Rgb};
+    info!("stick-firmware: std/ESP-IDF boot skeleton up (qhw.1)");
 
-/// Number of pixels on the strip. Set this to your hardware.
-const LED_COUNT: usize = 30;
-
-/// Data line into the strip. GPIO32 is the M5StickC Plus Grove port pin.
-const DATA_PIN: &str = "GPIO32";
-
-#[esp_hal::main]
-fn main() -> ! {
-    let peripherals = esp_hal::init(Config::default());
-    println!("stick-led-firmware: booting — {LED_COUNT} LEDs on {DATA_PIN}");
-
-    // --- Driven adapters (boundary) ---
-    let rmt = Rmt::new(peripherals.RMT, Rate::from_mhz(RMT_FREQ_MHZ)).expect("RMT init failed");
-    let mut strip = Ws2812Rmt::<{ buffer_size(LED_COUNT) }>::new(rmt.channel0, peripherals.GPIO32);
-    let clock = EspClock::start();
-
-    // --- Domain wiring (control) ---
-    let mut animator = Animator::new(Rainbow {
-        spatial: 8,
-        speed: 40,
-        sat: 255,
-        val: 128,
-    });
-    let mut frame = [Rgb::BLACK; LED_COUNT];
-    let delay = Delay::new();
-
-    // --- Render loop (~50 fps) ---
+    let mut uptime_s: u64 = 0;
     loop {
-        let now = clock.now();
-        if let Err(err) = animator.tick(now, &mut frame, &mut strip) {
-            println!("strip write error: {err:?}");
-        }
-        delay.delay_millis(20);
+        FreeRtos::delay_ms(1000);
+        uptime_s += 1;
+        info!("alive: {uptime_s}s");
     }
 }

@@ -1,5 +1,5 @@
 fn main() {
-    // esp-hal's build script places `linkall.x` (and the memory-region scripts it
-    // pulls in) on the linker search path; this pulls it into the final link.
-    println!("cargo:rustc-link-arg=-Tlinkall.x");
+    // esp-idf-sys builds ESP-IDF and records the resulting link/search flags in
+    // its sysenv; emit them here so ldproxy forwards them to the final link.
+    embuild::espidf::sysenv::output();
 }
