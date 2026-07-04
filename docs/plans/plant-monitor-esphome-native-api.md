@@ -2,8 +2,9 @@
 
 ## Context
 
-An M5Stack **Earth Unit** (capacitive soil probe) is plugged into the M5StickC Plus Grove
-port and sits in a plant. The goal: read soil moisture, graph it over time, and alert when to
+An M5Stack **Earth Unit** (**resistive** soil probe — two exposed pads; per m5 docs *not*
+corrosion-resistant, POC-grade) is plugged into the M5StickC Plus Grove port and sits in a
+plant. Constant DC bias corrodes the pads, so probe power is gated to sampling windows (own bead). The goal: read soil moisture, graph it over time, and alert when to
 water — with the readings flowing into **Home Assistant** via the **ESPHome native API**, so HA
 does the storing, graphing and alerting.
 
@@ -20,7 +21,7 @@ reshaped the plan from "a feature" into "a shared foundation":
 - **Foundation pivot:** move the *firmware* from `no_std` esp-hal → **`std` on ESP-IDF**
   (`esp-idf-svc`/`esp-idf-hal`/`esp-idf-sys`). The device (ESP32-PICO-D4, 4 MB flash, 520 KB
   SRAM, **no PSRAM**) handles it comfortably. This is what makes the native API a ~week job
-  instead of weeks: `std::net` TCP, `prost` protobuf, ESP-IDF WiFi/mDNS/OTA, `snow` for Noise.
+  instead of weeks: `std::net` TCP, `prost` protobuf, ESP-IDF WiFi/mDNS/OTA, `noise-protocol` for Noise.
   It **reverses** the documented no_std OTA epic (`stick-c-plus-qqh`) — ESP-IDF now supplies
   that stack natively.
 - **Domain stays no_std.** `led-core` and the new `plant-core` remain pure, framework-free, and
@@ -28,7 +29,8 @@ reshaped the plan from "a feature" into "a shared foundation":
 - **HA integration:** implement the ESPHome native API generically (see below). **Plaintext
   first**, Noise encryption as a fast-follow.
 - **Sensor pin:** Earth **analog on G33 (ADC1_CH5)** — must be **ADC1** so it coexists with
-  WiFi. Moisture % derived in software from raw counts; digital G32 line optional.
+  WiFi. Moisture % derived in software from raw counts; digital G32 line optional. The probe is
+  **resistive** (wet conducts more → expect wet-high readings, but calibration is order-agnostic).
 - **Display:** moisture status on the onboard **ST7789 TFT** (backlight gated by **AXP192** —
   power the PMIC *before* the display). Optional for the MVP.
 - **Home Assistant is not yet running** — a step-zero stands it up.
@@ -169,10 +171,11 @@ This keeps **tokio off the device** (heavy for 520 KB, no PSRAM), fits the hexag
 domain stay framework-free; the blocking net server is a boundary adapter), and still gives us
 the proto + Noise for free — the two hardest pieces.
 
-**Wire format** (to verify any implementation against): frame = **1-byte preamble + 2-byte
-big-endian length + payload**; preamble `0x00` = plaintext (payload = varint type + varint len +
-protobuf), `0x01` = encrypted (Noise blob whose *inner* frame = 2-byte type + 2-byte len +
-protobuf). Cipher `Noise_NNpsk0_25519_ChaChaPoly_SHA256`, PSK = base64 32-byte HA key, **device =
+**Wire format** (verified against developers.esphome.io + aioesphomeapi): **plaintext** frame =
+`0x00` preamble, **varint payload-size, varint message-type** (one length field, size *before*
+type), then exactly payload-size bytes of protobuf; **encrypted** frame = `0x01` preamble +
+**2-byte big-endian length** + Noise blob whose *inner* frame = 2-byte type + 2-byte len +
+protobuf. Cipher `Noise_NNpsk0_25519_ChaChaPoly_SHA256`, PSK = base64 32-byte HA key, **device =
 responder**. TXT advertises `api_encryption=Noise_NNpsk0_25519_ChaChaPoly_SHA256` when on.
 
 ## Target workspace structure
@@ -212,7 +215,7 @@ so `hex-lint` + `effect-audit` gate the layering (see **Dogfood**).
 | `esp-idf-hal` | 0.46 | ADC/SPI/I2C/RMT/GPIO | | `prost` | 0.13 | protobuf runtime (match UbiHome types) |
 | `esp-idf-sys` | 0.37 | bindings + IDF build | | `noise-protocol` | 0.2 | Noise NNpsk0 (no_std-capable, **not** snow) |
 | `embuild` | 0.33 | build.rs glue | | `noise-rust-crypto` | 0.6 | RustCrypto cipher backend for Noise |
-| `ldproxy` | 0.3 | linker shim (binary) | | `mipidsi` / `embedded-graphics` | 0.10 / 0.8 | ST7789 / drawing |
+| `ldproxy` | 0.3 | linker shim (binary) | | `mipidsi` / `embedded-graphics` | 0.9 / 0.8 | ST7789 / drawing |
 | | | | | `axp192` | 0.2 | PMIC (eh 1.0) |
 
 **ESP-IDF ≥ 5.3.0 required** (esp-idf-sys 0.37 dropped < 5.3). Target `xtensa-esp32-espidf`.
@@ -235,7 +238,7 @@ New epic **"M5StickC Plus — std/ESP-IDF foundation + ESPHome-native plant moni
 | G | WiFi STA bring-up (git-ignored creds) | A |
 | H | mDNS `_esphomelib._tcp` advertiser | A, G |
 | **I** | **On-device native-API server (plaintext), one Sensor entity, wired to sampler — end-to-end in HA** | D, E, G, H |
-| J | Noise encryption follow-on (`snow` responder) | I |
+| J | Noise encryption follow-on (`noise-protocol` responder; RNG injected from the shell) | I |
 | K | Host: stand up Home Assistant + adopt device | — |
 | L | WS2812 adapter re-home to esp-idf RMT + `led-driver` bin exposing a **Light** entity (project #2 seed) | B, D |
 | M | ESP-IDF-native OTA (esp-idf-svc OTA + HTTP; supersedes qqh no_std OTA) | G |
@@ -295,12 +298,15 @@ template from `animator.rs`'s inline tests.
   `embedded-hal-bus`.
 - `wifi.rs` (in `firmware-infra`) — `EspWifi`/`BlockingWifi` client; creds from a **git-ignored**
   `firmware/secrets.toml` read in `build.rs` → `env!("WIFI_SSID"/"WIFI_PASS")`. Add
-  `secrets.toml` + the Noise PSK to `.gitignore`. (SSID "REDACTED-WIFI-SSID" / pass "REDACTED-WIFI-PW"
-  never enter committed source.)
+  `secrets.toml` + the Noise PSK to `.gitignore`. (The real SSID/password never enter committed
+  source — including this document; an earlier revision leaked them, see qhw.7's history-scan AC.)
 - native-API — split **core vs shell** (FC/IS + `effect-audit`): the **pure core** in `esphome-api`
   (`role="domain"`, no sockets, tested with values) reuses the **vendored `UbiHome/esphome-native-api`
   (MIT)** `api.proto`+prost types + message-type-id registry, and holds the connection **FSM**
-  (`handle(conn,msg,snapshot)->(conn,out)`) + framing/Noise *transforms*. The **shell** in
+  (`handle(conn,msg,snapshot)->(conn,out)`) + framing/Noise *transforms*. **Purity caveat:** the
+  Noise NNpsk0 responder needs a CSPRNG for its ephemeral key — inject randomness from the shell
+  as a value/port (or host the handshake in `firmware-infra`); a direct RNG call in the core would
+  fail `effect-audit`, correctly. The **shell** in
   `firmware-infra` runs the blocking `TcpListener` on `0.0.0.0:6053`, pumps bytes through the core
   (our ~50-line `std::io` frame codec, replacing their tokio-util one), and does mDNS — cap
   concurrency 1–2 conns (no PSRAM). Noise (bead J): reuse UbiHome's **`noise-protocol` +
@@ -331,8 +337,9 @@ Pin to `kb/sources/` (pinned commit/tag) and write `kb/findings/`:
   datasheet; M5StickC Plus schematic (have) + **Earth Unit** datasheet/wiki.
 - **Findings:** std/ESP-IDF pivot supersedes the no_std OTA stack (cross-link
   `esp-rs-ota-version-matrix`); ESPHome native API framing + message-type-ID table + connection
-  flow (plaintext vs Noise); ESPHome Noise params; Earth Unit = capacitive probe on ADC1_CH5/G33,
-  ADC1-for-WiFi-coexistence + dry/wet calibration; M5StickC Plus std-ESP-IDF pin map.
+  flow (plaintext vs Noise); ESPHome Noise params; Earth Unit = **resistive** probe on
+  ADC1_CH5/G33 (not corrosion-resistant → power-gate it), ADC1-for-WiFi-coexistence + dry/wet
+  calibration; M5StickC Plus std-ESP-IDF pin map.
 
 ## Verification (end-to-end)
 
@@ -357,20 +364,22 @@ Pin to `kb/sources/` (pinned commit/tag) and write `kb/findings/`:
 ## Open items to confirm at implementation time (flagged, not blocking)
 
 1. `noise-protocol` + `noise-rust-crypto` cross-compile on `xtensa-esp32-espidf` (pure-Rust, no
-   ring — should be fine) — mitigated by plaintext-first. Confirm `blckngm/noise-rust`'s license
-   is MIT-compatible before vendoring.
+   ring — should be fine) — mitigated by plaintext-first. ~~License~~ resolved: `noise-rust-crypto`
+   is Unlicense, MIT-compatible.
 2. UbiHome server maturity: its high-level `EspHomeServer` accept-loop is WIP — confirm the
    generated prost `.rs` is committed (no build-time `protoc`) and budget to write the accept
    loop/state machine ourselves. Enable exactly **one** version feature to keep code size sane.
 3. Exact mDNS managed-component wiring (`espressif/mdns`) for esp-idf-svc 0.52.
-3. Exact `ESP_IDF_VERSION` v5.3.x tag esp-idf-sys 0.37 targets.
-4. ST7789 M5StickC-Plus **offsets + inversion** in `mipidsi` 0.10 (the "renders shifted" trap).
-5. Whether esp-idf-hal 0.46 `AdcChannelConfig` exposes ADC calibration on ESP32 (raw counts
+4. Exact `ESP_IDF_VERSION` v5.3.x tag esp-idf-sys 0.37 targets (verify the floor from the crate
+   changelog, not hearsay).
+5. ST7789 M5StickC-Plus **offsets + inversion** in `mipidsi` 0.9 (the "renders shifted" trap).
+6. Whether esp-idf-hal 0.46 `AdcChannelConfig` exposes ADC calibration on ESP32 (raw counts
    suffice regardless).
-6. Noise inner-frame layout (type-id + length inside the encrypted payload) vs `aioesphomeapi`.
-7. Current HA still accepts a **plaintext** native-API device (2026.x trends toward encryption) —
-   confirm at HA stand-up.
-8. Re-derive `api.proto` message IDs from the pinned commit at implementation time.
+7. Noise inner-frame layout (type-id + length inside the encrypted payload) vs `aioesphomeapi`.
+8. Current HA still accepts a **plaintext** native-API device — strong evidence **yes**: the
+   2026.1 "password removed" change constrains ESPHome *YAML compilation*, not the HA client;
+   plaintext remains a supported protocol variant. The spike (qhw.28) confirms empirically.
+9. Re-derive `api.proto` message IDs from the pinned commit at implementation time.
 
 ## Robotics divergence (flagged, not designed)
 
