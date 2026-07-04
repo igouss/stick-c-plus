@@ -24,6 +24,8 @@ root per binary.
 stick-c-plus/
 ├─ domain/            # led-core — pure no_std LED-animation domain (project #2). host-tested.
 ├─ plant-core/        # pure no_std soil-moisture domain (project #1). host-tested.
+├─ firmware-core/     # pure no_std shared kernel — ADC oversampling, probe-power gating. host-tested.
+├─ plant-shell/       # std imperative shell — shared moisture cache + sampler thread. host-tested.
 ├─ esphome-api/       # std ESPHome native-API framework (prost + std::net). host-tested.
 ├─ firmware/          # the Xtensa boundary — a detached std/ESP-IDF workspace (qhw.2):
 │  ├─ board-support/       #   infra          — BSP: AXP192 power-on, pin map, bring-up
@@ -53,7 +55,7 @@ The two worlds build under **different toolchains**, on purpose:
 
 | Crate(s) | Toolchain | Target | Tested |
 |---|---|---|---|
-| host domain — `led-core`, `plant-core`, `esphome-api` | stable | host | yes — `cargo test --workspace` |
+| host — `led-core`, `plant-core`, `firmware-core`, `plant-shell`, `esphome-api` | stable | host | yes — `cargo test --workspace` |
 | firmware | `esp` fork | `xtensa-esp32-espidf` (`std`) | on device |
 
 `firmware/` is its own workspace (`[workspace]` + root `exclude`) so its Xtensa
@@ -63,14 +65,20 @@ host domain crates by **path** across the boundary.
 ## Status
 
 - **`led-core`**, **`plant-core`** — domains done, host-tested (unit + property +
-  Gherkin).
+  Gherkin). `plant-core` includes the `fresh` staleness policy: a cached reading
+  goes unavailable once it ages out.
+- **`firmware-core`**, **`plant-shell`** — the host-testable shell. `firmware-core`
+  is the pure shared kernel (ADC oversampling, probe-power gating); `plant-shell`
+  is the imperative shell — the shared moisture cache and the sampler thread
+  (read → `step` → publish), with its staleness-on-death and panic-isolation rules
+  proven on the host.
 - **`esphome-api`** — native-API framework: prost message types, the frame codec,
   the entity model, the connection FSM, and the Light entity. Host-tested against
   golden captures + an `aioesphomeapi` oracle. Plaintext first; Noise is a
   fast-follow.
 - **firmware** — the workspace is carved and `bins/plant-monitor` boots on
-  hardware (a std/ESP-IDF skeleton: it logs and heartbeats). WiFi, the on-device
-  native-API server, and the ADC sampler are the next beads (`br ready`).
+  hardware. The ADC sampler thread now feeds the shared moisture cache (qhw.21);
+  WiFi and the on-device native-API server are the next beads (`br ready`).
 
 ## Prerequisites
 
