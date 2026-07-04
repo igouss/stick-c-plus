@@ -14,7 +14,22 @@ path = "src/lib.rs"
 [package.metadata.hex-arch]
 role = "infra"
 
-# qhw.2 scope is the skeleton only. WiFi STA (qhw.7), the mDNS advertiser
-# (qhw.8), the native-API server host (qhw.27) and OTA (qhw.12) arrive in their
-# own beads, pulling esp-idf-svc and esphome-api (by path) then.
+# WiFi STA (qhw.7) is live; the mDNS advertiser (qhw.8), the native-API server
+# host (qhw.27) and OTA (qhw.12) arrive in their own beads, pulling esphome-api
+# (by path) then.
 [dependencies]
+# The std/ESP-IDF stack (see kb/sources/rust-on-esp-idf.md). esp-idf-svc supplies
+# the WiFi service (EspWifi/BlockingWifi), the system event loop and NVS; -hal
+# supplies the modem peripheral the station is built over; -sys supplies EspError.
+# All three are named so the version floor stays visible next to the -svc that
+# re-exports them, matching the composition root.
+esp-idf-svc = "0.52"
+esp-idf-hal = "0.46"
+esp-idf-sys = "0.37"
+log = "0.4"
+
+# The WiFi credentials are baked in at build time from the git-ignored
+# firmware/secrets.toml (qhw.7); build.rs parses it with these host-side deps.
+[build-dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

@@ -29,5 +29,15 @@
 # it is the one irreplaceable capture here, so it IS committed. Keep what you can't reobtain.
 !/kb/sources/m5stickc-plus-factory-image/factory-full-4MB.bin
 
+# Firmware secrets — WiFi credentials (qhw.7) and the future Noise API PSK
+# (qhw.10). Real values live ONLY here, git-ignored, mirrored in Bitwarden; the
+# committed source of truth is secrets.toml.example. build.rs bakes these into
+# the image via env, so they never reach a tracked file. Never commit them: the
+# tree AND history must stay clean (qhw.7 acceptance).
+/firmware/secrets.toml
+secrets.toml
+/firmware/noise_psk.txt
+*.psk
+
 # bv (beads viewer) local config and caches
 .bv/
