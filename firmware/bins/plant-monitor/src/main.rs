@@ -13,7 +13,8 @@
 //! the sampler thread (qhw.21) feeding the native-API Sensor entity (qhw.9). Until
 //! then this stays a probe — but a probe against real ADC1 hardware, not a stub.
 
-use adapters::adc::EarthUnit;
+use adapters::adc::{EarthUnit, SAMPLES};
+use adapters::probe_power::AlwaysOn;
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::EspLogger;
@@ -33,12 +34,15 @@ fn main() {
     // rather than limp on: the composition root owns the one place peripherals
     // are taken and the adapter is built.
     let peripherals: Peripherals = Peripherals::take().expect("peripherals already taken");
-    let mut earth: EarthUnit = EarthUnit::new(peripherals.adc1, peripherals.pins.gpio33)
-        .expect("Earth Unit ADC1/GPIO33 bring-up");
+    // AlwaysOn: the probe stays powered for now. qhw.31 swaps this for a real
+    // ProbePower (AXP192 rail / GPIO switch) — the only wiring change — and the
+    // adapter energizes the electrodes only across each read.
+    let mut earth: EarthUnit<'_, AlwaysOn> =
+        EarthUnit::new(peripherals.adc1, peripherals.pins.gpio33, AlwaysOn)
+            .expect("Earth Unit ADC1/GPIO33 bring-up");
 
     info!(
-        "earth unit bound: ADC1 ch5 / GPIO33, 12 dB, {}x oversampled, raw 0..={MAX_READING}",
-        EarthUnit::SAMPLES
+        "earth unit bound: ADC1 ch5 / GPIO33, 12 dB, {SAMPLES}x oversampled, raw 0..={MAX_READING}"
     );
 
     let mut uptime_s: u64 = 0;
