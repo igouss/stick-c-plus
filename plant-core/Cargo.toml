@@ -1,0 +1,19 @@
+[package]
+name = "plant-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Framework-free soil-moisture core for the M5StickC Plus Earth Unit plant monitor."
+
+[lib]
+name = "plant_core"
+path = "src/lib.rs"
+
+# Pure no_std: the domain pulls in nothing. The ADC, the clock and any storage
+# all live behind ports the firmware implements.
+[dependencies]
+
+# Host-only. proptest links std and never reaches the Xtensa build (dev-deps are
+# excluded from a dependent's compilation).
+[dev-dependencies]
+proptest = "1"

@@ -22,13 +22,13 @@ default:
 
 # ---- Host domain (led-core) — stable rustc, no device ----
 
-# Run the domain suite: unit + property + cucumber.
+# Run the host domain suite (every host crate): unit + property + cucumber.
 test:
-    cargo test -p led-core
+    cargo test --workspace
 
-# Lint the domain, warnings as errors.
+# Lint the host domain (every host crate), warnings as errors.
 lint:
-    cargo clippy -p led-core -- -D warnings
+    cargo clippy --workspace -- -D warnings
 
 # ---- Firmware (Xtensa, esp toolchain) ----
 

@@ -4,7 +4,7 @@
 # forcing them on `cargo test` here. It depends on `domain` by path.
 [workspace]
 resolver = "2"
-members = ["domain"]
+members = ["domain", "plant-core"]
 # The firmware is its own Xtensa workspace; keep it out of the host one.
 exclude = ["firmware"]
 
