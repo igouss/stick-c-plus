@@ -21,7 +21,9 @@ use esp_idf_hal::modem::Modem;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::ipv4::Ipv4Addr;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
-use esp_idf_svc::wifi::{AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi};
+use esp_idf_svc::wifi::{
+    AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi, WifiDeviceId,
+};
 use esp_idf_sys::EspError;
 use log::{info, warn};
 
@@ -109,6 +111,15 @@ impl<'d> WifiStation<'d> {
     /// The current DHCP-assigned IPv4 of the station netif.
     pub fn ip(&self) -> Result<Ipv4Addr, EspError> {
         Ok(self.wifi.wifi().sta_netif().get_ip_info()?.ip)
+    }
+
+    /// The station interface's 6-byte MAC address.
+    ///
+    /// The composition root advertises this as the ESPHome `mac` TXT record
+    /// (qhw.8) — the identifier Home Assistant keys the device on. Read from the
+    /// driver, so it reflects the actual radio, not a guess.
+    pub fn mac(&self) -> Result<[u8; 6], EspError> {
+        self.wifi.wifi().driver().get_mac(WifiDeviceId::Sta)
     }
 
     /// Re-join if the link has dropped; a cheap no-op while it is up.

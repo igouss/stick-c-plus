@@ -6,8 +6,10 @@
 //! server host (the blocking accept loop), and OTA.
 //!
 //!   - [`wifi`] — 2.4 GHz station bring-up + keep-alive (qhw.7) ✅
+//!   - [`mdns`] — `_esphomelib._tcp` advertiser for HA discovery (qhw.8) ✅
 //!
-//! mDNS lands in qhw.8, the server host in qhw.27 and OTA in qhw.12, each filling
-//! this crate's `infra` seam in its own bead.
+//! The server host lands in qhw.27 and OTA in qhw.12, each filling this crate's
+//! `infra` seam in its own bead.
 
+pub mod mdns;
 pub mod wifi;
