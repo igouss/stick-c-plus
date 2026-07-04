@@ -32,6 +32,10 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
 - `finding` [ws2812-grb-byte-order](findings/ws2812-grb-byte-order.md) — `high` ·
   WS2812 latches **G-R-B**; the WS2812 boundary adapter (qqh.1) does the one swap —
   keep `Rgb` as RGB in the domain and don't double-swap at the boundary.
+- `finding` [esp-idf-managed-component-wiring](findings/esp-idf-managed-component-wiring.md)
+  — `high` · pulling an IDF managed component (`espressif/mdns`, qhw.8) needs both
+  `extra_components` metadata **and** `ESP_IDF_SYS_ROOT_CRATE` — a virtual workspace
+  has no `root_package()`, so esp-idf-sys silently reads no component metadata.
 - `source` [m5stickc-plus-pinout](sources/m5stickc-plus-pinout.md) — M5Stack's
   **official GPIO PinMap** captured verbatim (`pinmap.md`; `fetch.sh` re-diffs it
   against upstream). The vendor doc that *names the pin numbers*; every one is
