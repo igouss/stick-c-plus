@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! plant-monitor — the composition root (bin #1) on std/ESP-IDF.
 //!
 //! qhw.2 workspace carve: the qhw.1 boot skeleton, moved verbatim into

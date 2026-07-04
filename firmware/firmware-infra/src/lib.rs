@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! # firmware-infra
 //!
 //! Reusable firmware infrastructure for all three projects: WiFi STA bring-up,

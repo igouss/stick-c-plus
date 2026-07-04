@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! # esphome-api
 //!
 //! The ESPHome native-API wire vocabulary: the prost message types and the

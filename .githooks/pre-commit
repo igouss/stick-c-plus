@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# stick-c-plus pre-commit gate — enforce hexagonal role + bounded-context
+# boundaries before a commit lands (hex-lint, ~/code/tools). Fast: cargo metadata
+# only, no build. Install with `just setup-hooks` (points core.hooksPath here).
+# Bypass in a pinch with `git commit -n`.
+set -euo pipefail
+export PATH="$HOME/.cargo/bin:$PATH"
+cd "$(git rev-parse --show-toplevel)"
+exec just hex-lint

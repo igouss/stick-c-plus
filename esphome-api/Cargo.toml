@@ -54,3 +54,4 @@ serde_json = "1"
 # core stays effect-clean. Verified: `effect-audit --strict esphome-api`.
 [package.metadata.hex-arch]
 role = "domain"
+context = "api"

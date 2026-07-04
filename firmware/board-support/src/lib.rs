@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! # board-support
 //!
 //! M5StickC Plus board-support package (BSP): AXP192 PMIC power-on, the pin map,

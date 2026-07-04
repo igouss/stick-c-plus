@@ -40,10 +40,39 @@ lint:
     cargo clippy --workspace -- -D warnings
 
 # Enforce the functional-core / imperative-shell split on every crate marked
-# `[package.metadata.hex-arch] role = "domain"` (today: esphome-api). Fails if a
-# concrete effect — socket, file, thread, clock — leaks into a domain core.
+# `[package.metadata.hex-arch] role = "domain"` (led-core, plant-core, esphome-api).
+# Fails if a concrete effect — socket, file, thread, clock — leaks into a domain
+# core. (effect-audit's own CI wiring is qhw.25.)
 audit:
     effect-audit --strict --require-domain .
+
+# Enforce hexagonal role + bounded-context boundaries (hex-lint, ~/code/tools) on
+# BOTH workspaces: a cross-role dependency edge (e.g. the ESPHome transport or the
+# ADC HAL sneaking into a role=domain crate) fails the build. Suite exit contract
+# is 0 clean · 1 policy violation · 2 tool error; ANY non-zero is fatal here — a
+# tool error must never read as clean (that would be a false green). NB: hex-lint
+# 0.2 reports tool errors (e.g. `cargo metadata failed`) as exit 1, so we fail red
+# on 1 and 2 alike. The tree is clean, so this is blocking from day one (no
+# advisory grace period needed); grandfather any future debt in
+# hex-lint-exceptions.toml.
+hex-lint:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    fail=0
+    for ws in Cargo.toml firmware/Cargo.toml; do
+      echo "── hex-lint $ws"
+      if hex-lint --manifest-path "$ws"; then :; else
+        rc=$?
+        case $rc in
+          1) echo "❌ hex-lint: policy violation or tool error in $ws [exit 1]" ;;
+          2) echo "❌ hex-lint: TOOL ERROR in $ws [exit 2] — not clean" ;;
+          *) echo "❌ hex-lint: unexpected exit $rc in $ws" ;;
+        esac
+        fail=1
+      fi
+    done
+    [ "$fail" -eq 0 ] && echo "✅ hex-lint: both workspaces clean (roles + contexts)"
+    exit "$fail"
 
 # ---- Firmware (Xtensa, std/ESP-IDF) ----
 
@@ -103,12 +132,19 @@ versions:
         | jq -r --arg n "$c" '.crate | "\($n): \(.max_stable_version)  (newest \(.newest_version))"'
     done
 
+# Install the git hooks (points core.hooksPath at .githooks). Run once per clone.
+# The pre-commit hook runs `just hex-lint` (architecture gate) before a commit.
+setup-hooks:
+    git config core.hooksPath .githooks
+    @echo "hooks installed: .githooks/pre-commit → just hex-lint  (bypass: git commit -n)"
+
 # Show ready-to-start beads (unblocked work).
 ready:
     br ready
 
-# Everything CI checks: format, lint both worlds, test, build.
-ci: (fmt "check") lint lint-fw test build
+# Everything CI checks: format, architecture (hex-lint), lint both worlds, test,
+# build. hex-lint runs early — an architecture breach fails fast, before builds.
+ci: (fmt "check") hex-lint lint lint-fw test build
 
 # Remove build artifacts (host + firmware).
 clean:

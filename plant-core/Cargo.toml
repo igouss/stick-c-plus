@@ -9,6 +9,12 @@ description = "Framework-free soil-moisture core for the M5StickC Plus Earth Uni
 name = "plant_core"
 path = "src/lib.rs"
 
+# Functional-core domain (soil moisture). hex-lint enforces the role + bounded-
+# context boundary; effect-audit reads role=domain as the FC purity marker (qhw.25).
+[package.metadata.hex-arch]
+role = "domain"
+context = "plant"
+
 # Pure no_std: the domain pulls in nothing. The ADC, the clock and any storage
 # all live behind ports the firmware implements.
 [dependencies]

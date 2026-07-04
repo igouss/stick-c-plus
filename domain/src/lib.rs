@@ -1,4 +1,5 @@
 #![cfg_attr(not(test), no_std)]
+#![forbid(unsafe_code)]
 //! # led-core
 //!
 //! Framework-free LED-strip animation core for the M5StickC Plus, inspired by

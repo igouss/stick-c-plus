@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! # adapters
 //!
 //! The driven side of the firmware hexagon: concrete adapters that implement the
