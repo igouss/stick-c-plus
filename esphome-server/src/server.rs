@@ -302,8 +302,14 @@ fn pump<D: Device>(
     // Small frames, latency over throughput: send each reply without Nagle delay.
     let _ = stream.set_nodelay(true);
 
-    let mut reader: FrameReader<TcpStream> = FrameReader::new(stream.try_clone()?);
-    let mut writer: FrameWriter<TcpStream> = FrameWriter::new(stream);
+    // Both halves borrow the one socket — no `dup()`. `pump` is single-threaded (it
+    // reads, then writes, never both at once), and std implements `Read`/`Write` for
+    // `&TcpStream`, so two shared borrows suffice. This deliberately avoids
+    // `TcpStream::try_clone` (a socket `dup`): on ESP-IDF that needs
+    // `CONFIG_LWIP_NETCONN_FULLDUPLEX` and fails without it, dropping the connection
+    // before the first reply — HA then sees an EOF and reports a missing `api`.
+    let mut reader: FrameReader<&TcpStream> = FrameReader::new(&stream);
+    let mut writer: FrameWriter<&TcpStream> = FrameWriter::new(&stream);
 
     // Identity and entity list are fixed for the life of the device; fetch once.
     let device_info = device.device_info();
@@ -371,10 +377,10 @@ fn pump<D: Device>(
 ///
 /// A no-op unless the client has subscribed and the device's current states differ
 /// from what was last sent — so an unsubscribed or unchanged tick sends nothing.
-fn broadcast_changes<D: Device>(
+fn broadcast_changes<D: Device, W: io::Write>(
     conn: &Connection,
     device: &D,
-    writer: &mut FrameWriter<TcpStream>,
+    writer: &mut FrameWriter<W>,
     last_broadcast: &mut Vec<StateMessage>,
 ) -> io::Result<()> {
     if !conn.is_subscribed() {
@@ -391,7 +397,7 @@ fn broadcast_changes<D: Device>(
 }
 
 /// Write each outbound message as a frame, in order.
-fn write_all(writer: &mut FrameWriter<TcpStream>, messages: &[Outbound]) -> io::Result<()> {
+fn write_all<W: io::Write>(writer: &mut FrameWriter<W>, messages: &[Outbound]) -> io::Result<()> {
     for message in messages {
         let (msg_type, payload): (u32, Vec<u8>) = message.wire();
         writer.write_frame(msg_type, &payload)?;
