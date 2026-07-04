@@ -1,0 +1,23 @@
+# Golden plaintext native-API frames — CAPTURED from aioesphomeapi itself, not
+# hand-rolled. The payload is serialized by aioesphomeapi's vendored protobuf
+# (`api_pb2`) and the frame wrapper by its own `_frame_helper.packets.
+# make_plain_text_packets`, so every byte here is the REAL client's output. A
+# round-trip against our own encoder would only prove self-consistency; matching
+# these proves faithfulness to the wire (per the crate's two-oracle discipline —
+# see PROVENANCE.md and tests/golden_ids.rs).
+#
+# Regenerate: tools/capture_frames.py against the pinned aioesphomeapi
+# (commit 1e16d71, native-API 1.14). Columns are TAB-separated:
+#
+#   name <TAB> msg_type <TAB> frame_hex <TAB> payload_hex <TAB> note
+#
+# The frame is preamble(0x00) + varuint(len(payload)) + varuint(msg_type) +
+# payload. The Rust test reconstructs each message from the same field values
+# (hard-coded in tests/golden_frames.rs, kept in sync with capture_frames.py),
+# encodes it, and asserts byte-equality with frame_hex; then decodes frame_hex
+# and asserts it recovers msg_type + payload_hex.
+PingRequest	7	000007		empty payload — frame is preamble + len(0) + type only
+HelloResponse	2	001b020801100e1a0b657370686f6d652d6170692208706c616e746d6f6e	0801100e1a0b657370686f6d652d6170692208706c616e746d6f6e	mixed varint + string fields
+SensorStateResponse	25	000a190d4d3c2b1a1500002a42	0d4d3c2b1a1500002a42	fixed32 key + IEEE-754 float state=42.5; default bool omitted
+DeviceInfoResponse	10	00df010a1208706c616e746d6f6e2208727573742d302e3132c8014d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d	1208706c616e746d6f6e2208727573742d302e3132c8014d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d	payload >=128 bytes — two-byte length varuint (0xdf 0x01 = 223)
+ListEntitiesSensorResponse	16	0030100a0d736f696c5f6d6f697374757265154d3c2b1a1a0d536f696c204d6f6973747572653201254a086d6f697374757265	0a0d736f696c5f6d6f697374757265154d3c2b1a1a0d536f696c204d6f6973747572653201254a086d6f697374757265	entity List message

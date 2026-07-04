@@ -26,7 +26,9 @@ default = ["api-1-14"]
 api-1-14 = []
 
 # Host-only. The golden id test re-parses the vendored proto; regex keeps that
-# parser obviously correct and never reaches a device build (dev-deps are
-# excluded from a dependent's compilation).
+# parser obviously correct. proptest drives the codec round-trip and entity
+# enumeration properties. Neither reaches a device build (dev-deps are excluded
+# from a dependent's compilation).
 [dev-dependencies]
 regex = "1"
+proptest = "1"

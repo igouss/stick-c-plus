@@ -12,9 +12,10 @@
 //! to HA (the codec, entity model and connection FSM — later beads) do.
 //!
 //! ## Scope
-//! Types and the id registry only. The blocking `std::io` codec (qhw.17), the
-//! generic entity model (qhw.18) and the pure connection FSM (qhw.19) build on
-//! this crate. There is no async runtime here: `prost` is the only dependency.
+//! The wire vocabulary (types + id registry), the blocking `std::io` frame
+//! codec ([`frame`] + [`frame_io`], qhw.17) and the generic entity model
+//! ([`entity`], qhw.18). The pure connection FSM (qhw.19) builds on these.
+//! There is no async runtime here: `prost` is the only runtime dependency.
 
 // Exactly one api-version feature must select a vendored proto snapshot. Today
 // only `api-1-14` exists; when a second version is vendored this guard grows to
@@ -43,6 +44,13 @@ mod ids {
     include!("generated/ids.rs");
 }
 
+pub mod frame;
+pub mod frame_io;
+
+pub use frame::{
+    decode_frame, encode_frame, encode_frame_vec, Frame, FrameError, MAX_FRAME_SIZE,
+};
+pub use frame_io::{FrameReader, FrameWriter};
 pub use ids::MESSAGE_IDS;
 pub use proto::*;
 
