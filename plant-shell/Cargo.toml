@@ -1,0 +1,34 @@
+[package]
+name = "plant-shell"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Host-testable imperative shell for the plant monitor: the shared moisture cache and the sampler thread. std-linked but device-independent — the thread runs on the host under `cargo test` and cross-compiles to esp-idf std unchanged."
+
+[lib]
+name = "plant_shell"
+path = "src/lib.rs"
+
+# A driving (primary) adapter: the sampler is a timer-driven loop that turns the
+# passage of time into repeated calls on the domain's `step`, reading the
+# `SoilSensor` port (the concrete EarthUnit is injected by the composition-root,
+# never named here) and publishing into the shared cache. It owns effects (a
+# std::thread, an Arc<Mutex> cache, a monotonic clock) but names no hardware, so
+# every rule is exercised on the host — like `esphome-api` holds the host-testable
+# protocol plumbing while the firmware holds the on-target socket loop. It may
+# depend only on domain / usecase / port-and-adapter; here that is just plant-core
+# (domain). context=plant scopes it to the plant bounded context.
+[package.metadata.hex-arch]
+role = "driving-adapter"
+context = "plant"
+
+[dependencies]
+# The pure soil-moisture domain: the SoilSensor port the sampler drives, the
+# `step` use case it folds readings through, and the `fresh` staleness policy the
+# shared cache enforces. no_std + zero-dep, so it cross-compiles to xtensa cleanly
+# — this crate adds only std (threads, Arc/Mutex, Instant) on top.
+plant-core = { path = "../plant-core" }
+# The shell logs a failed soil read so a dead probe is observable; on-device these
+# records reach the ESP-IDF logger the composition root installs, on the host they
+# are inert without a logger.
+log = "0.4"
