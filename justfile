@@ -74,9 +74,13 @@ run:
 # `just flash` == `just run` (build + flash + monitor).
 alias flash := run
 
-# Attach a serial monitor only, no flash. Ctrl-C to exit.
+# Attach a serial monitor only, no flash. Ctrl-C to exit. `--non-interactive`
+# skips espflash's crossterm input reader, so no controlling TTY (and no
+# `script` pty shim) is needed — it streams serial straight to stdout, which is
+# what a piped / CI / agent invocation wants. Reset-on-connect still yields a
+# fresh boot; you forgo only the interactive Ctrl-R chip reset.
 monitor:
-    {{sg}} "script -qec 'espflash monitor -p {{port}} -c {{chip}}' /dev/null"
+    {{sg}} 'espflash monitor -p {{port}} -c {{chip}} --non-interactive'
 
 # Print board / flash info over serial.
 board-info:

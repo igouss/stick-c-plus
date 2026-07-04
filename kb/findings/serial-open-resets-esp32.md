@@ -41,6 +41,8 @@ by `--before no-reset`, but that can't sync to already-running firmware anyway.
 forks one child per browser client, so every tab is another `open()` = another
 reset **and** a byte race over the port. Put exactly one process on `/dev/ttyUSB0`
 and mirror *that* to viewers. Recipe to confirm the reset: run
-`/usr/bin/sg dialout -c "script -qec 'espflash monitor -p /dev/ttyUSB0 -c esp32' /dev/null"`
-twice — each connect reprints the boot banner (`@M5StickCPlus initializing...`),
-proving open ⇒ reboot.
+`/usr/bin/sg dialout -c 'espflash monitor -p /dev/ttyUSB0 -c esp32 --non-interactive'`
+twice — each connect reprints the boot banner (now our firmware's
+`plant-monitor: std/ESP-IDF boot skeleton up …`, formerly FactoryTest's
+`@M5StickCPlus initializing…`), proving open ⇒ reboot. (`--non-interactive`
+streams serial without a controlling TTY, replacing the old `script` pty shim.)

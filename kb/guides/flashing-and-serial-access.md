@@ -56,13 +56,20 @@ warning). Use the **default 115200**. A full 3 MB `app0` read then takes ~4–5 
 # Read the app partition off the board (read-only; non-destructive):
 /usr/bin/sg dialout -c 'espflash read-flash -p /dev/ttyUSB0 -c esp32 0x10000 0x300000 app0.bin'
 
-# Monitor needs a REAL PTY — in a non-interactive shell wrap it:
-/usr/bin/sg dialout -c "script -qec 'espflash monitor -p /dev/ttyUSB0 -c esp32' /dev/null"
+# Monitor (no flash). `--non-interactive` skips espflash's crossterm input
+# reader, so no controlling TTY is needed — it streams serial to stdout. (The
+# old `script -qec … /dev/null` pty shim is no longer required.)
+/usr/bin/sg dialout -c 'espflash monitor -p /dev/ttyUSB0 -c esp32 --non-interactive'
 
-# Flash our firmware (from firmware/, esp env sourced) — see ../../README.md:
-#   cargo run --release      # espflash flash --monitor, per .cargo/config.toml
+# Flash our firmware — from firmware/, no esp env to source (esp-idf-sys
+# self-provisions the toolchain; see ../guides/esp-rust-toolchain.md):
+#   cargo run --release -p plant-monitor   # espflash flash --monitor, per .cargo/config.toml
+#   (or `just run` from the repo root, which also handles the sg/pyshim wrapping)
 ```
 
-Only one process may own the port at a time. Nothing of ours is flashed yet — the
-board still runs the stock FactoryTest demo
-([board-runs-factorytest-demo](../findings/board-runs-factorytest-demo.md)).
+Only one process may own the port at a time. The board now runs **our**
+firmware — the `plant-monitor` std/ESP-IDF boot skeleton (qhw.2), not the stock
+FactoryTest demo. The factory image is preserved and restorable from
+[m5stickc-plus-factory-image](../sources/m5stickc-plus-factory-image.md); the
+original fingerprinting is recorded in
+[board-runs-factorytest-demo](../findings/board-runs-factorytest-demo.md).
