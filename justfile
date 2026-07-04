@@ -132,11 +132,16 @@ versions:
         | jq -r --arg n "$c" '.crate | "\($n): \(.max_stable_version)  (newest \(.newest_version))"'
     done
 
+# The fast pre-commit gate: formatting + architecture, no compile (so it stays
+# quick). This is what .githooks/pre-commit runs; the slow gates (clippy, tests,
+# build) stay in `just ci`.
+precommit: (fmt "check") hex-lint
+
 # Install the git hooks (points core.hooksPath at .githooks). Run once per clone.
-# The pre-commit hook runs `just hex-lint` (architecture gate) before a commit.
+# The pre-commit hook runs `just precommit` (fmt + hex-lint) before a commit.
 setup-hooks:
     git config core.hooksPath .githooks
-    @echo "hooks installed: .githooks/pre-commit → just hex-lint  (bypass: git commit -n)"
+    @echo "hooks installed: .githooks/pre-commit → just precommit  (bypass: git commit -n)"
 
 # Show ready-to-start beads (unblocked work).
 ready:
