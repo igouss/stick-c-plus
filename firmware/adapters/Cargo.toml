@@ -1,0 +1,22 @@
+[package]
+name = "adapters"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "M5StickC Plus domain-port adapters: adc, st7789, wifi, clock, ws2812 — the driven side of the hexagon."
+
+[lib]
+name = "adapters"
+path = "src/lib.rs"
+
+# Driven adapters: each implements a host-crate domain port (SoilSensor,
+# LedOutput, Clock, ...) against real esp-idf-hal peripherals. Enforcement of the
+# role lands with qhw.14.
+[package.metadata.hex-arch]
+role = "driven-adapter"
+
+# qhw.2 scope is the skeleton only. The ADC/SoilSensor adapter (qhw.5), the
+# Clock re-home (qhw.15), the WS2812 RMT encoder (qqh.1) and the ST7789 display
+# arrive in their own beads, pulling esp-idf-hal and the host port crates (by
+# path) then.
+[dependencies]

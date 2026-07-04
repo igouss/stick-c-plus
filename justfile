@@ -16,7 +16,7 @@ set shell := ["bash", "-uc"]
 port := "/dev/ttyUSB0"
 chip := "esp32"
 baud := "115200"   # the board's FT232 is unreliable above this.
-elf  := "firmware/target/xtensa-esp32-espidf/release/stick-led-firmware"
+elf  := "firmware/target/xtensa-esp32-espidf/release/plant-monitor"
 # `sg dialout -c` grants the group espflash needs; absolute path dodges the
 # ast-grep `sg` alias.
 sg := "/usr/bin/sg dialout -c"
@@ -69,7 +69,7 @@ size: build
 # Runner is `espflash flash --monitor --baud 115200`; ESPFLASH_PORT names the
 # port so espflash never prompts (which fails without a tty). Ctrl-C exits.
 run:
-    cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release'
+    cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p plant-monitor'
 
 # `just flash` == `just run` (build + flash + monitor).
 alias flash := run

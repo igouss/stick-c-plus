@@ -1,0 +1,20 @@
+[package]
+name = "board-support"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "M5StickC Plus board-support package: AXP192 power-on, pin map, peripheral bring-up (shared by all three projects)."
+
+[lib]
+name = "board_support"
+path = "src/lib.rs"
+
+# Board/peripheral bring-up is infrastructure the domain-port adapters build on,
+# below the adapters themselves. Enforcement of the role lands with qhw.14.
+[package.metadata.hex-arch]
+role = "infra"
+
+# qhw.2 scope is the skeleton only. The AXP192 power-on that enables the LCD/TFT
+# rails (qhw.20) and the pin map arrive in their own beads, pulling esp-idf-hal
+# and the axp192 PMIC crate then.
+[dependencies]

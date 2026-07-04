@@ -1,0 +1,37 @@
+[package]
+name = "plant-monitor"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+# The plant-monitor composition root (bin #1). qhw.2 scope: the qhw.1 boot
+# skeleton moved here from firmware/src/main.rs, now linking the host `plant-core`
+# domain across the workspace boundary to prove the cross-workspace path build.
+# The real wiring (WiFi, native-API host, ADC sampler, Sensor entity) lands in
+# qhw.5 / .7 / .8 / .9 / .27.
+description = "M5StickC Plus + Earth Unit soil-moisture plant monitor (ESPHome-native)."
+
+[[bin]]
+name = "plant-monitor"
+path = "src/main.rs"
+
+# The imperative shell's outermost layer: it composes adapters and owns effects,
+# so it is the one crate the effect-audit `domain` gate must never tag.
+[package.metadata.hex-arch]
+role = "composition-root"
+
+[dependencies]
+# The std/ESP-IDF stack (see kb/sources/rust-on-esp-idf.md). esp-idf-svc
+# re-exports -hal and -sys, but all three are named so the version floor shows.
+esp-idf-svc = "0.52"
+esp-idf-hal = "0.46"
+esp-idf-sys = "0.37"
+log = "0.4"
+# Host domain crate, referenced by path across the two workspaces — the same
+# cross-workspace seam every downstream bead relies on. plant-core is no_std and
+# zero-dep, so it cross-compiles for xtensa cleanly; main.rs references a real
+# constant from it so a broken seam fails the build rather than passing silently.
+plant-core = { path = "../../../plant-core" }
+
+[build-dependencies]
+# Emits the ESP-IDF sysenv link/search flags for the final link (via ldproxy).
+embuild = "0.33"

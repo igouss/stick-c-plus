@@ -1,0 +1,20 @@
+[package]
+name = "firmware-infra"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "M5StickC Plus firmware infrastructure: WiFi STA, mDNS, the native-API socket server host, and OTA (shared by all three projects)."
+
+[lib]
+name = "firmware_infra"
+path = "src/lib.rs"
+
+# WiFi / mDNS / socket-host / OTA are infrastructure services, not domain-port
+# adapters. Enforcement of the role lands with qhw.14.
+[package.metadata.hex-arch]
+role = "infra"
+
+# qhw.2 scope is the skeleton only. WiFi STA (qhw.7), the mDNS advertiser
+# (qhw.8), the native-API server host (qhw.27) and OTA (qhw.12) arrive in their
+# own beads, pulling esp-idf-svc and esphome-api (by path) then.
+[dependencies]

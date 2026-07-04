@@ -1,40 +1,30 @@
-[package]
-name = "stick-led-firmware"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-# qhw.1 scope: a minimal std/ESP-IDF binary that BOOTS and logs over serial —
-# nothing more. The crate keeps its name for now; the workspace carve (qhw.2)
-# renames/splits it into the plant-monitor and led-driver (fmz.1) binaries, and
-# the re-homed WS2812/Clock adapters return under qqh.1 / qhw.15.
-description = "M5StickC Plus firmware: std/ESP-IDF boot skeleton (qhw.1)."
+# M5StickC Plus FIRMWARE workspace — detached from the host workspace above.
+#
+# Carved into small single-responsibility crates so the hexagon / Functional-
+# Core–Imperative-Shell boundaries are enforceable per crate. The role tags below
+# are DECLARED now; the mechanical gate that reads them lands with qhw.14.
+#
+#   board-support/      infra          — M5StickC Plus BSP (AXP192 power-on, pin
+#                                        map, peripheral bring-up); all 3 projects.
+#   firmware-infra/     infra          — WiFi STA, mDNS, the native-API socket
+#                                        server host, OTA; all 3 projects.
+#   adapters/           driven-adapter — domain-port adapters (adc, st7789, wifi,
+#                                        clock, ws2812) implementing host ports.
+#   bins/plant-monitor/ composition-root — bin #1; wires adapters to the host
+#                                        crates (plant-core, esphome-api) by path.
+#
+# Detached (own `[workspace]`, `exclude`d up top) so its Xtensa target and `esp`
+# toolchain (rust-toolchain.toml) never touch the host `cargo test`.
+[workspace]
+resolver = "2"
+members = ["board-support", "firmware-infra", "adapters", "bins/plant-monitor"]
 
-[[bin]]
-name = "stick-led-firmware"
-path = "src/main.rs"
-
-[dependencies]
-# The std/ESP-IDF stack (supersedes the no_std esp-hal stack; see the KB note
-# kb/sources/rust-on-esp-idf.md). esp-idf-svc re-exports -hal and -sys, but all
-# three are named explicitly so the version floor is visible at a glance.
-esp-idf-svc = "0.52"
-esp-idf-hal = "0.46"
-esp-idf-sys = "0.37"
-log = "0.4"
-
-[build-dependencies]
-# Emits the sysenv link/search flags ESP-IDF's build produces so the final link
-# finds the ESP-IDF libraries; consumed by build.rs.
-embuild = "0.33"
-
+# Profiles live at the (virtual) workspace root; members may not set their own.
+# opt-level "s" everywhere — `-O0` overflows IRAM on the esp32.
 [profile.release]
 opt-level = "s"
 lto = "fat"
 codegen-units = 1
 
 [profile.dev]
-opt-level = "s"      # -O0 overflows IRAM on esp32; keep the debug build small.
-
-# Detach from the root host workspace so this crate keeps its own Xtensa target
-# and `esp` toolchain without infecting `cargo test` up there.
-[workspace]
+opt-level = "s"
