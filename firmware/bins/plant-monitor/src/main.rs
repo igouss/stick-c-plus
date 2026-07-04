@@ -7,15 +7,26 @@
 //! [`plant_shell`]
 //! sampler thread: the thread reads the ADC every sample period, folds each
 //! reading through the pure [`plant_core::sampler::step`], and publishes the
-//! latest [`plant_core::Moisture`] into a [`SharedMoisture`] cache. This bin then
-//! plays a consumer — logging the cached value once a second and keeping the WiFi
-//! link up — until the display (qhw.6) and the native-API server (qhw.9/.27) read
-//! that same slot and take over the network.
+//! latest [`plant_core::Moisture`] into a [`SharedMoisture`] cache. It then stands
+//! up the reusable native-API server host ([`esphome_server`], qhw.27) on :6053,
+//! serving a single Soil Moisture [`SensorDevice`] whose value is pulled from that
+//! same cache (qhw.9) — so Home Assistant adopts the device and graphs the probe as
+//! it wets and dries. The supervisory loop keeps the WiFi link up and logs a
+//! heartbeat; the server thread is the real consumer of the cache.
+//!
+//! The `plant`↔`api` bounded contexts stay isolated in the host workspace and are
+//! host-tested apart (the sampler + freshness in `plant-shell`, the `SensorDevice`
+//! against the real HA client in the `esphome-server` oracle); this composition
+//! root is the one place they are wired together — the source closure that reads
+//! [`SharedMoisture::latest`] and hands the value to the api core.
 //!
 //! The plumbing (a live cache tracking the probe as it wets and dries, going
 //! *unavailable* when the sensor stops reporting) is what qhw.21 proves. The
 //! moisture *percent* is not yet trustworthy: it rides a provisional calibration
 //! ([`PROVISIONAL_CAL`]) until qhw.29 captures the probe's real dry/wet endpoints.
+
+use std::sync::Arc;
+use std::thread;
 
 use adapters::adc::{EarthUnit, SAMPLES};
 use adapters::probe_power::AlwaysOn;
@@ -24,6 +35,9 @@ use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::log::EspLogger;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
+use esphome_api::proto::{DeviceInfoResponse, SensorStateClass};
+use esphome_api::{SensorConfig, SensorDevice};
+use esphome_server::{Server, ServerConfig};
 use firmware_infra::mdns::{self, EsphomeService};
 use firmware_infra::wifi::{self, WifiStation};
 use log::{error, info, warn};
@@ -56,6 +70,21 @@ const FRIENDLY_NAME: &str = "Plant Monitor";
 const PLATFORM: &str = "ESP32";
 /// ESPHome `board` TXT — informational device identity (M5StickC Plus).
 const BOARD: &str = "m5stick-c";
+/// Native-API device node name — HA's `device.name`, a stable slug (distinct from
+/// [`FRIENDLY_NAME`], the display name). Matches the identity the aioesphomeapi
+/// oracle asserts, so the on-device oracle flow (qhw.9) reuses it unchanged.
+const DEVICE_NAME: &str = "plantmon";
+/// Native-API device model — the hardware, shown in HA's device page.
+const MODEL: &str = "M5StickC Plus";
+
+/// The native-API accept-loop thread's stack, in bytes.
+///
+/// The loop only accepts a connection and spawns a sized per-connection thread
+/// (each [`esphome_server::PLAINTEXT_STACK_SIZE`]), so its own frame is shallow;
+/// 8 KiB holds it with headroom on the ESP32's scarce SRAM. Sized explicitly, not
+/// inherited, and — like the sampler's — validated against the true high-water mark
+/// on the metal (qhw.9 on-board acceptance) before it is trusted.
+const SERVER_ACCEPT_STACK: usize = 8 * 1024;
 
 fn main() {
     // Patch a few ESP-IDF symbols Rust's std expects, then route `log` records to
@@ -142,16 +171,68 @@ fn main() {
         spawn_sampler(earth, shared.clone(), clock, config).expect("spawn plant-sampler thread");
     info!("sampler thread up: {period:?} period, unavailable after {max_age} ms stale");
 
-    // Stand-in consumer: report the cached moisture, or that it has gone stale.
-    // Each tick also keeps the WiFi link up — a cheap no-op while connected, a
-    // re-join once the router comes back (qhw.7).
+    // The native-API device HA adopts: one Soil Moisture sensor whose live value is
+    // PULLED from the shared cache on every server poll. The freshness check lives
+    // in the pure `SharedMoisture::latest` (host-tested in plant-shell): a stale or
+    // absent reading returns `None`, which `SensorDevice` serves as `missing_state`
+    // — HA shows *unavailable*, never a frozen last value. This closure is the one
+    // point the plant and api bounded contexts meet; everything either side of it
+    // is host-tested in its own context.
+    let device_info: DeviceInfoResponse = DeviceInfoResponse {
+        name: DEVICE_NAME.to_string(),
+        friendly_name: FRIENDLY_NAME.to_string(),
+        mac_address: mac.clone(),
+        model: MODEL.to_string(),
+        esphome_version: env!("CARGO_PKG_VERSION").to_string(),
+        ..Default::default()
+    };
+    let sensor: SensorConfig = SensorConfig {
+        object_id: "soil_moisture".to_string(),
+        name: "Soil Moisture".to_string(),
+        unit_of_measurement: "%".to_string(),
+        accuracy_decimals: 0,
+        device_class: "moisture".to_string(),
+        state_class: SensorStateClass::StateClassMeasurement,
+    };
+    let source = {
+        let shared: SharedMoisture = shared.clone();
+        move || {
+            shared
+                .latest(clock.now(), max_age)
+                .map(|m| f32::from(m.percent()))
+        }
+    };
+    let device: Arc<SensorDevice<_>> = Arc::new(SensorDevice::new(device_info, sensor, source));
+
+    // Bind :6053 and run the accept loop on its own thread — `serve` blocks for the
+    // life of the program (there is no shutdown path here; the monitor serves until
+    // power-off). The per-connection threads are sized inside the host
+    // (PLAINTEXT_STACK_SIZE); this thread only accepts and dispatches.
+    let server: Server = Server::bind(ServerConfig::default()).expect("bind native-API :6053");
+    let _server_thread = thread::Builder::new()
+        .name("esphome-api".to_string())
+        .stack_size(SERVER_ACCEPT_STACK)
+        .spawn(move || {
+            if let Err(err) = server.serve(device) {
+                error!("native-API server exited: {err}");
+            }
+        })
+        .expect("spawn native-API server thread");
+    info!(
+        "native-API server up on :{}",
+        esphome_server::NATIVE_API_PORT
+    );
+
+    // Supervisory loop: keep the WiFi link up (a no-op while connected, a re-join
+    // once the router returns — qhw.7) and log a heartbeat so the serial console
+    // shows liveness. The server thread is the real consumer of the shared cache.
     loop {
         FreeRtos::delay_ms(1000);
         if let Err(err) = wifi.ensure_connected() {
             error!("wifi reconnect failed: {err}");
         }
         match shared.latest(clock.now(), max_age) {
-            Some(moisture) => info!("moisture = {}%", moisture.percent()),
+            Some(moisture) => info!("serving moisture = {}%", moisture.percent()),
             None => warn!("moisture unavailable — no fresh sample within {max_age} ms"),
         }
     }

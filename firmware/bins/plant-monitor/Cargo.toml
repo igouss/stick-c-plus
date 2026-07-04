@@ -35,6 +35,15 @@ plant-core = { path = "../../../plant-core" }
 # `spawn_sampler`; the shell's staleness + panic-isolation rules are host-tested
 # there, so this bin stays pure wiring.
 plant-shell = { path = "../../../plant-shell" }
+# The native-API core (context=api): the `SensorDevice` this root composes and the
+# `DeviceInfoResponse`/`SensorConfig` it fills. Pure + prost-only, cross-compiles
+# to xtensa cleanly. This is the plant<->api cross-context wiring the composition
+# root exists to do — the two bounded contexts stay isolated in the host workspace.
+esphome-api = { path = "../../../esphome-api" }
+# The reusable native-API server host (context=api): the blocking accept loop that
+# serves the `SensorDevice` on :6053. std::net over lwIP on-device; host-tested via
+# the aioesphomeapi oracle, so this bin only binds it and hands it the device.
+esphome-server = { path = "../../../esphome-server" }
 # The driven adapters (firmware workspace). The composition root reaches for
 # `adapters::adc::EarthUnit` to bind the SoilSensor port to real ADC1 hardware.
 adapters = { path = "../../adapters" }
