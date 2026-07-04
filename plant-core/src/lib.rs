@@ -17,13 +17,18 @@
 //!   a raw ADC reading to a percentage.
 //! - **Control**: [`step`] — the sampling use case (average → calibrate →
 //!   report-on-change), a pure function of its inputs.
+//! - **Control / policy**: [`fresh`] — the staleness rule that turns a cached
+//!   [`Reading`] unavailable once it ages out, so a dead sensor never keeps
+//!   reporting its last healthy value.
 //! - **Ports**: [`SoilSensor`] — the driven interface the firmware's ADC
 //!   adapter implements.
 
+pub mod freshness;
 pub mod moisture;
 pub mod ports;
 pub mod sampler;
 
+pub use freshness::{fresh, Reading, Tick};
 pub use moisture::{to_percent, Calibration, Moisture};
 pub use ports::SoilSensor;
 pub use sampler::{step, Sample};
