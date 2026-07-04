@@ -15,7 +15,15 @@
 //!   with their invariants enforced at construction.
 //! - **Entities / policy**: [`to_percent`] — the pure calibration curve mapping
 //!   a raw ADC reading to a percentage.
+//! - **Control**: [`step`] — the sampling use case (average → calibrate →
+//!   report-on-change), a pure function of its inputs.
+//! - **Ports**: [`SoilSensor`] — the driven interface the firmware's ADC
+//!   adapter implements.
 
 pub mod moisture;
+pub mod ports;
+pub mod sampler;
 
 pub use moisture::{to_percent, Calibration, Moisture};
+pub use ports::SoilSensor;
+pub use sampler::{step, Sample};

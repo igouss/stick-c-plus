@@ -13,7 +13,15 @@ path = "src/lib.rs"
 # all live behind ports the firmware implements.
 [dependencies]
 
-# Host-only. proptest links std and never reaches the Xtensa build (dev-deps are
+# Host-only. These link std and never reach the Xtensa build (dev-deps are
 # excluded from a dependent's compilation).
 [dev-dependencies]
 proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run
+# under the default harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false
