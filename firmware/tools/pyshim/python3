@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# ESP-IDF 5.3's tooling does not run on this host's default python (3.14); it
+# needs <= 3.12. embuild bootstraps its ESP-IDF venv from whatever `python3` it
+# finds on PATH, so the firmware build recipes prepend this dir to force 3.12.
+# Harmless once .embuild's venv exists (that venv is reused, not re-bootstrapped).
+exec python3.12 "$@"

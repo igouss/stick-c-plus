@@ -1,8 +1,12 @@
 # stick-c-plus — task automation.
 #
-# Two build worlds: the host domain (`led-core`) compiles on stable rustc with no
-# device, and the firmware is a detached Xtensa workspace that needs the `esp`
-# toolchain (sourced from ~/export-esp.sh) plus dialout access to /dev/ttyUSB0.
+# Two build worlds: the host domain (`led-core`, plant-core, esphome-api) compiles
+# on stable rustc with no device, and the firmware is a detached Xtensa workspace
+# on the std/ESP-IDF stack (esp toolchain via firmware/rust-toolchain.toml).
+# esp-idf-sys self-provisions clang + xtensa-gcc + a python 3.12 venv under
+# firmware/.embuild, so no ~/export-esp.sh is needed — but a FRESH build's ESP-IDF
+# bootstrap needs python <= 3.12 and this host's default python3 is 3.14, so the
+# firmware recipes prepend firmware/tools/pyshim (python3 -> python3.12).
 # Device recipes go through `/usr/bin/sg` — on this host `sg` is shadowed by an
 # ast-grep alias, and the espflash user lacks the dialout group in its login set.
 # See kb/guides/flashing-and-serial-access.md and kb/guides/esp-rust-toolchain.md.
@@ -11,10 +15,15 @@ set shell := ["bash", "-uc"]
 
 port := "/dev/ttyUSB0"
 chip := "esp32"
-elf  := "firmware/target/xtensa-esp32-none-elf/release/stick-led-firmware"
+baud := "115200"   # the board's FT232 is unreliable above this.
+elf  := "firmware/target/xtensa-esp32-espidf/release/stick-led-firmware"
 # `sg dialout -c` grants the group espflash needs; absolute path dodges the
-# ast-grep `sg` alias. Baud stays default 115200 — this FT232 fails higher.
+# ast-grep `sg` alias.
 sg := "/usr/bin/sg dialout -c"
+# Firmware toolchain PATH: python 3.12 (ESP-IDF bootstrap), cargo/rustup shims,
+# and ninja (via linuxbrew). Prepended inside `sg`, which may reset the env.
+pyshim  := justfile_directory() / "firmware/tools/pyshim"
+fw_path := pyshim + ":$HOME/.cargo/bin:/home/linuxbrew/.linuxbrew/bin"
 
 # List recipes.
 default:
@@ -36,29 +45,34 @@ lint:
 audit:
     effect-audit --strict --require-domain .
 
-# ---- Firmware (Xtensa, esp toolchain) ----
+# ---- Firmware (Xtensa, std/ESP-IDF) ----
 
 # Build the firmware (release).
 build:
-    source ~/export-esp.sh && cd firmware && cargo build --release
+    cd firmware && PATH="{{pyshim}}:$PATH" cargo build --release
 
 # Type-check the firmware without linking (fast).
 check:
-    source ~/export-esp.sh && cd firmware && cargo check --release
+    cd firmware && PATH="{{pyshim}}:$PATH" cargo check --release
 
 # Lint the firmware, warnings as errors.
 lint-fw:
-    source ~/export-esp.sh && cd firmware && cargo clippy --release -- -D warnings
+    cd firmware && PATH="{{pyshim}}:$PATH" cargo clippy --release -- -D warnings
 
 # Report the firmware binary's section sizes (text/data/bss).
 size: build
-    source ~/export-esp.sh && xtensa-esp32-elf-size {{elf}}
+    size {{elf}}
 
 # ---- Device (needs the board on {{port}}) ----
 
-# Flash + monitor the firmware (espflash, via the cargo runner).
+# Build, flash, and monitor the firmware (the qhw.1 board session, automated).
+# Runner is `espflash flash --monitor --baud 115200`; ESPFLASH_PORT names the
+# port so espflash never prompts (which fails without a tty). Ctrl-C exits.
 run:
-    source ~/export-esp.sh && cd firmware && {{sg}} 'cargo run --release'
+    cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release'
+
+# `just flash` == `just run` (build + flash + monitor).
+alias flash := run
 
 # Attach a serial monitor only, no flash. Ctrl-C to exit.
 monitor:
@@ -80,8 +94,7 @@ versions:
     #!/usr/bin/env bash
     set -euo pipefail
     ua="stick-c-plus just versions (i.gouss@gmail.com)"
-    for c in esp-hal esp-radio esp-rtos esp-storage esp-bootloader-esp-idf \
-             esp-alloc esp-hal-smartled; do
+    for c in esp-idf-svc esp-idf-hal esp-idf-sys embuild ldproxy; do
       curl -s -H "User-Agent: $ua" "https://crates.io/api/v1/crates/$c" \
         | jq -r --arg n "$c" '.crate | "\($n): \(.max_stable_version)  (newest \(.newest_version))"'
     done

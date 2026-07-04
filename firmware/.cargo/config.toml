@@ -6,7 +6,9 @@ target = "xtensa-esp32-espidf"
 # ldproxy forwards the linker args ESP-IDF's build system emits (via build.rs +
 # embuild) to the real linker; a plain linker invocation misses them.
 linker = "ldproxy"
-runner = "espflash flash --monitor"
+# --baud 115200: the board's FT232 is unreliable above this (verified flashing
+# qhw.1). Monitor console baud is the ESP-IDF default 115200 and needs no flag.
+runner = "espflash flash --monitor --baud 115200"
 # esp-idf-sys >= 0.34 assumes a 64-bit time_t; ESP-IDF 5.x is built that way.
 rustflags = ["--cfg", "espidf_time64"]
 
