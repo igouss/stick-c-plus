@@ -44,9 +44,14 @@ mod ids {
     include!("generated/ids.rs");
 }
 
+pub mod entity;
 pub mod frame;
 pub mod frame_io;
 
+pub use entity::{
+    object_id_key, ApiEntity, CommandMessage, ListMessage, Registry, SensorConfig, SensorEntity,
+    StateMessage,
+};
 pub use frame::{
     decode_frame, encode_frame, encode_frame_vec, Frame, FrameError, MAX_FRAME_SIZE,
 };

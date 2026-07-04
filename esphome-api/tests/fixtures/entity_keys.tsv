@@ -1,0 +1,19 @@
+# FNV-1a (32-bit) entity keys — an independent oracle for entity::object_id_key.
+#
+# An entity's native-API `key` (a fixed32) is a seedless FNV-1a hash of its
+# object_id's UTF-8 bytes, so it is reboot-stable and HA never churns entities.
+# These expected values are computed by a second implementation, in Python
+# (tools/fnv1a_oracle.py), so the Rust hash is checked against a foreign oracle
+# rather than only against itself (cf. tests/golden_ids.rs). Columns:
+#
+#   object_id <TAB> key_hex(u32, 8 hex digits)
+#
+# The empty object_id hashes to the bare FNV offset basis (0x811c9dc5); "café"
+# proves the hash runs over UTF-8 bytes, not chars.
+soil_moisture	22f623e5
+temperature	e9f2a935
+living_room_light	ca36e059
+	811c9dc5
+x	fd0c5087
+MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM	ba3583d1
+café	a82b5049
