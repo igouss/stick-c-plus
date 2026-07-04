@@ -9,7 +9,9 @@
 //!   - `clock`       — the shared `Clock` port on ESP-IDF time (qhw.15)
 //!   - `ws2812`      — `led_core::LedOutput` over the esp-idf RMT encoder (qqh.1)
 //!   - `st7789`      — the ST7789 display, over `mipidsi`
-//!   - `wifi`        — the WiFi client adapter
+//!
+//! WiFi is *not* here: station bring-up has no inward domain port, so it lives in
+//! `firmware-infra` as infrastructure (qhw.7), not among these driven adapters.
 //!
 //! The pure, host-testable pieces (the oversampling reduction, the ProbePower
 //! port + gating orchestration) live in `firmware-core`; this crate is the thin

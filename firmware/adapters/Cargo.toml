@@ -3,7 +3,7 @@ name = "adapters"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "M5StickC Plus domain-port adapters: adc, st7789, wifi, clock, ws2812 — the driven side of the hexagon."
+description = "M5StickC Plus domain-port adapters: adc, st7789, clock, ws2812 — the driven side of the hexagon (WiFi is infra, in firmware-infra)."
 
 [lib]
 name = "adapters"

@@ -8,7 +8,7 @@
 #                                        map, peripheral bring-up); all 3 projects.
 #   firmware-infra/     infra          — WiFi STA, mDNS, the native-API socket
 #                                        server host, OTA; all 3 projects.
-#   adapters/           driven-adapter — domain-port adapters (adc, st7789, wifi,
+#   adapters/           driven-adapter — domain-port adapters (adc, st7789,
 #                                        clock, ws2812) implementing host ports.
 #   bins/plant-monitor/ composition-root — bin #1; wires adapters to the host
 #                                        crates (plant-core, esphome-api) by path.
