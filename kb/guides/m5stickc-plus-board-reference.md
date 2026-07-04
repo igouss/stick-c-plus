@@ -55,8 +55,9 @@ actually wire to without cutting into an on-board function:
 
 G2 carries the buzzer and G0/G34 the mic, so the Grove pins (**G32/G33**) are the
 clean choice for external LEDs — free, 5 V-adjacent, and brought out to the
-connector. `LED_DATA_PIN` in `../../firmware/src/main.rs` defaults to G32; set it
-and `LED_COUNT` to match your strip.
+connector. The WS2812 strip lands on **G32** (project #2's LED driver); the plant
+monitor's Earth Unit probe uses **G33 / ADC1_CH5**. Set the pin + strip length in
+the relevant binary to match your hardware.
 
 ## See also
 

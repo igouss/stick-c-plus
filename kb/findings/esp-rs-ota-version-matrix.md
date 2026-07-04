@@ -9,6 +9,14 @@ reviewed: 2026-07-03
 check: manual   # re-query crates.io; the version table below drifts — recipe at foot
 ---
 
+> **⚠️ SUPERSEDED (2026-07-04) by the std/ESP-IDF pivot.** This finding maps the
+> **no_std esp-hal** WiFi/OTA stack — the path **not** taken. The firmware now
+> builds `std` on ESP-IDF, where WiFi comes from `esp-idf-svc` and OTA from its
+> `EspOta` (write/flip/rollback, qhw.12) — so none of the `esp-hal 1.1` /
+> `esp-radio` / `esp-rtos` constraints below apply. Kept as the record of why the
+> no_std stack looked the way it did (epic `stick-c-plus-qqh`, retired). Current
+> stack: [rust-on-esp-idf](../sources/rust-on-esp-idf.md).
+
 **Claim:** To add WiFi + OTA to this firmware you must move to **`esp-hal 1.1`**,
 and that forces dropping **`esp-hal-smartled`** — it pins `esp-hal ~1.0`
 (`>=1.0.0, <1.1.0`), which is *disjoint* from what the radio/OTA crates require

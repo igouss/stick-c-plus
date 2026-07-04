@@ -51,7 +51,7 @@ not a register table.
 
 | Path (under `m5stack-m5stickc-plus/`) | Why it matters for `../../firmware` |
 |---|---|
-| `src/M5StickCPlus.cpp` | The composition root — `begin()` shows the *order*: AXP192 → LCD → Beep → RTC. Mirror it in `firmware/src/main.rs`. Emits the `M5StickCPlus initializing...` banner our board prints. |
+| `src/M5StickCPlus.cpp` | The factory composition root — `begin()` shows the power-on *order*: AXP192 → LCD → Beep → RTC. Mirror it in `board-support` (the BSP, qhw.20). Emits the `M5StickCPlus initializing...` banner the factory app printed (used in the board fingerprinting). |
 | `src/AXP192.cpp` / `.h` | **Read first.** The PMU must be programmed or the board (and LCD backlight) stays dark. Reg `0x28` = LDO2 (TFT_LED) + LDO3 (TFT) 3.0 V; `0x12` enables them; `ScreenBreath()` dims via LDO2. See [axp192-powers-lcd-backlight](../findings/axp192-powers-lcd-backlight.md). |
 | `src/M5Display.cpp`, `src/utility/ST7789_Init.h`, `ST7789_Defines.h` | ST7789V2 init command stream + rotation — for a future display adapter. |
 | `src/RTC.cpp` / `.h` | BM8563 (`0x51`) over the internal I2C bus. |

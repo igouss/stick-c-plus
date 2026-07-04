@@ -30,8 +30,8 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
   — `high` · display stays dark until the AXP192 (`0x34`) is programmed; backlight
   is the **LDO2** rail (I2C reg `0x28`), not a GPIO/PWM. Bring the PMU up first.
 - `finding` [ws2812-grb-byte-order](findings/ws2812-grb-byte-order.md) — `high` ·
-  WS2812 latches **G-R-B**; our in-tree `Ws2812Rmt` adapter emits the swap — keep
-  `Rgb` as RGB in the domain and don't double-swap at the boundary.
+  WS2812 latches **G-R-B**; the WS2812 boundary adapter (qqh.1) does the one swap —
+  keep `Rgb` as RGB in the domain and don't double-swap at the boundary.
 - `source` [m5stickc-plus-pinout](sources/m5stickc-plus-pinout.md) — M5Stack's
   **official GPIO PinMap** captured verbatim (`pinmap.md`; `fetch.sh` re-diffs it
   against upstream). The vendor doc that *names the pin numbers*; every one is
@@ -43,12 +43,15 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
 ## Development — toolchain & flashing
 
 - `guide` [esp-rust-toolchain](guides/esp-rust-toolchain.md) — the `esp` rustc fork
-  for Xtensa (`espup`, `xtensa-esp32-none-elf`), why `firmware/` is a detached
-  workspace, and why the firmware is now on `esp-hal 1.1` (smartled dropped).
+  for Xtensa (`espup`, target **`xtensa-esp32-espidf`**, `std` on ESP-IDF), why
+  `firmware/` is a detached **workspace** (board-support / firmware-infra /
+  adapters / bins), and why no `~/export-esp.sh` is needed (esp-idf-sys
+  self-provisions).
 - `finding` [esp-rs-ota-version-matrix](findings/esp-rs-ota-version-matrix.md) —
-  `high` · WiFi/OTA needs **esp-hal 1.1**; `esp-hal-smartled`'s `~1.0` pin is the
-  wall (so we own the RMT encoder), and `esp-wifi`/`esp-hal-embassy` are superseded
-  by **`esp-radio`/`esp-rtos`**. Carries the pinned latest OTA crate set.
+  **⚠️ superseded** by the std/ESP-IDF pivot (WiFi via `esp-idf-svc`, OTA via
+  `EspOta`). Kept as the record of the **no_std** esp-hal 1.1 WiFi/OTA stack — the
+  path not taken (why `esp-hal-smartled` capped it; the `esp-radio`/`esp-rtos`
+  renames).
 - `guide` [flashing-and-serial-access](guides/flashing-and-serial-access.md) — the
   board is `/dev/ttyUSB0` (FT232); the three traps that make a working `espflash`
   look broken (missing `dialout` group → `/usr/bin/sg`; `sg` shadowed by ast-grep;
@@ -57,11 +60,11 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
   `high` · opening the port reboots the ESP32 (FT232 auto-reset) and the port is
   single-owner, so a shared console must fan out from **one** holder — never
   `ttyd espflash monitor` (one child per browser tab = reset + byte race).
-- `guide` [rust-driver-crates](guides/rust-driver-crates.md) — the `no_std` crate
-  per component (esp-hal 1.1 / embedded-hal 1.0), with the **eh-1.0 vs eh-0.2**
-  column that decides drop-in vs work: `axp192`/`mipidsi`/`pcf8563`/`smart-leds`
-  ready; MPU6886 + IR have **no eh-1.0 driver**, so (greenfield, no legacy compat)
-  we own thin drivers. Share the I2C bus with `embedded-hal-bus`.
+- `guide` [rust-driver-crates](guides/rust-driver-crates.md) — the driver crate
+  per component (foundation **`esp-idf-hal`** / embedded-hal 1.0), with the
+  **eh-1.0 vs eh-0.2** column that decides drop-in vs work: `axp192`/`mipidsi`/
+  `pcf8563` ready; MPU6886 + IR have **no eh-1.0 driver**, so (greenfield, no
+  legacy compat) we own thin drivers. Share the I2C bus with `embedded-hal-bus`.
 - `guide` [sharing-the-serial-console](guides/sharing-the-serial-console.md) — let
   many viewers (or the web) watch the UART at once: tmux-mirror (recommended),
   `ser2net`, or `conserver`, fronted by the host's `ttyd`/`oauth2-proxy` stack.
