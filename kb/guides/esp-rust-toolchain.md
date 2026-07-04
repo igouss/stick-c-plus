@@ -56,7 +56,7 @@ a `[package.metadata.hex-arch] role` tag (the gate that reads them lands in qhw.
 | Crate | role | holds |
 |---|---|---|
 | `board-support` | `infra` | BSP: AXP192 power-on, pin map, bring-up |
-| `firmware-infra` | `infra` | WiFi STA, mDNS, native-API host, OTA |
+| `firmware-infra` | `infra` | WiFi STA, mDNS, OTA (the native-API server host is the portable host crate `esphome-server`, not here) |
 | `adapters` | `driven-adapter` | domain-port adapters (adc, st7789, clock, ws2812, wifi) |
 | `bins/plant-monitor` | `composition-root` | bin #1 — the composition root |
 

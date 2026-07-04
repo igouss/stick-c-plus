@@ -14,8 +14,8 @@ path = "src/lib.rs"
 # `SoilSensor` port (the concrete EarthUnit is injected by the composition-root,
 # never named here) and publishing into the shared cache. It owns effects (a
 # std::thread, an Arc<Mutex> cache, a monotonic clock) but names no hardware, so
-# every rule is exercised on the host — like `esphome-api` holds the host-testable
-# protocol plumbing while the firmware holds the on-target socket loop. It may
+# every rule is exercised on the host — its sibling `esphome-server` holds the
+# host-testable native-API socket loop the same way. It may
 # depend only on domain / usecase / port-and-adapter; here that is just plant-core
 # (domain). context=plant scopes it to the plant bounded context.
 [package.metadata.hex-arch]

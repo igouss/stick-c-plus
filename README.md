@@ -27,9 +27,10 @@ stick-c-plus/
 ├─ firmware-core/     # pure no_std shared kernel — ADC oversampling, probe-power gating. host-tested.
 ├─ plant-shell/       # std imperative shell — shared moisture cache + sampler thread. host-tested.
 ├─ esphome-api/       # std ESPHome native-API framework (prost + std::net). host-tested.
+├─ esphome-server/    # std native-API server host — accept loop driving the FSM. host-tested.
 ├─ firmware/          # the Xtensa boundary — a detached std/ESP-IDF workspace (qhw.2):
 │  ├─ board-support/       #   infra          — BSP: AXP192 power-on, pin map, bring-up
-│  ├─ firmware-infra/      #   infra          — WiFi STA, mDNS, native-API host, OTA
+│  ├─ firmware-infra/      #   infra          — WiFi STA, mDNS, OTA
 │  ├─ adapters/            #   driven-adapter — domain-port adapters (adc/st7789/ws2812/clock/wifi)
 │  └─ bins/plant-monitor/  #   composition-root — bin #1, the composition root
 └─ kb/                # Knowledge base — board facts, sources, findings (kbe-style)
@@ -55,7 +56,7 @@ The two worlds build under **different toolchains**, on purpose:
 
 | Crate(s) | Toolchain | Target | Tested |
 |---|---|---|---|
-| host — `led-core`, `plant-core`, `firmware-core`, `plant-shell`, `esphome-api` | stable | host | yes — `cargo test --workspace` |
+| host — `led-core`, `plant-core`, `firmware-core`, `plant-shell`, `esphome-api`, `esphome-server` | stable | host | yes — `cargo test --workspace` |
 | firmware | `esp` fork | `xtensa-esp32-espidf` (`std`) | on device |
 
 `firmware/` is its own workspace (`[workspace]` + root `exclude`) so its Xtensa
@@ -76,9 +77,17 @@ host domain crates by **path** across the boundary.
   the entity model, the connection FSM, and the Light entity. Host-tested against
   golden captures + an `aioesphomeapi` oracle. Plaintext first; Noise is a
   fast-follow.
+- **`esphome-server`** — the reusable native-API **server host** (qhw.27): a
+  blocking `TcpListener` accept loop that pumps frames through `esphome-api`'s pure
+  FSM, serving any device's entities with a bounded connection cap, stalled-client
+  reaping, and device-driven state broadcasts. A portable-`std` driving-adapter —
+  host-tested with a wire-identical loopback client (and the `aioesphomeapi`
+  oracle), it cross-compiles to esp-idf `std` unchanged. Both firmware binaries
+  build on it.
 - **firmware** — the workspace is carved and `bins/plant-monitor` boots on
-  hardware. The ADC sampler thread now feeds the shared moisture cache (qhw.21);
-  WiFi and the on-device native-API server are the next beads (`just ready`).
+  hardware. WiFi STA (qhw.7) and the mDNS advertiser (qhw.8) are verified
+  on-device, and the ADC sampler thread feeds the shared moisture cache (qhw.21);
+  wiring the Sensor entity into the server host is the MVP bead next (`just ready`).
 
 ## Prerequisites
 
@@ -120,8 +129,9 @@ Per-project and pin-exact in the KB: the plant probe is the M5 Earth Unit on
 
 Tracked in beads — `just ready` for unblocked work, `just triage` for graph-ranked
 recommendations; the workflow is written up in
-[`kb/guides/beads-triage.md`](kb/guides/beads-triage.md). Next up: WiFi STA + mDNS,
-the on-device ESPHome native-API server, the ADC→moisture sampler and Sensor entity
-(→ the HA dashboard), then Noise encryption, the ST7789 status display, and OTA.
+[`kb/guides/beads-triage.md`](kb/guides/beads-triage.md). Done on-device: WiFi STA,
+mDNS discovery, the ADC→moisture sampler, and the native-API server host. Next up:
+wiring the Sensor entity into the host so HA adopts and graphs it (the MVP), then
+Noise encryption, the ST7789 status display, and OTA.
 Project #2 (the WS2812 driver) and project #3 (the rover) build on the same
 foundation.

@@ -3,7 +3,7 @@ name = "firmware-infra"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "M5StickC Plus firmware infrastructure: WiFi STA, mDNS, the native-API socket server host, and OTA (shared by all three projects)."
+description = "M5StickC Plus firmware infrastructure: WiFi STA, mDNS, and OTA — the ESP-IDF-backed services shared by all three projects (the native-API server host is the portable host crate esphome-server)."
 
 [lib]
 name = "firmware_infra"
@@ -24,9 +24,10 @@ role = "infra"
 [[package.metadata.esp-idf-sys.extra_components]]
 remote_component = { name = "espressif/mdns", version = "1.8.2" }
 
-# WiFi STA (qhw.7) and the mDNS advertiser (qhw.8) are live; the native-API server
-# host (qhw.27) and OTA (qhw.12) arrive in their own beads, pulling esphome-api
-# (by path) then.
+# WiFi STA (qhw.7) and the mDNS advertiser (qhw.8) are live. The native-API server
+# host (qhw.27) landed as the portable host crate `esphome-server`, not here (it
+# needs only std, no esp-idf-svc). OTA (qhw.12) is the remaining service and
+# arrives in its own bead.
 [dependencies]
 # The std/ESP-IDF stack (see kb/sources/rust-on-esp-idf.md). esp-idf-svc supplies
 # the WiFi service (EspWifi/BlockingWifi), the system event loop and NVS; -hal

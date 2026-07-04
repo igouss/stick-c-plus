@@ -6,8 +6,9 @@
 #
 #   board-support/      infra          — M5StickC Plus BSP (AXP192 power-on, pin
 #                                        map, peripheral bring-up); all 3 projects.
-#   firmware-infra/     infra          — WiFi STA, mDNS, the native-API socket
-#                                        server host, OTA; all 3 projects.
+#   firmware-infra/     infra          — WiFi STA, mDNS, OTA; all 3 projects.
+#                                        (the native-API server host is the portable
+#                                        host crate `esphome-server`, not here.)
 #   adapters/           driven-adapter — domain-port adapters (adc, st7789,
 #                                        clock, ws2812) implementing host ports.
 #   bins/plant-monitor/ composition-root — bin #1; wires adapters to the host
