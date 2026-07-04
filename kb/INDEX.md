@@ -64,6 +64,11 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
   `high` · opening the port reboots the ESP32 (FT232 auto-reset) and the port is
   single-owner, so a shared console must fan out from **one** holder — never
   `ttyd espflash monitor` (one child per browser tab = reset + byte race).
+- `finding` [esp-idf-socket-dup-needs-fullduplex](findings/esp-idf-socket-dup-needs-fullduplex.md)
+  — `high` · a socket `dup()` (`TcpStream::try_clone`) fails on ESP-IDF without
+  `LWIP_NETCONN_FULLDUPLEX`; the server accepts then **EOFs the handshake** with no
+  panic — HA reports a missing `api`. Host `dup()` always works, so the oracle
+  stays green (host-green/device-red). Fix: borrow `&TcpStream`, don't clone (qhw.9).
 - `guide` [rust-driver-crates](guides/rust-driver-crates.md) — the driver crate
   per component (foundation **`esp-idf-hal`** / embedded-hal 1.0), with the
   **eh-1.0 vs eh-0.2** column that decides drop-in vs work: `axp192`/`mipidsi`/
