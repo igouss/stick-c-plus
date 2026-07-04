@@ -1042,6 +1042,15 @@ dependencies = [
  "esp-idf-sys",
  "log",
  "plant-core",
+ "plant-shell",
+]
+
+[[package]]
+name = "plant-shell"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "plant-core",
 ]
 
 [[package]]

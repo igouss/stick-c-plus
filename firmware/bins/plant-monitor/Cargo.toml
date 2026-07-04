@@ -25,10 +25,16 @@ esp-idf-svc = "0.52"
 esp-idf-hal = "0.46"
 esp-idf-sys = "0.37"
 log = "0.4"
-# Host domain crate, referenced by path across the two workspaces — the same
+# Host crates, referenced by path across the two workspaces — the same
 # cross-workspace seam every downstream bead relies on. plant-core is no_std and
-# zero-dep, so it cross-compiles for xtensa cleanly.
+# zero-dep; plant-shell adds only std (threads, Arc/Mutex), so both cross-compile
+# for xtensa cleanly (esp-idf maps std::thread onto a FreeRTOS task).
 plant-core = { path = "../../../plant-core" }
+# The imperative shell: the shared moisture cache + the sampler thread. The
+# composition root builds the real EarthUnit adapter and hands it to
+# `spawn_sampler`; the shell's staleness + panic-isolation rules are host-tested
+# there, so this bin stays pure wiring.
+plant-shell = { path = "../../../plant-shell" }
 # The driven adapters (firmware workspace). The composition root reaches for
 # `adapters::adc::EarthUnit` to bind the SoilSensor port to real ADC1 hardware.
 adapters = { path = "../../adapters" }
