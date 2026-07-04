@@ -1,0 +1,45 @@
+[package]
+name = "esphome-server"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Reusable ESPHome native-API server host: a blocking TcpListener accept loop that pumps frames through the pure esphome-api connection FSM, serving whatever entities a device registers. std-linked but device-independent — verified on the host, cross-compiles to esp-idf std unchanged."
+
+[lib]
+name = "esphome_server"
+path = "src/lib.rs"
+
+# A driving (primary) adapter: it turns inbound network events (accepted TCP
+# connections, decoded frames) into calls on the api core, exactly as the
+# `plant-shell` sampler turns the passage of time into calls on plant-core. It
+# owns effects (a TcpListener, per-connection std::threads, read timeouts) but
+# names no hardware and no concrete entity type, so every rule is exercised on the
+# host — the on-target socket comes from lwIP under the same `std::net`. It may
+# depend only on the api core it serves; here that is just esphome-api (role
+# `domain`, the functional-core protocol plumbing). context=api scopes it to the
+# native-API bounded context, beside esphome-api.
+[package.metadata.hex-arch]
+role = "driving-adapter"
+context = "api"
+
+[dependencies]
+# The native-API core this host serves: the pure connection FSM (`handle`,
+# `broadcast_states`), the frame-codec pumps (`FrameReader`/`FrameWriter`, generic
+# over Read/Write — the real TcpStream is injected here), the entity model
+# (`Registry`, `ListMessage`, `StateMessage`) and the prost wire types. no_std +
+# prost-only, so this crate adds only std (sockets, threads, Instant) on top and
+# cross-compiles to xtensa cleanly.
+esphome-api = { path = "../esphome-api" }
+# Accepted / rejected / reaped connections are logged so the accept loop is
+# observable; on-device these reach the ESP-IDF logger the composition root
+# installs, on the host they are inert without a logger.
+log = "0.4"
+
+# Host-only test client + oracle. The pure-Rust loopback client hand-builds native
+# API frames with the same prost types HA speaks, driving the accept loop
+# deterministically (handshake, broadcast, cap, reaping, fd-leak). serde_json reads
+# back the #[ignore]d aioesphomeapi oracle's JSON verdict. Neither reaches a device
+# build (dev-deps are excluded from a dependent's compilation).
+[dev-dependencies]
+prost = "0.14"
+serde_json = "1"
