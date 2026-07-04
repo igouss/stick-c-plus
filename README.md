@@ -74,7 +74,10 @@ host domain crates by **path** across the boundary.
   (read → `step` → publish), with its staleness-on-death and panic-isolation rules
   proven on the host.
 - **`esphome-api`** — native-API framework: prost message types, the frame codec,
-  the entity model, the connection FSM, and the Light entity. Host-tested against
+  the entity model, the connection FSM, the Light entity, and the `Device` port a
+  host serves — with `SensorDevice`, a one-sensor device whose value is pulled from
+  an injected source (qhw.9). The port lives here, in the pure core, so an
+  implementor never depends on the transport that drives it. Host-tested against
   golden captures + an `aioesphomeapi` oracle. Plaintext first; Noise is a
   fast-follow.
 - **`esphome-server`** — the reusable native-API **server host** (qhw.27): a
@@ -86,8 +89,10 @@ host domain crates by **path** across the boundary.
   build on it.
 - **firmware** — the workspace is carved and `bins/plant-monitor` boots on
   hardware. WiFi STA (qhw.7) and the mDNS advertiser (qhw.8) are verified
-  on-device, and the ADC sampler thread feeds the shared moisture cache (qhw.21);
-  wiring the Sensor entity into the server host is the MVP bead next (`just ready`).
+  on-device, and the ADC sampler thread feeds the shared moisture cache (qhw.21).
+  The composition root now stands up the server host, serving a Soil Moisture
+  `SensorDevice` from that cache (qhw.9) — verified host-first against the real HA
+  client; the on-device adoption pass awaits the board.
 
 ## Prerequisites
 
@@ -130,8 +135,9 @@ Per-project and pin-exact in the KB: the plant probe is the M5 Earth Unit on
 Tracked in beads — `just ready` for unblocked work, `just triage` for graph-ranked
 recommendations; the workflow is written up in
 [`kb/guides/beads-triage.md`](kb/guides/beads-triage.md). Done on-device: WiFi STA,
-mDNS discovery, the ADC→moisture sampler, and the native-API server host. Next up:
-wiring the Sensor entity into the host so HA adopts and graphs it (the MVP), then
-Noise encryption, the ST7789 status display, and OTA.
+mDNS discovery, and the ADC→moisture sampler. The MVP — the Sensor entity served
+over the native-API host so HA adopts and graphs it (qhw.9) — is wired and verified
+host-first; the on-device adoption pass awaits the board. Next up: Noise encryption,
+the ST7789 status display, and OTA.
 Project #2 (the WS2812 driver) and project #3 (the rover) build on the same
 foundation.
