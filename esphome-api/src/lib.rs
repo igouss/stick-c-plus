@@ -21,9 +21,11 @@
 //!
 //! ## Scope
 //! The wire vocabulary (types + id registry), the blocking `std::io` frame
-//! codec ([`frame`] + [`frame_io`], qhw.17) and the generic entity model
-//! ([`entity`], qhw.18). The pure connection FSM (qhw.19) builds on these.
-//! There is no async runtime here: `prost` is the only runtime dependency.
+//! codec ([`frame`] + [`frame_io`], qhw.17), the generic entity model
+//! ([`entity`], qhw.18) and the [`Device`] port a host serves ([`device`], with
+//! the source-fed [`SensorDevice`], qhw.9). The pure connection FSM (qhw.19)
+//! builds on these. There is no async runtime here: `prost` is the only runtime
+//! dependency.
 
 // Exactly one api-version feature must select a vendored proto snapshot. Today
 // only `api-1-14` exists; when a second version is vendored this guard grows to
@@ -53,12 +55,14 @@ mod ids {
 }
 
 pub mod connection;
+pub mod device;
 pub mod entity;
 pub mod frame;
 pub mod frame_io;
 pub mod light;
 
 pub use connection::{broadcast_states, handle, Connection, Inbound, Outbound, Phase, Snapshot};
+pub use device::{Device, SensorDevice, SensorSource};
 pub use entity::{
     object_id_key, ApiEntity, CommandMessage, ListMessage, Registry, SensorConfig, SensorEntity,
     StateMessage,

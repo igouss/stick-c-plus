@@ -306,6 +306,24 @@ impl SensorEntity {
     pub fn state(&self) -> Option<f32> {
         self.state
     }
+
+    /// The state message this sensor would report for an **externally-sourced**
+    /// value, without mutating the entity: `None` maps to `missing_state`, exactly
+    /// as an unset [`state`](Self::state) does.
+    ///
+    /// For a device whose live value lives *outside* the entity — a shared cache a
+    /// sampler shell writes, read on each server poll — the entity supplies its
+    /// stable identity (`key`) and the missing-vs-present mapping while the caller
+    /// supplies the value. [`ApiEntity::state_message`] is exactly this applied to
+    /// the entity's own stored [`state`](Self::state).
+    pub fn state_message_for(&self, value: Option<f32>) -> StateMessage {
+        StateMessage::Sensor(proto::SensorStateResponse {
+            key: self.key,
+            state: value.unwrap_or(0.0),
+            missing_state: value.is_none(),
+            device_id: 0,
+        })
+    }
 }
 
 impl ApiEntity for SensorEntity {
@@ -331,12 +349,9 @@ impl ApiEntity for SensorEntity {
     }
 
     fn state_message(&self) -> StateMessage {
-        StateMessage::Sensor(proto::SensorStateResponse {
-            key: self.key,
-            state: self.state.unwrap_or(0.0),
-            missing_state: self.state.is_none(),
-            device_id: 0,
-        })
+        // The entity's own stored state, projected through the same mapping an
+        // external value takes — so the missing-vs-present rule lives in one place.
+        self.state_message_for(self.state)
     }
 
     fn handle_command(&mut self, _command: &CommandMessage) -> Option<StateMessage> {

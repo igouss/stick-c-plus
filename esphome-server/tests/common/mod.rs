@@ -53,22 +53,30 @@ impl Device for TestDevice {
     }
 }
 
-/// The plant monitor's one moisture sensor at a given reading — the entity HA
-/// adopts. Its name/object_id/unit match what the aioesphomeapi oracle asserts.
-pub fn moisture_sensor(reading: f32) -> SensorEntity {
-    let mut sensor: SensorEntity = SensorEntity::new(SensorConfig {
+/// The plant monitor's moisture-sensor descriptor — name/object_id/unit/class as
+/// the aioesphomeapi oracle asserts them, and as the real [`esphome_api::SensorDevice`]
+/// advertises.
+pub fn moisture_config() -> SensorConfig {
+    SensorConfig {
         object_id: "soil_moisture".to_string(),
         name: "Soil Moisture".to_string(),
         unit_of_measurement: "%".to_string(),
         accuracy_decimals: 0,
         device_class: "moisture".to_string(),
         state_class: SensorStateClass::StateClassMeasurement,
-    });
+    }
+}
+
+/// The plant monitor's one moisture sensor at a given reading — the entity HA
+/// adopts.
+pub fn moisture_sensor(reading: f32) -> SensorEntity {
+    let mut sensor: SensorEntity = SensorEntity::new(moisture_config());
     sensor.set_state(reading);
     sensor
 }
 
-fn plantmon_info() -> DeviceInfoResponse {
+/// The device identity the oracle asserts: node name `plantmon`, a fixed MAC.
+pub fn plantmon_info() -> DeviceInfoResponse {
     DeviceInfoResponse {
         name: "plantmon".to_string(),
         esphome_version: "rust-0.1".to_string(),

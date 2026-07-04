@@ -32,11 +32,9 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use esphome_api::{
-    broadcast_states, handle, Connection, FrameReader, FrameWriter, Inbound, Outbound, Snapshot,
-    StateMessage,
+    broadcast_states, handle, Connection, Device, FrameReader, FrameWriter, Inbound, Outbound,
+    Snapshot, StateMessage,
 };
-
-use crate::device::Device;
 
 /// The ESPHome native-API TCP port every device listens on and HA connects to.
 pub const NATIVE_API_PORT: u16 = 6053;

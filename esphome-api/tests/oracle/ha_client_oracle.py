@@ -39,19 +39,32 @@ async def run(port: int) -> dict:
         await client.disconnect()
 
     # --- Assertions: the oracle checks values, so a green means HA really adopts
-    #     this device and reads it, not just that the sockets connected. ---
+    #     this device and reads it, not just that the sockets connected. The full
+    #     sensor descriptor is asserted — name, unit, class, precision — because HA
+    #     renders and aggregates the entity from exactly these fields. ---
     assert device.name == "plantmon", f"device name was {device.name!r}"
+    assert device.mac_address.lower() == "aa:bb:cc:dd:ee:ff", f"mac was {device.mac_address!r}"
     assert len(entities) == 1, f"expected exactly one entity, got {len(entities)}"
     entity = entities[0]
     assert entity.object_id == "soil_moisture", f"object_id was {entity.object_id!r}"
     assert entity.name == "Soil Moisture", f"entity name was {entity.name!r}"
+    assert entity.unit_of_measurement == "%", f"unit was {entity.unit_of_measurement!r}"
+    assert entity.device_class == "moisture", f"device_class was {entity.device_class!r}"
+    assert entity.accuracy_decimals == 0, f"accuracy_decimals was {entity.accuracy_decimals!r}"
+    # state_class is an IntEnum; 1 == MEASUREMENT (how HA aggregates history).
+    assert int(entity.state_class) == 1, f"state_class was {int(entity.state_class)}"
     assert len(distinct_states) >= 2, f"expected >=2 distinct states, got {sorted(distinct_states)}"
 
     return {
         "device_name": device.name,
+        "mac_address": device.mac_address,
         "entity_count": len(entities),
         "object_id": entity.object_id,
         "entity_name": entity.name,
+        "unit_of_measurement": entity.unit_of_measurement,
+        "device_class": entity.device_class,
+        "accuracy_decimals": entity.accuracy_decimals,
+        "state_class": int(entity.state_class),
         "distinct_states": sorted(distinct_states),
     }
 

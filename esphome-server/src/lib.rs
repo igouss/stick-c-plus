@@ -53,8 +53,11 @@
 //! this host serves the read path — describe, list, subscribe, stream — that a
 //! sensor device needs today.
 
-mod device;
 mod server;
 
-pub use device::Device;
+// The [`Device`] port lives in the api core ([`esphome_api::device`]), not here: a
+// device is implemented against the pure protocol vocabulary, never against this
+// transport, so the hexagon's dependencies point inward. Re-exported so a caller
+// still writes `esphome_server::Device` beside the [`Server`] that serves it.
+pub use esphome_api::Device;
 pub use server::{Server, ServerConfig, ServerHandle, NATIVE_API_PORT, PLAINTEXT_STACK_SIZE};
