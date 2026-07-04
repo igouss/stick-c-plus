@@ -66,3 +66,31 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
   many viewers (or the web) watch the UART at once: tmux-mirror (recommended),
   `ser2net`, or `conserver`, fronted by the host's `ttyd`/`oauth2-proxy` stack.
   Package availability + configs verified on-host; setups not yet run on the board.
+
+## ESPHome native API & the std/ESP-IDF pivot
+
+- `source` [aioesphomeapi](sources/aioesphomeapi.md) — the ESPHome client HA
+  actually speaks (MIT submodule, pinned `1e16d71`, native-API **1.14**). Our
+  **oracle**: `api.proto` (the vendored proto source), `_frame_helper` (the frame
+  codec's golden capture), `connection.py` (the FSM + Noise flow).
+- `source` [ubihome-esphome-native-api](sources/ubihome-esphome-native-api.md) — a
+  Rust native-API **server** (MIT submodule, pinned `79c5066`). Design reference,
+  not a dep; its `encryption.md` + `packet_encrypted.rs` are the qhw.10 Noise example.
+- `source` [esphome-core-api](sources/esphome-core-api.md) — esphome/esphome
+  `components/api`, **GPL-3.0 · REFERENCE-ONLY, never copy/vendor**. The C++ ground
+  truth for edge cases; read it, implement from the MIT sources.
+- `source` [esphome-native-api-protocol](sources/esphome-native-api-protocol.md) —
+  the prose spec (developers.esphome.io + HA integration/Noise pages). Framing =
+  `0x00` + varuint size + varuint type + payload — **one** length, size before type.
+- `source` [rust-on-esp-idf](sources/rust-on-esp-idf.md) — the std/ESP-IDF stack for
+  the pivot: the Rust-on-ESP book, `esp-idf-template`, and `esp-idf-sys` **0.37.2** /
+  `-hal` **0.46.2** / `-svc` **0.52.1** (ESP-IDF v5.3.x).
+- `source` [prost-and-noise](sources/prost-and-noise.md) — `prost` **0.14.4** (the
+  wire types, in use) + the Noise stack (`noise-protocol` 0.2, `noise-rust-crypto`
+  0.6) and the spec: ESPHome is **`Noise_NNpsk0_25519_ChaChaPoly_SHA256`**, device = responder.
+- `source` [embedded-driver-crates](sources/embedded-driver-crates.md) — the eh-1.0
+  drivers `mipidsi` **0.10** / `embedded-graphics` **0.8** / `axp192` **0.2** (display +
+  PMU); the matching silicon lives in [datasheets](sources/m5stickc-plus-datasheets.md).
+- `source` [m5-earth-unit](sources/m5-earth-unit.md) — the **resistive** soil probe
+  (U019) on **ADC1 ch5 / G33** (ADC2 dies under WiFi); power-gated, two-endpoint
+  calibration. Schematic via `fetch.sh` (PDF gitignored).

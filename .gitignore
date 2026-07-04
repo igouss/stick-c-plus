@@ -7,8 +7,9 @@
 !**/proptest-regressions/
 
 # Datasheets are large immutable binaries — fetched locally, not committed.
-# The source note + kb/sources/m5stickc-plus-datasheets/fetch.sh reproduce them.
+# The source note + kb/sources/<slug>/fetch.sh reproduce them.
 /kb/sources/m5stickc-plus-datasheets/*.pdf
+/kb/sources/m5-earth-unit/*.pdf
 
 # The full upstream doc-page snapshot is re-fetchable (fetch.sh) and noisy — keep
 # the hand-transcribed pinmap.md, not the whole page.

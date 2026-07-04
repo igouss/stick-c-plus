@@ -1,3 +1,9 @@
 [submodule "kb/sources/m5stack-m5stickc-plus"]
 	path = kb/sources/m5stack-m5stickc-plus
 	url = https://github.com/m5stack/M5StickC-Plus
+[submodule "kb/sources/aioesphomeapi"]
+	path = kb/sources/aioesphomeapi
+	url = https://github.com/esphome/aioesphomeapi
+[submodule "kb/sources/ubihome-esphome-native-api"]
+	path = kb/sources/ubihome-esphome-native-api
+	url = https://github.com/UbiHome/esphome-native-api
