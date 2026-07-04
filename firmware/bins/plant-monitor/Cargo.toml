@@ -3,11 +3,10 @@ name = "plant-monitor"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-# The plant-monitor composition root (bin #1). qhw.2 scope: the qhw.1 boot
-# skeleton moved here from firmware/src/main.rs, now linking the host `plant-core`
-# domain across the workspace boundary to prove the cross-workspace path build.
-# The real wiring (WiFi, native-API host, ADC sampler, Sensor entity) lands in
-# qhw.5 / .7 / .8 / .9 / .27.
+# The plant-monitor composition root (bin #1). It wires the driven `adapters` to
+# the host domain crates by path across the workspace boundary. The ADC
+# SoilSensor adapter is live (qhw.5); WiFi, the native-API host, the sampler
+# thread and the Sensor entity follow in qhw.7 / .8 / .9 / .21 / .27.
 description = "M5StickC Plus + Earth Unit soil-moisture plant monitor (ESPHome-native)."
 
 [[bin]]
@@ -28,9 +27,11 @@ esp-idf-sys = "0.37"
 log = "0.4"
 # Host domain crate, referenced by path across the two workspaces — the same
 # cross-workspace seam every downstream bead relies on. plant-core is no_std and
-# zero-dep, so it cross-compiles for xtensa cleanly; main.rs references a real
-# constant from it so a broken seam fails the build rather than passing silently.
+# zero-dep, so it cross-compiles for xtensa cleanly.
 plant-core = { path = "../../../plant-core" }
+# The driven adapters (firmware workspace). The composition root reaches for
+# `adapters::adc::EarthUnit` to bind the SoilSensor port to real ADC1 hardware.
+adapters = { path = "../../adapters" }
 
 [build-dependencies]
 # Emits the ESP-IDF sysenv link/search flags for the final link (via ldproxy).
