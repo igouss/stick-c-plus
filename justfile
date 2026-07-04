@@ -143,10 +143,6 @@ setup-hooks:
     git config core.hooksPath .githooks
     @echo "hooks installed: .githooks/pre-commit → just precommit  (bypass: git commit -n)"
 
-# Show ready-to-start beads (unblocked work).
-ready:
-    br ready
-
 # Everything CI checks: format, architecture (hex-lint), lint both worlds, test,
 # build. hex-lint runs early — an architecture breach fails fast, before builds.
 ci: (fmt "check") hex-lint lint lint-fw test build
@@ -155,3 +151,62 @@ ci: (fmt "check") hex-lint lint lint-fw test build
 clean:
     cargo clean
     cd firmware && cargo clean
+
+# ---- Beads (issue tracking) ----
+#
+# Two tools over one dependency graph in .beads/. `br` (beads_rust) is the CRUD +
+# git-facing store: a SQLite db mirrored to the committed .beads/issues.jsonl.
+# `bv` reads that graph and ranks it (PageRank / betweenness) into robot-JSON
+# triage. Division of labour: br writes & lists (human-readable), bv analyses &
+# recommends (agent JSON — NEVER run bare `bv`, it opens a blocking TUI).
+# br is non-invasive: it never runs git, so flushing the db to JSONL and
+# committing it is our job — `just bead-sync`, then a `beads:`-scoped commit.
+# The robot-JSON conforms to the schemas `br schema <target>` emits (and the
+# upstream agent_baseline/schemas), so agents parse it deterministically.
+# Full workflow: kb/guides/beads-triage.md.
+
+# Ready work: open, unblocked, not deferred (br, human list).
+ready:
+    br ready
+
+# Blocked work and what each waits on (br, human list).
+blocked:
+    br blocked
+
+# Project counts by status / type / priority (br).
+stats:
+    br stats
+
+# Top pick + its `br update … --status=in_progress` claim command (bv, robot JSON).
+next:
+    bv --robot-next
+
+# Full triage — recommendations + blockers + graph health (bv, the mega-command).
+triage:
+    bv --robot-triage
+
+# Parallel execution tracks: what can run concurrently right now (bv, robot JSON).
+plan:
+    bv --robot-plan
+
+# Flush the db → the committed .beads/issues.jsonl so beads changes can land.
+# br is non-invasive (never runs git), so stage + commit the JSONL yourself —
+# the recipe prints the exact command.
+bead-sync:
+    br sync --flush-only
+    @echo "flushed → .beads/issues.jsonl  ·  commit: git add .beads/issues.jsonl && git commit -m 'beads: …'"
+
+# Graph-health gate. bv's insight metrics are lazily computed and report
+# Cycles:null when uncomputed (a false red), so the cycle count comes from
+# `br dep cycles` instead. Runs br diagnostics + asserts zero cycles; else fails.
+bead-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    br doctor
+    if br dep cycles --json | jq -e '.count == 0' >/dev/null; then
+      echo "✅ beads: no dependency cycles"
+    else
+      br dep cycles
+      echo "❌ beads: dependency cycle(s) — break one edge with: br dep remove <child> <parent>"
+      exit 1
+    fi

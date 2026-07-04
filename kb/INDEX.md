@@ -97,3 +97,12 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
 - `source` [m5-earth-unit](sources/m5-earth-unit.md) — the **resistive** soil probe
   (U019) on **ADC1 ch5 / G33** (ADC2 dies under WiFi); power-gated, two-endpoint
   calibration. Schematic via `fetch.sh` (PDF gitignored).
+
+## Workflow — issue tracking & triage
+
+- `guide` [beads-triage](guides/beads-triage.md) — how we run **beads**: `br`
+  (beads_rust) is the store + the git-tracked `issues.jsonl`; `bv` ranks the graph
+  (PageRank / betweenness) into robot-JSON triage. The `just` recipes
+  (`ready`/`triage`/`next`/`plan`/`bead-sync`/`bead-check`), the "br never runs
+  git" sync discipline, the `--json` / `br schema` contract, and why the cycle
+  gate reads `br dep cycles` — not bv's lazily-`null` `Cycles` (a false red).

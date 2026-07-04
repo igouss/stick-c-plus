@@ -78,7 +78,7 @@ host domain crates by **path** across the boundary.
   fast-follow.
 - **firmware** — the workspace is carved and `bins/plant-monitor` boots on
   hardware. The ADC sampler thread now feeds the shared moisture cache (qhw.21);
-  WiFi and the on-device native-API server are the next beads (`br ready`).
+  WiFi and the on-device native-API server are the next beads (`just ready`).
 
 ## Prerequisites
 
@@ -118,7 +118,10 @@ Per-project and pin-exact in the KB: the plant probe is the M5 Earth Unit on
 
 ## Roadmap
 
-Tracked in beads (`br ready` for unblocked work): WiFi STA + mDNS, the on-device
-ESPHome native-API server, the ADC→moisture sampler and Sensor entity (→ the HA
-dashboard), then Noise encryption, the ST7789 status display, and OTA. Project #2
-(the WS2812 driver) and project #3 (the rover) build on the same foundation.
+Tracked in beads — `just ready` for unblocked work, `just triage` for graph-ranked
+recommendations; the workflow is written up in
+[`kb/guides/beads-triage.md`](kb/guides/beads-triage.md). Next up: WiFi STA + mDNS,
+the on-device ESPHome native-API server, the ADC→moisture sampler and Sensor entity
+(→ the HA dashboard), then Noise encryption, the ST7789 status display, and OTA.
+Project #2 (the WS2812 driver) and project #3 (the rover) build on the same
+foundation.
