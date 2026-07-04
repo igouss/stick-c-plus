@@ -1,0 +1,26 @@
+[package]
+name = "firmware-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Pure, host-testable primitives shared by the firmware's driven adapters: ADC oversampling and the probe-power gating port."
+
+[lib]
+name = "firmware_core"
+path = "src/lib.rs"
+
+# Framework-free shared kernel: pure reductions + the ProbePower port, no HAL and
+# no effects. role=domain marks it for effect-audit (FC purity, qhw.25); context
+# "shared" is hex-lint's reserved name, letting an adapter in any bounded context
+# depend on it.
+[package.metadata.hex-arch]
+role = "domain"
+context = "shared"
+
+# Pure no_std: the shared kernel pulls in nothing. Every effect (the ADC, the
+# probe's power rail) lives behind a port an on-target crate implements.
+[dependencies]
+
+# Host-only; never reaches the Xtensa build (a dependent excludes dev-deps).
+[dev-dependencies]
+proptest = "1"

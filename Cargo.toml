@@ -1,11 +1,12 @@
 # Host workspace: framework-free, host-testable crates (led-core, plant-core,
-# esphome-api). The firmware is a *detached* workspace (firmware/Cargo.toml has
-# its own [workspace]) so it can carry the Xtensa target + `esp` toolchain
-# without forcing them on `cargo test` here. Firmware crates depend on these host
-# crates by path across the boundary (e.g. bins/plant-monitor -> plant-core).
+# esphome-api, firmware-core). The firmware is a *detached* workspace
+# (firmware/Cargo.toml has its own [workspace]) so it can carry the Xtensa target
+# + `esp` toolchain without forcing them on `cargo test` here. Firmware crates
+# depend on these host crates by path across the boundary (e.g. adapters ->
+# plant-core, firmware-core).
 [workspace]
 resolver = "2"
-members = ["domain", "plant-core", "esphome-api"]
+members = ["domain", "plant-core", "esphome-api", "firmware-core"]
 # The firmware is its own Xtensa workspace; keep it out of the host one.
 exclude = ["firmware"]
 
