@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
 //! plant-monitor — the composition root (bin #1) on std/ESP-IDF.
 //!
-//! Brings the board onto the network via [`firmware_infra::wifi`] (qhw.7), then
-//! wires the driven [`adapters::adc::EarthUnit`] into the host [`plant_shell`]
+//! Brings the board onto the network via [`firmware_infra::wifi`] (qhw.7) and
+//! advertises it for Home Assistant discovery via [`firmware_infra::mdns`]
+//! (qhw.8), then wires the driven [`adapters::adc::EarthUnit`] into the host
+//! [`plant_shell`]
 //! sampler thread: the thread reads the ADC every sample period, folds each
 //! reading through the pure [`plant_core::sampler::step`], and publishes the
 //! latest [`plant_core::Moisture`] into a [`SharedMoisture`] cache. This bin then
@@ -22,6 +24,7 @@ use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::log::EspLogger;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
+use firmware_infra::mdns::{self, EsphomeService};
 use firmware_infra::wifi::{self, WifiStation};
 use log::{error, info, warn};
 use plant_core::moisture::Calibration;
@@ -44,6 +47,15 @@ const PROVISIONAL_CAL: Calibration =
 /// just that we hold a lease (qhw.7). Resolution failure is logged, not fatal:
 /// the monitor still samples soil without a working resolver.
 const DNS_CHECK_HOST: &str = "google.com";
+
+/// mDNS hostname (sans `.local`) — the device answers `plant-monitor.local` (qhw.8).
+const HOSTNAME: &str = "plant-monitor";
+/// The device's display name in Home Assistant and mDNS browsers (qhw.8).
+const FRIENDLY_NAME: &str = "Plant Monitor";
+/// ESPHome `platform` TXT — the chip family.
+const PLATFORM: &str = "ESP32";
+/// ESPHome `board` TXT — informational device identity (M5StickC Plus).
+const BOARD: &str = "m5stick-c";
 
 fn main() {
     // Patch a few ESP-IDF symbols Rust's std expects, then route `log` records to
@@ -76,6 +88,29 @@ fn main() {
         Ok(addrs) => info!("dns ok: {DNS_CHECK_HOST} -> {addrs:?}"),
         Err(err) => warn!("dns resolve of {DNS_CHECK_HOST} failed: {err}"),
     }
+
+    // Advertise as an ESPHome device so Home Assistant auto-discovers us (qhw.8).
+    // The MAC comes from the live station; _mdns owns the advert for the life of
+    // main — dropping it retracts the record, which is how power-off makes the
+    // device vanish within its TTL. Fatal on failure: without discovery HA cannot
+    // find us, defeating the point of being online. The native-API server that
+    // answers on :6053 lands in qhw.27/.9.
+    let mac_bytes: [u8; 6] = wifi.mac().expect("read station MAC");
+    let mac: String = mdns::esphome_mac(&mac_bytes);
+    let service: EsphomeService = EsphomeService {
+        hostname: HOSTNAME,
+        instance_name: FRIENDLY_NAME,
+        friendly_name: FRIENDLY_NAME,
+        version: env!("CARGO_PKG_VERSION"),
+        mac: &mac,
+        platform: PLATFORM,
+        board: BOARD,
+    };
+    let _mdns = mdns::advertise(&service).expect("mDNS advertise");
+    info!(
+        "mdns: advertising _esphomelib._tcp:{} as {FRIENDLY_NAME:?} (mac {mac})",
+        mdns::ESPHOME_API_PORT
+    );
 
     // AlwaysOn: the probe stays powered for now. qhw.31 swaps this for a real
     // ProbePower (AXP192 rail / GPIO switch) — the only wiring change — and the
