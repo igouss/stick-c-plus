@@ -14,7 +14,17 @@ path = "src/lib.rs"
 [package.metadata.hex-arch]
 role = "infra"
 
-# WiFi STA (qhw.7) is live; the mDNS advertiser (qhw.8), the native-API server
+# The mDNS advertiser (qhw.8) needs the `espressif/mdns` managed component: mDNS
+# was removed from the core ESP-IDF tree in 5.0 and now lives in the Component
+# Registry (idf >= 5.0). esp-idf-sys reads this table from the root binary crate
+# AND its direct dependencies — firmware-infra is a direct dep of plant-monitor —
+# synthesizes the idf_component.yml, and links the component so
+# `esp_idf_svc::mdns` resolves. Pinned for reproducibility (1.11.3 is latest;
+# 1.8.2 is the tested stable this was built against).
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/mdns", version = "1.8.2" }
+
+# WiFi STA (qhw.7) and the mDNS advertiser (qhw.8) are live; the native-API server
 # host (qhw.27) and OTA (qhw.12) arrive in their own beads, pulling esphome-api
 # (by path) then.
 [dependencies]

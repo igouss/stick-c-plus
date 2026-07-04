@@ -3,8 +3,8 @@
 # Acceptance note (qhw.1): a MISTYPED key is silently ignored, so proof is the
 # GENERATED sdkconfig showing these values took effect — not that the line exists
 # here. The stack/socket/optimization keys are core IDF and appear immediately;
-# CONFIG_MDNS_MAX_SERVICES only materializes once the mdns managed component is
-# pulled in (qhw.8) — until then it is expected to be inert.
+# CONFIG_MDNS_MAX_SERVICES materializes now that the espressif/mdns managed
+# component is pulled in (qhw.8).
 
 # Size optimization: flash on this board is tight (4 MB, dual-OTA slots).
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
@@ -19,6 +19,6 @@ CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=8192
 # lwIP sockets: the HA connection + mDNS + OTA pull + headroom.
 CONFIG_LWIP_MAX_SOCKETS=16
 
-# mDNS services advertised (_esphomelib._tcp and friends). Inert until qhw.8
-# adds the mdns component.
+# mDNS services advertised (_esphomelib._tcp and friends). Live since qhw.8 pulled
+# the espressif/mdns managed component, which provides this Kconfig symbol.
 CONFIG_MDNS_MAX_SERVICES=10

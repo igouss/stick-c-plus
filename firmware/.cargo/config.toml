@@ -18,6 +18,15 @@ build-std = ["std", "panic_abort"]
 
 [env]
 MCU = "esp32"
+# This is a VIRTUAL workspace (members list, no root package), so cargo_metadata's
+# `root_package()` is None and esp-idf-sys cannot tell which crate's
+# `[package.metadata.esp-idf-sys]` to read — it silently reads none (the "could
+# not identify the root crate" error is downgraded to a warning). Name the root
+# binary explicitly so esp-idf-sys reads it AND its direct deps, which is how the
+# `espressif/mdns` managed component declared in firmware-infra (qhw.8) gets
+# pulled into the build. Without this the mdns component is never added and
+# `esp_idf_svc::mdns` compiles out.
+ESP_IDF_SYS_ROOT_CRATE = "plant-monitor"
 # Exact ESP-IDF tag (acceptance: pin an exact v5.3.x). esp-idf-sys 0.37.0's
 # CHANGELOG deprecates all IDF < 5.3.0, i.e. the floor is v5.3.0 and it supports
 # 5.3.x/5.4.x/5.5.x; v5.3.3 is the latest 5.3 patch, on the floor's own line.
