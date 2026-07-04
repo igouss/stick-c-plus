@@ -38,6 +38,11 @@ plant-shell = { path = "../../../plant-shell" }
 # The driven adapters (firmware workspace). The composition root reaches for
 # `adapters::adc::EarthUnit` to bind the SoilSensor port to real ADC1 hardware.
 adapters = { path = "../../adapters" }
+# Firmware infrastructure (same workspace): WiFi STA bring-up (qhw.7). The
+# composition root takes the modem + system event loop + NVS and hands them to
+# `firmware_infra::wifi::WifiStation` so the board joins the network before the
+# native-API server (qhw.27) needs the link.
+firmware-infra = { path = "../../firmware-infra" }
 
 [build-dependencies]
 # Emits the ESP-IDF sysenv link/search flags for the final link (via ldproxy).
