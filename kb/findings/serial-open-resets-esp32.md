@@ -24,8 +24,8 @@ stub gets loaded), so a connect demonstrably reboots the chip. The auto-reset
 circuit is thus present and functional (default-reset never had to be disabled).
 The "second opener can't share" half is standard POSIX tty semantics, not board
 magic. See [flashing-and-serial-access](../guides/flashing-and-serial-access.md)
-for the connect recipes this builds on. *(The fan-out remedies — ser2net /
-conserver / a tmux-mirrored monitor — are written up in
+for the connect recipes this builds on. *(The fan-out remedies — ser2net or
+a tmux-mirrored monitor — are written up in
 [sharing-the-serial-console](../guides/sharing-the-serial-console.md) but not yet
 exercised on this board.)*
 

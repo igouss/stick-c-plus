@@ -19,14 +19,13 @@ ESP32 (FT232 auto-reset). So the naive `ttyd espflash monitor …` is wrong on t
 counts: `ttyd` forks one child **per browser client**, so two tabs = two opens =
 two processes fighting for the port **and** a double reset. The fix is always the
 same shape: **one process owns the port; everyone else mirrors that process, not
-the device.** Three ways to do it, cheapest first.
+the device.** Two ways to do it, cheapest first.
 
 ## What's on this host (verified 2026-07-03)
 
 `dnf`/`rpm` on this Fedora 43 box: `socat`, `telnet`, `ttyd` **installed**;
-`tio`, `picocom`, `ser2net`, `conserver` **absent** but packaged —
-`ser2net 4.6.7` (updates), `conserver 8.2.7` (fedora). So any option below is one
-`dnf install` away; nothing needs building.
+`tio`, `picocom`, `ser2net` **absent** but packaged — `ser2net 4.6.7` (updates).
+So either option below is one `dnf install` away; nothing needs building.
 
 ## Option A — tmux mirror (recommended; zero new daemons)
 
@@ -71,35 +70,7 @@ device on first client and (by default) releases it when the last leaves, so an
 idle→reconnect resets the board once more; keep one client (e.g. a logger)
 attached to avoid that.
 
-## Option C — conserver (console server with persistent logging)
-
-`sudo dnf install conserver`, then `/etc/conserver.cf`:
-
-```
-config * { logfile /var/log/conserver/conserver.log; }
-default full { rw *; }
-
-console m5stick {
-    master   localhost;
-    type     device;
-    device   /dev/ttyUSB0;
-    baud     115200;
-    parity   none;
-    logfile  /var/log/conserver/m5stick.log;   # every byte, even unattended
-    timestamp "1hab";
-    include  full;
-}
-
-access * { trusted 127.0.0.1; allowed 100.64.0.0/10; }   # tailnet
-```
-
-Attach: `console -M localhost m5stick` (escape `Ctrl-E c`, then `?` help, `w` who,
-`;` take write, `.` disconnect, `r` replay log). Unlike ser2net it **owns the
-device continuously from daemon start** — resets the board once, then logs forever,
-so a panic that happens while nobody's watching is still captured. That log is the
-reason to pick it over ser2net for a dev board.
-
-## Fronting any of these on the web
+## Fronting either of these on the web
 
 Reuse the host's `ttyd` → `oauth2-proxy` (Pocket ID OIDC) → Caddy `.homelab`
 gateway pattern (the units live in `~/IdeaProjects/infra`, not here). Point `ttyd`
@@ -107,7 +78,6 @@ at a **client** of the owner, never at the device:
 
 ```sh
 ttyd -p 7683 -i 127.0.0.1 -b /board socat - TCP:127.0.0.1:3333        # ser2net
-ttyd -p 7683 -i 127.0.0.1 -b /board console -M localhost m5stick      # conserver
 ```
 
 Multiple browser tabs are now fine — each becomes a client of the multiplexer,
@@ -120,15 +90,15 @@ laptop.
 
 - **Flashing is exclusive.** `espflash flash` / `cargo run` drive the bootloader
   over the raw port + reset lines — they can't go through a shared mirror. Stop the
-  owner (`tmux kill-session -t board`, or `systemctl stop ser2net`/`conserver`)
-  before flashing our firmware, restart after.
+  owner (`tmux kill-session -t board`, or `systemctl stop ser2net`) before flashing
+  our firmware, restart after.
 - **One physical owner, always.** "Concurrent" here means concurrent *observers of
   one owner*, never two programs each holding `/dev/ttyUSB0`.
 
 ## Status
 
 Verified on this host: the single-owner/reset constraint, and package
-availability. **Not yet run on this board:** the ser2net/conserver setups above are
-the recommended recipes, not yet exercised end-to-end — prove one before relying on
+availability. **Not yet run on this board:** the ser2net setup above is the
+recommended recipe, not yet exercised end-to-end — prove it before relying on
 it (attach two clients, confirm both see the stream and the board resets only at
 owner start).

@@ -249,8 +249,9 @@ Bead **I is the MVP milestone** — soil moisture graphing in HA over plaintext.
 
 **Reconcile the old epic:** mark `stick-c-plus-qqh` and its no_std OTA children `qqh.2–qqh.6`
 **superseded** by the new epic (keep for provenance, don't delete). **Keep `qqh.1`** (own the
-WS2812 encoder — intent survives, substrate changes) and re-file under project #2. **Keep `5ww`**
-(serial-under-conserver, still relevant until OTA lands). Add a *superseded* banner to
+WS2812 encoder — intent survives, substrate changes) and re-file under project #2. (`5ww`,
+the serial-under-conserver interim, was later dropped — 2026-07-04 — as we don't run conserver;
+flashing borrows the UART directly.) Add a *superseded* banner to
 `kb/findings/esp-rs-ota-version-matrix.md`.
 
 ## Domain additions — `plant-core` (mirrors `led-core`'s shape & test discipline)

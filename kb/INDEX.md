@@ -70,8 +70,8 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
   `pcf8563` ready; MPU6886 + IR have **no eh-1.0 driver**, so (greenfield, no
   legacy compat) we own thin drivers. Share the I2C bus with `embedded-hal-bus`.
 - `guide` [sharing-the-serial-console](guides/sharing-the-serial-console.md) — let
-  many viewers (or the web) watch the UART at once: tmux-mirror (recommended),
-  `ser2net`, or `conserver`, fronted by the host's `ttyd`/`oauth2-proxy` stack.
+  many viewers (or the web) watch the UART at once: tmux-mirror (recommended) or
+  `ser2net`, fronted by the host's `ttyd`/`oauth2-proxy` stack.
   Package availability + configs verified on-host; setups not yet run on the board.
 
 ## ESPHome native API & the std/ESP-IDF pivot
