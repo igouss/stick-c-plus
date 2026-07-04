@@ -16,6 +16,11 @@ path = "src/lib.rs"
 # including the firmware's — needs no protoc.
 [dependencies]
 prost = "0.14"
+# Optional, behind the `light` feature: the LightEntity maps HA light commands to
+# led-core effects. Kept optional so the plant-monitor build (SensorEntity only)
+# never pulls in the LED animation domain. led-core is pure no_std, so it does
+# not disturb effect-audit.
+led-core = { path = "../domain", optional = true }
 
 [features]
 # Exactly one api-version feature selects the vendored proto snapshot. Only the
@@ -24,6 +29,9 @@ prost = "0.14"
 # is enabled.
 default = ["api-1-14"]
 api-1-14 = []
+# The LightEntity -> led-core render mapping (LightEntity itself is always
+# available; only led_render() and LedRender need led-core).
+light = ["dep:led-core"]
 
 # Host-only. The golden id test re-parses the vendored proto; regex keeps that
 # parser obviously correct. proptest drives the codec round-trip and entity

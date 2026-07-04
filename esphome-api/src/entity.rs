@@ -70,13 +70,13 @@ pub fn object_id_key(object_id: &str) -> u32 {
 /// sync by hand.
 #[derive(Clone, PartialEq, Debug)]
 pub enum ListMessage {
-    /// A sensor's description — the only implemented type.
+    /// A sensor's description ([`crate::SensorEntity`]).
     Sensor(proto::ListEntitiesSensorResponse),
     /// UNVERIFIED placeholder — no entity produces this yet.
     BinarySensor(proto::ListEntitiesBinarySensorResponse),
     /// UNVERIFIED placeholder — no entity produces this yet.
     Switch(proto::ListEntitiesSwitchResponse),
-    /// UNVERIFIED placeholder — no entity produces this yet.
+    /// A light's description ([`crate::LightEntity`]).
     Light(proto::ListEntitiesLightResponse),
     /// UNVERIFIED placeholder — no entity produces this yet.
     Number(proto::ListEntitiesNumberResponse),
@@ -123,13 +123,13 @@ impl ListMessage {
 /// type. See [`ListMessage`] for the add-a-type recipe.
 #[derive(Clone, PartialEq, Debug)]
 pub enum StateMessage {
-    /// A sensor's current reading — the only implemented type.
+    /// A sensor's current reading ([`crate::SensorEntity`]).
     Sensor(proto::SensorStateResponse),
     /// UNVERIFIED placeholder — no entity produces this yet.
     BinarySensor(proto::BinarySensorStateResponse),
     /// UNVERIFIED placeholder — no entity produces this yet.
     Switch(proto::SwitchStateResponse),
-    /// UNVERIFIED placeholder — no entity produces this yet.
+    /// A light's current state ([`crate::LightEntity`]).
     Light(proto::LightStateResponse),
     /// UNVERIFIED placeholder — no entity produces this yet.
     Number(proto::NumberStateResponse),
@@ -193,7 +193,7 @@ impl StateMessage {
 pub enum CommandMessage {
     /// UNVERIFIED placeholder — no entity handles this yet.
     Switch(proto::SwitchCommandRequest),
-    /// UNVERIFIED placeholder — no entity handles this yet.
+    /// A light command, handled by [`crate::LightEntity`].
     Light(proto::LightCommandRequest),
     /// UNVERIFIED placeholder — no entity handles this yet.
     Number(proto::NumberCommandRequest),
