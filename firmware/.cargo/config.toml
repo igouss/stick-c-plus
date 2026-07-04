@@ -8,7 +8,12 @@ target = "xtensa-esp32-espidf"
 linker = "ldproxy"
 # --baud 115200: the board's FT232 is unreliable above this (verified flashing
 # qhw.1). Monitor console baud is the ESP-IDF default 115200 and needs no flag.
-runner = "espflash flash --monitor --baud 115200"
+# --non-interactive: the monitor streams serial straight to stdout instead of
+# starting espflash's crossterm input reader, which aborts without a controlling
+# TTY ("Failed to initialize input reader") — so `cargo run` works from a pipe,
+# CI, or an agent. Reset-on-connect still yields a fresh boot; you forgo only the
+# interactive Ctrl-R chip reset.
+runner = "espflash flash --monitor --non-interactive --baud 115200"
 # esp-idf-sys >= 0.34 assumes a 64-bit time_t; ESP-IDF 5.x is built that way.
 rustflags = ["--cfg", "espidf_time64"]
 

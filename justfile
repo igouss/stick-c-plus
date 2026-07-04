@@ -122,8 +122,10 @@ size: build
 # ---- Device (needs the board on {{port}}) ----
 
 # Build, flash, and monitor the firmware (the qhw.1 board session, automated).
-# Runner is `espflash flash --monitor --baud 115200`; ESPFLASH_PORT names the
-# port so espflash never prompts (which fails without a tty). Ctrl-C exits.
+# Runner is `espflash flash --monitor --non-interactive --baud 115200`;
+# ESPFLASH_PORT names the port so espflash never prompts, and --non-interactive
+# streams serial without a controlling TTY, so this works from a pipe/CI/agent
+# (no crossterm input reader to fail). Ctrl-C exits.
 run:
     cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p plant-monitor'
 
