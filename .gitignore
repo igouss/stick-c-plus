@@ -41,3 +41,7 @@ secrets.toml
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# The aioesphomeapi conformance-oracle venv, provisioned by `just oracle`. A local
+# dev tool (aioesphomeapi is not a Cargo dep); re-creatable, so never committed.
+/.oracle-venv

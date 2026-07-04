@@ -24,6 +24,8 @@ sg := "/usr/bin/sg dialout -c"
 # and ninja (via linuxbrew). Prepended inside `sg`, which may reset the env.
 pyshim  := justfile_directory() / "firmware/tools/pyshim"
 fw_path := pyshim + ":$HOME/.cargo/bin:/home/linuxbrew/.linuxbrew/bin"
+# The aioesphomeapi conformance-oracle venv (git-ignored, survives `cargo clean`).
+oracle_venv := justfile_directory() / ".oracle-venv"
 
 # List recipes.
 default:
@@ -34,6 +36,31 @@ default:
 # Run the host domain suite (every host crate): unit + property + cucumber.
 test:
     cargo test --workspace
+
+# Run the aioesphomeapi conformance oracles — the #[ignore]d tests that drive the
+# REAL Home Assistant client (aioesphomeapi) against our device: the connection FSM
+# (esphome-api) and the qhw.9 Soil Moisture `SensorDevice` served over the full
+# accept loop (esphome-server). First run provisions a local venv at
+# {{oracle_venv}} (needs network + a python with aioesphomeapi wheels); it survives
+# `cargo clean`. NOT part of `just ci`: aioesphomeapi is not a Cargo dep, so a plain
+# build never fakes it — the tests show *ignored*, never a false green — and this
+# recipe is the one place that pins ESPHOME_ORACLE_PYTHON and un-ignores them.
+oracle:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    venv="{{oracle_venv}}"
+    py="$venv/bin/python"
+    if ! "$py" -c "import aioesphomeapi" 2>/dev/null; then
+      base="$(command -v python3.12 || command -v python3)"
+      echo "▶ provisioning oracle venv at $venv (from $base)"
+      "$base" -m venv "$venv"
+      "$py" -m pip install --quiet --upgrade pip
+      "$py" -m pip install --quiet aioesphomeapi
+    fi
+    echo "▶ oracle: esphome-api connection FSM"
+    ESPHOME_ORACLE_PYTHON="$py" cargo test -p esphome-api --test aioesphomeapi_oracle -- --ignored --nocapture
+    echo "▶ oracle: esphome-server SensorDevice over the server host (qhw.9)"
+    ESPHOME_ORACLE_PYTHON="$py" cargo test -p esphome-server --test aioesphomeapi_oracle -- --ignored --nocapture
 
 # Lint the host domain (every host crate), warnings as errors.
 lint:
