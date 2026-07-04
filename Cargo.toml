@@ -4,7 +4,7 @@
 # forcing them on `cargo test` here. It depends on `domain` by path.
 [workspace]
 resolver = "2"
-members = ["domain", "plant-core"]
+members = ["domain", "plant-core", "esphome-api"]
 # The firmware is its own Xtensa workspace; keep it out of the host one.
 exclude = ["firmware"]
 

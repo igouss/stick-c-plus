@@ -1,0 +1,32 @@
+[package]
+name = "esphome-api"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "ESPHome native-API prost message types + message-type-id registry, vendored from aioesphomeapi (MIT). Framework-free: no tokio, no async runtime."
+
+[lib]
+name = "esphome_api"
+path = "src/lib.rs"
+
+# Only prost, at runtime. No tokio, no async runtime, no codec: the blocking
+# std::io codec (qhw.17), the entity model (qhw.18) and the connection FSM
+# (qhw.19) are separate beads that build on these types. The prost message code
+# is committed under src/generated (see PROVENANCE.md), so a downstream build —
+# including the firmware's — needs no protoc.
+[dependencies]
+prost = "0.14"
+
+[features]
+# Exactly one api-version feature selects the vendored proto snapshot. Only the
+# pinned aioesphomeapi 1.14 proto is vendored today; later versions get their own
+# feature and generated module beside this one. lib.rs fails to compile if none
+# is enabled.
+default = ["api-1-14"]
+api-1-14 = []
+
+# Host-only. The golden id test re-parses the vendored proto; regex keeps that
+# parser obviously correct and never reaches a device build (dev-deps are
+# excluded from a dependent's compilation).
+[dev-dependencies]
+regex = "1"
