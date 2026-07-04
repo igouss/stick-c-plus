@@ -181,40 +181,48 @@ clean:
 
 # ---- Beads (issue tracking) ----
 #
-# Two tools over one dependency graph in .beads/. `br` (beads_rust) is the CRUD +
-# git-facing store: a SQLite db mirrored to the committed .beads/issues.jsonl.
-# `bv` reads that graph and ranks it (PageRank / betweenness) into robot-JSON
-# triage. Division of labour: br writes & lists (human-readable), bv analyses &
-# recommends (agent JSON — NEVER run bare `bv`, it opens a blocking TUI).
-# br is non-invasive: it never runs git, so flushing the db to JSONL and
+# Two tools over one dependency graph in .beads/. `br` (github.com/gastownhall/beads)
+# is the CRUD + git-facing store: a SQLite db mirrored to the committed
+# .beads/issues.jsonl. `bv` reads that graph and ranks it (PageRank / betweenness)
+# into robot-JSON triage. Division of labour: br writes & lists, bv analyses &
+# recommends. br is non-invasive: it never runs git, so flushing the db to JSONL and
 # committing it is our job — `just bead-sync`, then a `beads:`-scoped commit.
-# The robot-JSON conforms to the schemas `br schema <target>` emits (and the
-# upstream agent_baseline/schemas), so agents parse it deterministically.
+#
+# NON-INTERACTIVE CONTRACT (every recipe here is safe to script / run headless):
+#   - `br` prints and exits — no pager, no prompt, no TTY needed. `--json` gives a
+#     stable machine shape; the human recipes below rely on the plain-text output.
+#   - `bv` is a TUI FIRST: bare `bv` opens a full-screen viewer that BLOCKS the
+#     terminal (and any agent session). So `bv` is invoked ONLY with a `--robot-*`
+#     flag, which makes it emit-and-exit. NEVER script bare `bv`.
+#   - `-f json` PINS the output format: `bv`'s robot mode defaults to JSON but honours
+#     BV_OUTPUT_FORMAT / TOON_DEFAULT_FORMAT, so pinning it keeps the shape
+#     deterministic no matter the environment. Robot-JSON conforms to the schemas
+#     `br schema <target>` emits.
 # Full workflow: kb/guides/beads-triage.md.
 
-# Ready work: open, unblocked, not deferred (br, human list).
+# Ready work: open, unblocked, not deferred (br, human list — prints and exits).
 ready:
     br ready
 
-# Blocked work and what each waits on (br, human list).
+# Blocked work and what each waits on (br, human list — prints and exits).
 blocked:
     br blocked
 
-# Project counts by status / type / priority (br).
+# Project counts by status / type / priority (br — prints and exits).
 stats:
     br stats
 
-# Top pick + its `br update … --status=in_progress` claim command (bv, robot JSON).
+# Top pick + its `br update … --status=in_progress` claim command (bv robot JSON).
 next:
-    bv --robot-next
+    bv --robot-next -f json
 
 # Full triage — recommendations + blockers + graph health (bv, the mega-command).
 triage:
-    bv --robot-triage
+    bv --robot-triage -f json
 
-# Parallel execution tracks: what can run concurrently right now (bv, robot JSON).
+# Parallel execution tracks: what can run concurrently right now (bv robot JSON).
 plan:
-    bv --robot-plan
+    bv --robot-plan -f json
 
 # Flush the db → the committed .beads/issues.jsonl so beads changes can land.
 # br is non-invasive (never runs git), so stage + commit the JSONL yourself —

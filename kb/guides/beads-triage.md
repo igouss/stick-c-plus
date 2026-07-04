@@ -12,17 +12,26 @@ This project tracks work in **beads** — a dependency graph of issues living in
 
 | Tool | Role | Reads/writes | Output |
 |------|------|--------------|--------|
-| **`br`** ([beads_rust](https://github.com/Dicklesworthstone/beads_rust)) | the store — create / update / close / query, and the git-facing JSONL | writes the SQLite db + the committed `issues.jsonl` | human text, or `--json` |
+| **`br`** ([gastownhall/beads](https://github.com/gastownhall/beads); Rust client wrapper: `~/code/beads-client`) | the store — create / update / close / query, and the git-facing JSONL | writes the SQLite db + the committed `issues.jsonl` | human text, or `--json` |
 | **`bv`** (beads viewer) | triage — ranks the graph by PageRank / betweenness into recommendations | reads only | interactive TUI, or `--robot-*` JSON |
 
 Division of labour: **`br` writes and lists** (for a human), **`bv` analyses and
 recommends** (for an agent). `bv` never mutates anything.
 
-## Two rules that bite
+## Non-interactive contract (this matters for agents)
 
-1. **Never run bare `bv`.** It launches a full-screen TUI and blocks the terminal
-   (and any agent session). Always pass a `--robot-*` flag — see below.
-2. **`br` never runs git.** By design it only touches `.beads/`. Flushing the db
+Every command below is safe to run headless — it prints and exits, no pager, no
+prompt, no TTY. The one trap is `bv`.
+
+1. **Never run bare `bv`.** It launches a full-screen TUI that BLOCKS the terminal
+   (and any agent session). Always pass a `--robot-*` flag; that makes it
+   emit-and-exit. Pair it with **`-f json`** to pin the shape — robot mode defaults
+   to JSON but honours `BV_OUTPUT_FORMAT` / `TOON_DEFAULT_FORMAT`, so an env default
+   could otherwise flip it to TOON.
+2. **`br` is non-interactive by default** — it never opens a pager or prompts, so
+   `br ready` / `br show <id>` / `br update …` are all script-safe. Pass `--json`
+   when a machine parses the output.
+3. **`br` never runs git.** By design it only touches `.beads/`. Flushing the db
    to `issues.jsonl` and committing it is *your* job (`just bead-sync`, then a
    `beads:`-scoped commit). Import back into the db is automatic on the next `br`
    read; a merge after `git pull` is the exception (`br sync --merge`).
@@ -60,6 +69,7 @@ br create "Title" -d "desc" -t task -p 2   # -t task|bug|feature|epic|chore|docs
 br q "Quick title"                          # quick-capture, prints the id only
 br show <id> [--json]                        # full detail + dependencies
 br search "keyword"                          # full-text search
+br comments add <id> "text"                  # append a comment — NOTE: `comments add`, not `br comment`
 br dep add <child> <parent>                  # child depends on (is blocked by) parent
 br dep tree <id>                             # visualise the subtree
 br dep remove <child> <parent>               # break an edge (e.g. to kill a cycle)
@@ -73,11 +83,14 @@ shape (below).
 ## `bv` triage (robot mode)
 
 ```sh
-bv --robot-next                       # single top pick + claim command
-bv --robot-triage                     # recommendations + blockers + health
-bv --robot-plan                       # dependency-respecting parallel tracks
-bv --robot-triage --robot-by-label esphome-api   # scope to one domain
+bv --robot-next   -f json             # single top pick + claim command
+bv --robot-triage -f json             # recommendations + blockers + health
+bv --robot-plan   -f json             # dependency-respecting parallel tracks
+bv --robot-triage -f json --robot-by-label esphome-api   # scope to one domain
 ```
+
+`-f json` is belt-and-braces (robot mode already defaults to JSON) but keeps the
+shape deterministic regardless of `BV_OUTPUT_FORMAT` / `TOON_DEFAULT_FORMAT`.
 
 The scores are graph metrics: **PageRank** = how much everything depends on this
 (foundations rank high); **betweenness** = bottleneck (blocks many paths). High on
