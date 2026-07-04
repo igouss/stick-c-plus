@@ -32,3 +32,17 @@ api-1-14 = []
 [dev-dependencies]
 regex = "1"
 proptest = "1"
+# The aioesphomeapi conformance oracle (an #[ignore]d integration test) reads the
+# Python client's JSON verdict back. Host-only, like the other dev-deps.
+serde_json = "1"
+
+# `role = "domain"` is effect-audit's *functional-core* marker: it asserts this
+# crate's `src/` performs no concrete effects (no sockets, files, threads, clock)
+# and makes `effect-audit` fail if one leaks in. It is NOT a DDD claim — per
+# lib.rs this crate is adapter-side wire vocabulary, not the business domain
+# (plant-core/led-core are). The two byte-stream pumps in frame_io are generic
+# over `Read`/`Write` (dependency-inverted), so the real `TcpStream` is injected
+# by the shell — the accept-loop bead and the aioesphomeapi oracle test — and the
+# core stays effect-clean. Verified: `effect-audit --strict esphome-api`.
+[package.metadata.hex-arch]
+role = "domain"

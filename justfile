@@ -30,6 +30,12 @@ test:
 lint:
     cargo clippy --workspace -- -D warnings
 
+# Enforce the functional-core / imperative-shell split on every crate marked
+# `[package.metadata.hex-arch] role = "domain"` (today: esphome-api). Fails if a
+# concrete effect — socket, file, thread, clock — leaks into a domain core.
+audit:
+    effect-audit --strict --require-domain .
+
 # ---- Firmware (Xtensa, esp toolchain) ----
 
 # Build the firmware (release).

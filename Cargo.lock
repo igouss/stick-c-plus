@@ -312,6 +312,7 @@ dependencies = [
  "proptest",
  "prost",
  "regex",
+ "serde_json",
 ]
 
 [[package]]

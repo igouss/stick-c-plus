@@ -6,10 +6,17 @@
 //! commit — never from `esphome/esphome`, which is GPLv3. See `PROVENANCE.md`.
 //!
 //! ## Hexagon
-//! This crate is a **boundary vocabulary**, not domain: it is the on-the-wire
-//! representation HA expects, so it lives at the edge. The framework-free
-//! `plant-core`/`led-core` domains never depend on it; the adapters that speak
-//! to HA (the codec, entity model and connection FSM — later beads) do.
+//! This crate is adapter-side **wire vocabulary and logic**, not the business
+//! domain: it is the on-the-wire representation HA expects, so it lives at the
+//! edge, and the framework-free `plant-core`/`led-core` domains never depend on
+//! it. What it *does* hold — the frame codec, the entity model, the connection
+//! FSM — is a **functional core**: pure, effect-free, host-testable with plain
+//! values. Concrete effects (a `TcpStream`, an accept loop) are injected by the
+//! shell: the byte-stream pumps in [`frame_io`] are generic over `Read`/`Write`,
+//! so the socket comes from the server-host bead or the conformance test, never
+//! from here. That FC/IS property is enforced by `effect-audit`, which is why
+//! the crate carries `role = "domain"` in `Cargo.toml` (its functional-core
+//! marker — distinct from the DDD sense of "domain" above).
 //!
 //! ## Scope
 //! The wire vocabulary (types + id registry), the blocking `std::io` frame
@@ -44,10 +51,12 @@ mod ids {
     include!("generated/ids.rs");
 }
 
+pub mod connection;
 pub mod entity;
 pub mod frame;
 pub mod frame_io;
 
+pub use connection::{broadcast_states, handle, Connection, Inbound, Outbound, Phase, Snapshot};
 pub use entity::{
     object_id_key, ApiEntity, CommandMessage, ListMessage, Registry, SensorConfig, SensorEntity,
     StateMessage,
