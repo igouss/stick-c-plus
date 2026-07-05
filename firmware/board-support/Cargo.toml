@@ -14,7 +14,12 @@ path = "src/lib.rs"
 [package.metadata.hex-arch]
 role = "infra"
 
-# qhw.2 scope is the skeleton only. The AXP192 power-on that enables the LCD/TFT
-# rails (qhw.20) and the pin map arrive in their own beads, pulling esp-idf-hal
-# and the axp192 PMIC crate then.
+# The AXP192 power-on that enables the LCD/TFT rails (qhw.20). The thin driver is
+# generic over embedded-hal 1.0's I2c, so it names no concrete bus and the internal
+# I2C can be shared (embedded-hal-bus, at the composition root) with the MPU6886 and
+# BM8563 RTC that sit on the same pins. esp-idf-hal supplies the real I2cDriver the
+# `internal_i2c` helper builds; esp-idf-sys names EspError, the bring-up error type.
 [dependencies]
+esp-idf-hal = "0.46"
+esp-idf-sys = "0.37"
+embedded-hal = "1.0"
