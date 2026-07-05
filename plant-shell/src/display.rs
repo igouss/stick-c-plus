@@ -2,10 +2,12 @@
 //!
 //! The imperative shell's second background loop, companion to the sampler: every
 //! [`RENDER_PERIOD`] it reads the freshest [`Measurement`] from the
-//! [`SharedMoisture`] cache and hands it to a [`MoistureDisplay`] adapter to draw.
-//! It owns the *render cadence*; the pixel-pushing stays in the adapter (the ST7789
-//! TFT on-device) and the freshness rule stays in the pure core, so this loop's
-//! body is a straight line.
+//! [`SharedMoisture`] cache and, *only when it changed*, hands it to a
+//! [`MoistureDisplay`] adapter to draw. It owns the *render cadence* and the
+//! change-suppression; the pixel-pushing stays in the adapter (the ST7789 TFT
+//! on-device) and the freshness rule stays in the pure core, so this loop's body is
+//! a straight line. Redrawing only on change keeps a steady panel from flickering —
+//! it is painted once, then left alone until the value or its availability moves.
 //!
 //! ## Fail-visible, like the sampler
 //!
@@ -128,7 +130,15 @@ where
     Ok(DisplayTask { handle, stop })
 }
 
-/// The thread body: render, sleep — until asked to stop.
+/// What is currently on the glass: `None` before anything is drawn, else the last
+/// reading handed to the display (itself `Some`/`None` for a value/unavailable).
+///
+/// The outer option distinguishes "nothing drawn yet" from "drew the unavailable
+/// state", so the very first tick always paints — even when there is no reading.
+type Shown = Option<Option<Measurement>>;
+
+/// The thread body: on each tick, redraw only if the reading changed — until asked
+/// to stop.
 fn render_loop<D>(
     mut display: D,
     shared: SharedMoisture,
@@ -139,27 +149,45 @@ fn render_loop<D>(
     D: MoistureDisplay,
     D::Error: std::fmt::Display,
 {
+    let mut shown: Shown = None;
     while !stop.load(Ordering::Relaxed) {
-        render_once(&mut display, &shared, clock.now(), config.max_age);
+        shown = render_once(&mut display, &shared, clock.now(), config.max_age, shown);
         thread::sleep(config.period);
     }
 }
 
-/// One render cycle: read the freshest measurement and draw it.
+/// One render cycle: read the freshest measurement and draw it *only if it changed*.
 ///
-/// The whole shell↔adapter seam, in isolation and testable without a thread: the
+/// The whole shell↔adapter seam, in isolation and testable without a thread. The
 /// freshness decision is the cache's ([`SharedMoisture::latest`]), so a stale or
 /// absent reading arrives as `None` and the adapter shows its unavailable
-/// placeholder. A render error is logged, not propagated — the panel is not allowed
-/// to take the monitor down. Complexity is zero branches on the value.
-fn render_once<D>(display: &mut D, shared: &SharedMoisture, now: Tick, max_age: Tick)
+/// placeholder. Change-suppression keeps the panel steady: a reading equal to what
+/// is already on the glass is *not* redrawn, so a steady probe is painted once and
+/// then left alone — no per-tick redraw, no flicker. A transition (value → value,
+/// value → unavailable, or the first paint) does redraw. A render error is logged,
+/// not propagated, and leaves `shown` unchanged so the next tick retries. Returns
+/// the value now on the glass.
+fn render_once<D>(
+    display: &mut D,
+    shared: &SharedMoisture,
+    now: Tick,
+    max_age: Tick,
+    shown: Shown,
+) -> Shown
 where
     D: MoistureDisplay,
     D::Error: std::fmt::Display,
 {
     let reading: Option<Measurement> = shared.latest(now, max_age);
-    if let Err(err) = display.show(reading) {
-        warn!("plant-display: render failed, skipping this cycle: {err}");
+    if shown == Some(reading) {
+        return shown; // unchanged — leave the glass untouched.
+    }
+    match display.show(reading) {
+        Ok(()) => Some(reading),
+        Err(err) => {
+            warn!("plant-display: render failed, skipping this cycle: {err}");
+            shown // keep the prior state; retry next tick.
+        }
     }
 }
 
@@ -248,14 +276,14 @@ mod tests {
     }
 
     #[test]
-    fn a_fresh_measurement_is_shown_with_its_raw_and_percent() {
-        // The happy path: a published reading, within the bound, reaches the glass
-        // whole — raw and percent.
+    fn the_first_paint_shows_the_fresh_measurement_whole() {
+        // The happy path: with nothing yet on the glass (`None`), a published
+        // reading within the bound is painted — raw and percent both reach it.
         let shared: SharedMoisture = SharedMoisture::new();
         shared.publish(measurement(30), 10);
         let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
 
-        render_once(&mut display, &shared, 20, 50);
+        let after: Shown = render_once(&mut display, &shared, 20, 50, None);
 
         let log: Vec<Option<Measurement>> = shown.lock().unwrap().clone();
         assert_eq!(log, vec![Some(measurement(30))]);
@@ -264,18 +292,20 @@ mod tests {
             300,
             "the raw count reaches the display"
         );
+        assert_eq!(after, Some(Some(measurement(30))), "it is now on the glass");
     }
 
     #[test]
-    fn an_empty_cache_shows_unavailable() {
-        // Nothing measured yet: the loop shows `None`, so the adapter draws its
-        // unavailable placeholder rather than a blank value.
+    fn the_first_paint_of_an_empty_cache_shows_unavailable() {
+        // Nothing measured yet: the first paint still happens, showing `None`, so
+        // the adapter draws its unavailable placeholder rather than a blank screen.
         let shared: SharedMoisture = SharedMoisture::new();
         let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
 
-        render_once(&mut display, &shared, 100, 50);
+        let after: Shown = render_once(&mut display, &shared, 100, 50, None);
 
         assert_eq!(shown.lock().unwrap().clone(), vec![None]);
+        assert_eq!(after, Some(None));
     }
 
     #[test]
@@ -287,29 +317,88 @@ mod tests {
         let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
 
         // age = 51 > max_age 50.
-        render_once(&mut display, &shared, 51, 50);
+        render_once(&mut display, &shared, 51, 50, None);
 
         assert_eq!(shown.lock().unwrap().clone(), vec![None]);
     }
 
     #[test]
-    fn a_render_error_is_logged_not_fatal() {
+    fn a_steady_reading_is_drawn_once_then_suppressed() {
+        // The flicker fix: three ticks over an unchanging reading paint exactly
+        // once. A steady probe is drawn and then left alone — no per-tick redraw.
+        let shared: SharedMoisture = SharedMoisture::new();
+        shared.publish(measurement(30), 10);
+        let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
+
+        let s0: Shown = render_once(&mut display, &shared, 20, 50, None);
+        let s1: Shown = render_once(&mut display, &shared, 21, 50, s0);
+        let s2: Shown = render_once(&mut display, &shared, 22, 50, s1);
+
+        assert_eq!(
+            shown.lock().unwrap().len(),
+            1,
+            "a steady reading is painted once, not per tick"
+        );
+        assert_eq!(s2, Some(Some(measurement(30))));
+    }
+
+    #[test]
+    fn a_changed_reading_is_redrawn() {
+        // A genuinely new value does repaint: the two distinct readings both reach
+        // the glass, in order, with no redundant frame between them.
+        let shared: SharedMoisture = SharedMoisture::new();
+        shared.publish(measurement(30), 10);
+        let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
+
+        let s0: Shown = render_once(&mut display, &shared, 11, 50, None);
+        shared.publish(measurement(60), 20);
+        render_once(&mut display, &shared, 21, 50, s0);
+
+        assert_eq!(
+            shown.lock().unwrap().clone(),
+            vec![Some(measurement(30)), Some(measurement(60))]
+        );
+    }
+
+    #[test]
+    fn a_transition_to_unavailable_is_redrawn() {
+        // Value → unavailable is a change, so it repaints: the glass follows a dying
+        // probe from its last value to the unavailable placeholder.
+        let shared: SharedMoisture = SharedMoisture::new();
+        shared.publish(measurement(42), 0);
+        let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
+
+        let s0: Shown = render_once(&mut display, &shared, 10, 50, None); // fresh -> Some(42)
+        render_once(&mut display, &shared, 60, 50, s0); // age 60 > 50 -> None
+
+        assert_eq!(
+            shown.lock().unwrap().clone(),
+            vec![Some(measurement(42)), None]
+        );
+    }
+
+    #[test]
+    fn a_render_error_keeps_the_prior_state_and_is_not_fatal() {
         // A panel that errors on every show must not panic the loop: render_once
-        // swallows the error (logs it) and returns.
+        // logs the error, returns the *prior* state (so the next tick retries the
+        // same reading), and does not advance `shown` past a failed paint.
         let shared: SharedMoisture = SharedMoisture::new();
         shared.publish(measurement(55), 0);
         let mut display: FakeDisplay = FakeDisplay::failing();
 
-        // No panic, no propagation — the cycle simply completes.
-        render_once(&mut display, &shared, 0, 50);
+        let after: Shown = render_once(&mut display, &shared, 0, 50, None);
+
+        assert_eq!(
+            after, None,
+            "a failed paint does not advance the shown state"
+        );
     }
 
     #[test]
-    fn the_spawned_thread_renders_and_stops_cleanly() {
-        // The one integration test: prove the real thread wiring — spawn, render
-        // through the loop, then stop and join without a panic. Blocking on two
-        // pings (rather than polling) makes it robust: a second render starting
-        // proves the first completed.
+    fn the_spawned_thread_redraws_on_change_and_stops_cleanly() {
+        // The one integration test: prove the real thread wiring — spawn, paint the
+        // first value, suppress the steady ticks, repaint on a change, then stop and
+        // join without a panic. Blocking on pings (not polling) keeps it robust.
         let clock: Monotonic = Monotonic::start();
         let shared: SharedMoisture = SharedMoisture::new();
         shared.publish(measurement(45), clock.now());
@@ -325,21 +414,22 @@ mod tests {
         let task: DisplayTask =
             spawn_display(display, shared.clone(), clock, config).expect("spawn display thread");
 
+        // First paint fires once; the steady value is then suppressed (no second
+        // ping arrives on its own).
         rx.recv_timeout(Duration::from_secs(2))
-            .expect("the display must render once");
+            .expect("the display must paint the first value");
+        // A genuine change re-arms a paint.
+        shared.publish(measurement(50), clock.now());
         rx.recv_timeout(Duration::from_secs(2))
-            .expect("a second render proves the first completed");
+            .expect("a changed value must re-render");
 
         task.stop();
         task.join().expect("the display thread must not panic");
 
-        // A generous max_age kept the value fresh, so every recorded frame is it.
-        let log: Vec<Option<Measurement>> = shown.lock().unwrap().clone();
-        assert!(!log.is_empty(), "the thread rendered at least once");
-        assert!(
-            log.iter()
-                .all(|frame: &Option<Measurement>| *frame == Some(measurement(45))),
-            "every frame shows the fresh value"
+        // Exactly the two distinct values, deduped across the many 1 ms ticks.
+        assert_eq!(
+            shown.lock().unwrap().clone(),
+            vec![Some(measurement(45)), Some(measurement(50))]
         );
     }
 }
