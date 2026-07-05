@@ -23,6 +23,12 @@ Feature: The sampler calibrates soil readings into a moisture percent
     When the probe is sampled at 10, 20 and 60
     Then the reported moisture is 30 percent
 
+  Scenario: The raw ADC mean is carried alongside the percent
+    Given a calibration of 0 dry and 100 wet
+    When the probe is sampled at 10, 20 and 60
+    Then the reported moisture is 30 percent
+    And the sampled raw mean is 30
+
   Scenario: An empty batch reports nothing
     Given a calibration of 1000 dry and 3000 wet
     When the probe is sampled at nothing

@@ -11,8 +11,10 @@
 //! side only supplies an ADC reading.
 //!
 //! ## Hexagon
-//! - **Entities**: [`Moisture`], [`Calibration`] — the moisture value objects,
-//!   with their invariants enforced at construction.
+//! - **Entities**: [`Moisture`], [`Calibration`], [`Measurement`] — the moisture
+//!   value objects, with their invariants enforced at construction. A
+//!   [`Measurement`] pairs a calibrated [`Moisture`] with the raw ADC count it came
+//!   from, so a reading's provenance survives to the display and future calibration.
 //! - **Entities / policy**: [`to_percent`] — the pure calibration curve mapping
 //!   a raw ADC reading to a percentage.
 //! - **Control**: [`step`] — the sampling use case (average → calibrate →
@@ -29,6 +31,6 @@ pub mod ports;
 pub mod sampler;
 
 pub use freshness::{fresh, Reading, Tick};
-pub use moisture::{to_percent, Calibration, Moisture};
+pub use moisture::{to_percent, Calibration, Measurement, Moisture};
 pub use ports::SoilSensor;
 pub use sampler::{step, Sample};

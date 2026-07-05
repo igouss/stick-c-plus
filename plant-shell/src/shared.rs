@@ -1,8 +1,9 @@
 //! SharedMoisture — the latest reading, shared writer-to-readers.
 //!
 //! One slot, one writer (the sampler thread), many readers (the display, the
-//! native-API server). The slot holds an [`Option<Reading>`]: the latest moisture
-//! *with the tick it was taken at*, so a reader can apply the pure staleness rule
+//! native-API server). The slot holds an [`Option<Reading>`]: the latest
+//! measurement (raw count and calibrated percent) *with the tick it was taken at*,
+//! so a reader can apply the pure staleness rule
 //! ([`fresh`]) and treat an aged-out reading as unavailable.
 //!
 //! Every access recovers from a poisoned lock. If the writer — or any reader —
@@ -15,7 +16,7 @@
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use plant_core::{fresh, Moisture, Reading, Tick};
+use plant_core::{fresh, Measurement, Reading, Tick};
 
 /// The latest soil-moisture reading, shared between the sampler and its
 /// consumers.
@@ -37,22 +38,25 @@ impl SharedMoisture {
         }
     }
 
-    /// Store `moisture` as the latest reading, stamped at `now` (the writer).
+    /// Store `measurement` as the latest reading, stamped at `now` (the writer).
     ///
     /// Overwrites any previous reading: the cache holds only the newest. Called on
     /// every successful sample — even when the value is unchanged — so the
     /// timestamp keeps advancing and a live-but-steady sensor stays fresh.
-    pub fn publish(&self, moisture: Moisture, now: Tick) {
-        *self.guard() = Some(Reading::new(moisture, now));
+    pub fn publish(&self, measurement: Measurement, now: Tick) {
+        *self.guard() = Some(Reading::new(measurement, now));
     }
 
-    /// The latest moisture if it is still fresh as of `now`, else `None` (a
+    /// The latest measurement if it is still fresh as of `now`, else `None` (a
     /// reader: the display, the server).
     ///
     /// Delegates the freshness decision to the pure [`fresh`] policy: `None` means
     /// either nothing was ever measured or the last reading is older than
-    /// `max_age` — to a consumer, both are the same "unavailable" state.
-    pub fn latest(&self, now: Tick, max_age: Tick) -> Option<Moisture> {
+    /// `max_age` — to a consumer, both are the same "unavailable" state. The
+    /// measurement carries both the raw ADC count and the calibrated percent, so a
+    /// reader (the display) can show either; the native-API server takes the
+    /// percent.
+    pub fn latest(&self, now: Tick, max_age: Tick) -> Option<Measurement> {
         fresh(*self.guard(), now, max_age)
     }
 
@@ -77,11 +81,17 @@ impl Default for SharedMoisture {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plant_core::Moisture;
 
-    /// A representative moisture value; the exact percent is irrelevant to the
-    /// cache — these tests turn on presence, staleness, and lock recovery.
-    fn moisture(percent: u8) -> Moisture {
-        Moisture::new(percent).expect("test percent is 0..=100")
+    /// A representative measurement at `percent`, with a raw count derived from it
+    /// (`raw = percent * 10`) so a test can confirm the raw rides through the cache.
+    /// The exact values are otherwise irrelevant — these tests turn on presence,
+    /// staleness, and lock recovery.
+    fn measurement(percent: u8) -> Measurement {
+        Measurement::new(
+            u16::from(percent) * 10,
+            Moisture::new(percent).expect("test percent is 0..=100"),
+        )
     }
 
     #[test]
@@ -92,11 +102,15 @@ mod tests {
     }
 
     #[test]
-    fn a_fresh_publish_is_served() {
-        // One publish, read within the bound: age = 20 - 10 = 10 <= 50.
+    fn a_fresh_publish_is_served_with_its_raw_and_percent() {
+        // One publish, read within the bound: age = 20 - 10 = 10 <= 50. Both the
+        // raw count and the percent survive the round-trip through the cache.
         let shared: SharedMoisture = SharedMoisture::new();
-        shared.publish(moisture(30), 10);
-        assert_eq!(shared.latest(20, 50), Some(moisture(30)));
+        shared.publish(measurement(30), 10);
+        assert_eq!(shared.latest(20, 50), Some(measurement(30)));
+        let served: Measurement = shared.latest(20, 50).expect("fresh");
+        assert_eq!(served.raw(), 300, "the raw count rides through the cache");
+        assert_eq!(served.percent(), 30);
     }
 
     #[test]
@@ -104,7 +118,7 @@ mod tests {
         // One publish, read past the bound: age = 51 > 50, so unavailable — the
         // dead-writer case, decided by the timestamp, not the value.
         let shared: SharedMoisture = SharedMoisture::new();
-        shared.publish(moisture(30), 0);
+        shared.publish(measurement(30), 0);
         assert_eq!(shared.latest(51, 50), None);
     }
 
@@ -112,9 +126,9 @@ mod tests {
     fn a_later_publish_supersedes_an_earlier_one() {
         // Many publishes: only the newest survives, with its own timestamp.
         let shared: SharedMoisture = SharedMoisture::new();
-        shared.publish(moisture(20), 0);
-        shared.publish(moisture(70), 10);
-        assert_eq!(shared.latest(11, 50), Some(moisture(70)));
+        shared.publish(measurement(20), 0);
+        shared.publish(measurement(70), 10);
+        assert_eq!(shared.latest(11, 50), Some(measurement(70)));
     }
 
     #[test]
@@ -123,8 +137,8 @@ mod tests {
         // through the other.
         let writer: SharedMoisture = SharedMoisture::new();
         let reader: SharedMoisture = writer.clone();
-        writer.publish(moisture(55), 5);
-        assert_eq!(reader.latest(6, 50), Some(moisture(55)));
+        writer.publish(measurement(55), 5);
+        assert_eq!(reader.latest(6, 50), Some(measurement(55)));
     }
 
     #[test]
@@ -133,7 +147,7 @@ mod tests {
         // slot* poisons the Mutex. A reader must step over that poison and still
         // read the value that was there, never inherit the panic.
         let shared: SharedMoisture = SharedMoisture::new();
-        shared.publish(moisture(42), 0);
+        shared.publish(measurement(42), 0);
 
         let poisoner: SharedMoisture = shared.clone();
         let panicked: std::thread::Result<()> = std::thread::spawn(move || {
@@ -144,9 +158,9 @@ mod tests {
         assert!(panicked.is_err(), "the helper thread must have panicked");
 
         // Lock is now poisoned; the reader recovers rather than propagating.
-        assert_eq!(shared.latest(0, 50), Some(moisture(42)));
+        assert_eq!(shared.latest(0, 50), Some(measurement(42)));
         // And the cache is still usable afterwards — a fresh write goes through.
-        shared.publish(moisture(80), 10);
-        assert_eq!(shared.latest(11, 50), Some(moisture(80)));
+        shared.publish(measurement(80), 10);
+        assert_eq!(shared.latest(11, 50), Some(measurement(80)));
     }
 }

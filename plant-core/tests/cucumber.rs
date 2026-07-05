@@ -4,12 +4,12 @@
 //! lives in the unit and property tests next to the code.
 
 use cucumber::{given, then, when, World};
-use plant_core::{step, Calibration, Moisture, Sample};
+use plant_core::{step, Calibration, Measurement, Moisture, Sample};
 
 #[derive(Debug, Default, World)]
 struct SamplerWorld {
     cal: Option<Calibration>,
-    prev: Option<Moisture>,
+    prev: Option<Measurement>,
     outcome: Option<Sample>,
 }
 
@@ -20,7 +20,10 @@ fn a_calibration(world: &mut SamplerWorld, dry_raw: u16, wet_raw: u16) {
 
 #[given(regex = r"^a last reported moisture of (\d+) percent$")]
 fn a_last_moisture(world: &mut SamplerWorld, percent: u8) {
-    world.prev = Some(Moisture::new(percent).expect("a percent must be 0..=100"));
+    // Report-on-change keys on the percent; the previous measurement's raw count
+    // is irrelevant to whether a new reading reports, so pair it with a placeholder.
+    let moisture: Moisture = Moisture::new(percent).expect("a percent must be 0..=100");
+    world.prev = Some(Measurement::new(0, moisture));
 }
 
 #[when(regex = r"^the probe is sampled at (.+)$")]
@@ -41,6 +44,20 @@ fn the_reported_moisture_is(world: &mut SamplerWorld, percent: u8) {
 fn no_moisture_is_reported(world: &mut SamplerWorld) {
     let report: Option<Moisture> = world.outcome.expect("a scenario must sample").report;
     assert_eq!(report, None);
+}
+
+#[then(regex = r"^the sampled raw mean is (\d+)$")]
+fn the_sampled_raw_mean_is(world: &mut SamplerWorld, raw: u16) {
+    let state: Measurement = world
+        .outcome
+        .expect("a scenario must sample")
+        .state
+        .expect("a non-empty batch produces a measurement");
+    assert_eq!(
+        state.raw(),
+        raw,
+        "the raw ADC mean rides alongside the percent"
+    );
 }
 
 /// Parse a Gherkin reading list — `"2000"`, `"10, 20 and 60"`, or `"nothing"`

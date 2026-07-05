@@ -50,6 +50,53 @@ impl Moisture {
     }
 }
 
+/// A calibrated soil measurement: the raw ADC mean and the [`Moisture`] it maps to.
+///
+/// [`to_percent`] turns a raw count into a percent and would otherwise discard the
+/// raw; pairing them here keeps every reading's *provenance*. The percent is what
+/// Home Assistant graphs, but the raw count is what calibration capture (the dry/wet
+/// endpoints) and floating-probe detection reason about — and what the on-board
+/// display shows beside the percent — so it rides alongside the derived value rather
+/// than being thrown away. `raw` carries no invariant of its own beyond the port's
+/// `0..=`[`RAW_MAX`] contract; the [`Moisture`] keeps its `0..=100` invariant.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub struct Measurement {
+    raw: u16,
+    moisture: Moisture,
+}
+
+impl Measurement {
+    /// Pair a raw ADC count with the `moisture` it was already calibrated to.
+    pub const fn new(raw: u16, moisture: Moisture) -> Self {
+        Self { raw, moisture }
+    }
+
+    /// Calibrate `raw` against `cal` into a measurement, retaining the raw count.
+    ///
+    /// The one constructor the sampler uses: [`to_percent`] gives the derived
+    /// percent and the raw is kept beside it. Total and direction-agnostic, like
+    /// [`to_percent`] — any `raw` yields a valid measurement, never a panic.
+    pub fn measure(raw: u16, cal: Calibration) -> Self {
+        Self::new(raw, to_percent(raw, cal))
+    }
+
+    /// The raw ADC count this measurement was calibrated from.
+    pub const fn raw(self) -> u16 {
+        self.raw
+    }
+
+    /// The calibrated moisture.
+    pub const fn moisture(self) -> Moisture {
+        self.moisture
+    }
+
+    /// The moisture percentage, `0..=100` — shorthand for
+    /// [`self.moisture().percent()`](Moisture::percent).
+    pub const fn percent(self) -> u8 {
+        self.moisture.percent()
+    }
+}
+
 /// The two raw ADC endpoints that pin a probe's moisture curve.
 ///
 /// `dry_raw` is the reading in dry soil (→ 0 %); `wet_raw` is the reading in
@@ -152,6 +199,17 @@ mod tests {
         assert_eq!(to_percent(RAW_MAX, cal), Moisture::DRY);
     }
 
+    #[test]
+    fn a_measurement_retains_its_raw_and_derives_its_percent() {
+        // measure() keeps the raw count and delegates the percent to to_percent:
+        // raw 30 through a linear 0->100 curve is 30 %, and raw 30 is preserved.
+        let cal: Calibration = Calibration::new(0, 100);
+        let m: Measurement = Measurement::measure(30, cal);
+        assert_eq!(m.raw(), 30);
+        assert_eq!(m.moisture(), Moisture::new(30).unwrap());
+        assert_eq!(m.percent(), 30);
+    }
+
     /// A calibration strategy that spans the full ADC range *and deliberately
     /// samples the degenerate and near-degenerate cases* — equal endpoints and
     /// endpoints one apart — which uniform sampling would almost never hit.
@@ -249,6 +307,19 @@ mod tests {
         fn degenerate_calibration_is_always_dry(raw in 0u16..=RAW_MAX, point in 0u16..=RAW_MAX) {
             let cal: Calibration = Calibration::new(point, point);
             prop_assert_eq!(to_percent(raw, cal), Moisture::DRY);
+        }
+
+        /// A measurement always keeps the exact raw it was read from, and its
+        /// moisture equals the standalone calibration — pairing raw with percent
+        /// perturbs neither.
+        #[test]
+        fn a_measurement_pairs_raw_with_the_calibrated_percent(
+            raw in 0u16..=RAW_MAX,
+            cal in any_calibration(),
+        ) {
+            let m: Measurement = Measurement::measure(raw, cal);
+            prop_assert_eq!(m.raw(), raw);
+            prop_assert_eq!(m.moisture(), to_percent(raw, cal));
         }
     }
 }

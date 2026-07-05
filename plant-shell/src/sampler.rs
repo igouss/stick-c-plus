@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use log::warn;
 use plant_core::sampler::step;
-use plant_core::{Calibration, Moisture, Sample, SoilSensor, Tick};
+use plant_core::{Calibration, Measurement, Sample, SoilSensor, Tick};
 
 use crate::clock::Monotonic;
 use crate::shared::SharedMoisture;
@@ -157,7 +157,7 @@ fn sample_loop<S>(
     S: SoilSensor,
     S::Error: std::fmt::Display,
 {
-    let mut prev: Option<Moisture> = None;
+    let mut prev: Option<Measurement> = None;
     while !stop.load(Ordering::Relaxed) {
         prev = sample_once(&mut sensor, &shared, config.calibration, clock.now(), prev);
         thread::sleep(config.period);
@@ -167,17 +167,18 @@ fn sample_loop<S>(
 /// One sampling cycle: read, fold through the pure [`step`], publish on success.
 ///
 /// The whole shell↔core seam, in isolation and testable without a thread: on a
-/// good read it calibrates through [`step`] and publishes the latest moisture at
-/// `now`; on a failed read it publishes *nothing* — the last reading ages out —
-/// and carries `prev` forward. Returns the moisture state to carry into the next
-/// cycle. Complexity is one branch: read ok, or not.
+/// good read it calibrates through [`step`] and publishes the latest
+/// [`Measurement`] (raw count and calibrated percent) at `now`; on a failed read
+/// it publishes *nothing* — the last reading ages out — and carries `prev`
+/// forward. Returns the measurement state to carry into the next cycle. Complexity
+/// is one branch: read ok, or not.
 fn sample_once<S>(
     sensor: &mut S,
     shared: &SharedMoisture,
     calibration: Calibration,
     now: Tick,
-    prev: Option<Moisture>,
-) -> Option<Moisture>
+    prev: Option<Measurement>,
+) -> Option<Measurement>
 where
     S: SoilSensor,
     S::Error: std::fmt::Display,
@@ -187,8 +188,8 @@ where
             // One reading per cycle: the adapter already denoised it (electrical
             // oversampling), and the pure step calibrates + reports-on-change.
             let sample: Sample = step(prev, &[raw], calibration);
-            if let Some(moisture) = sample.state {
-                shared.publish(moisture, now);
+            if let Some(measurement) = sample.state {
+                shared.publish(measurement, now);
             }
             sample.state
         }
@@ -209,8 +210,10 @@ mod tests {
     /// straight through: raw 30 → 30 %. Same convention as `plant-core`'s tests.
     const LINEAR: Calibration = Calibration::new(0, 100);
 
-    fn moisture(percent: u8) -> Moisture {
-        Moisture::new(percent).expect("test percent is 0..=100")
+    /// The measurement the sensor yields at `raw` counts, through [`LINEAR`] (raw
+    /// `N` → `N %`): `measured(30)` is raw 30 calibrated to 30 %.
+    fn measured(raw: u16) -> Measurement {
+        Measurement::measure(raw, LINEAR)
     }
 
     /// A `SoilSensor` fake: it yields a queue of readings, then a fixed `after`
@@ -292,10 +295,10 @@ mod tests {
         let shared: SharedMoisture = SharedMoisture::new();
         let mut sensor: FakeSensor = FakeSensor::constant(30);
 
-        let carried: Option<Moisture> = sample_once(&mut sensor, &shared, LINEAR, 5, None);
+        let carried: Option<Measurement> = sample_once(&mut sensor, &shared, LINEAR, 5, None);
 
-        assert_eq!(carried, Some(moisture(30)), "state carries the new reading");
-        assert_eq!(shared.latest(5, 1000), Some(moisture(30)));
+        assert_eq!(carried, Some(measured(30)), "state carries the new reading");
+        assert_eq!(shared.latest(5, 1000), Some(measured(30)));
     }
 
     #[test]
@@ -305,12 +308,12 @@ mod tests {
         let shared: SharedMoisture = SharedMoisture::new();
         let mut sensor: FakeSensor = FakeSensor::dead();
 
-        let carried: Option<Moisture> =
-            sample_once(&mut sensor, &shared, LINEAR, 5, Some(moisture(40)));
+        let carried: Option<Measurement> =
+            sample_once(&mut sensor, &shared, LINEAR, 5, Some(measured(40)));
 
         assert_eq!(
             carried,
-            Some(moisture(40)),
+            Some(measured(40)),
             "prior state survives a bad read"
         );
         assert_eq!(shared.latest(5, 1000), None, "a bad read publishes nothing");
@@ -325,13 +328,13 @@ mod tests {
         let mut sensor: FakeSensor = FakeSensor::constant(50);
         let max_age: Tick = 50;
 
-        let prev: Option<Moisture> = sample_once(&mut sensor, &shared, LINEAR, 0, None);
-        assert_eq!(shared.latest(0, max_age), Some(moisture(50)));
+        let prev: Option<Measurement> = sample_once(&mut sensor, &shared, LINEAR, 0, None);
+        assert_eq!(shared.latest(0, max_age), Some(measured(50)));
         // Without a new sample, the reading ages out.
         assert_eq!(shared.latest(100, max_age), None);
         // A live sensor resamples, refreshing the stamp — fresh again at t=100.
-        let _prev: Option<Moisture> = sample_once(&mut sensor, &shared, LINEAR, 100, prev);
-        assert_eq!(shared.latest(100, max_age), Some(moisture(50)));
+        let _prev: Option<Measurement> = sample_once(&mut sensor, &shared, LINEAR, 100, prev);
+        assert_eq!(shared.latest(100, max_age), Some(measured(50)));
     }
 
     #[test]
@@ -346,15 +349,15 @@ mod tests {
         let max_age: Tick = config.max_age(); // 6000 ms
 
         // t=0: the one healthy reading is published.
-        let mut prev: Option<Moisture> = sample_once(&mut sensor, &shared, cal, 0, None);
-        assert_eq!(shared.latest(0, max_age), Some(moisture(60)));
+        let mut prev: Option<Measurement> = sample_once(&mut sensor, &shared, cal, 0, None);
+        assert_eq!(shared.latest(0, max_age), Some(measured(60)));
 
         // The sensor is dead now; the next cycles publish nothing.
         prev = sample_once(&mut sensor, &shared, cal, 2000, prev);
         prev = sample_once(&mut sensor, &shared, cal, 4000, prev);
         // At exactly the bound (age 6000 == max_age) it is still just available.
-        assert_eq!(shared.latest(6000, max_age), Some(moisture(60)));
-        let _prev: Option<Moisture> = sample_once(&mut sensor, &shared, cal, 6000, prev);
+        assert_eq!(shared.latest(6000, max_age), Some(measured(60)));
+        let _prev: Option<Measurement> = sample_once(&mut sensor, &shared, cal, 6000, prev);
         // One tick past the bound: unavailable — flipped within 3 periods.
         assert_eq!(shared.latest(6001, max_age), None);
     }
@@ -385,7 +388,7 @@ mod tests {
             .expect("a second reading proves the first publish landed");
 
         // A generous max_age so scheduler jitter can't masquerade as staleness.
-        assert_eq!(shared.latest(clock.now(), 60_000), Some(moisture(45)));
+        assert_eq!(shared.latest(clock.now(), 60_000), Some(measured(45)));
 
         sampler.stop();
         sampler.join().expect("the sampler thread must not panic");
