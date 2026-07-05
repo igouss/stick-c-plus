@@ -23,7 +23,8 @@
 //!   [`Reading`] unavailable once it ages out, so a dead sensor never keeps
 //!   reporting its last healthy value.
 //! - **Ports**: [`SoilSensor`] — the driven interface the firmware's ADC
-//!   adapter implements.
+//!   adapter implements; [`MoistureDisplay`] — the driven interface the ST7789
+//!   TFT adapter implements to render the value.
 
 pub mod freshness;
 pub mod moisture;
@@ -32,5 +33,5 @@ pub mod sampler;
 
 pub use freshness::{fresh, Reading, Tick};
 pub use moisture::{to_percent, Calibration, Measurement, Moisture};
-pub use ports::SoilSensor;
+pub use ports::{MoistureDisplay, SoilSensor};
 pub use sampler::{step, Sample};

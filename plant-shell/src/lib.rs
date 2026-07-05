@@ -17,6 +17,9 @@
 //! - [`spawn_sampler`] — the sized background thread: read the ADC adapter → fold
 //!   through the pure [`step`](plant_core::sampler::step) → publish the latest
 //!   moisture. Owns the timing and the cache; the domain stays pure.
+//! - [`spawn_display`] — the companion background thread: read the cache → render
+//!   the freshest measurement through a [`MoistureDisplay`](plant_core::MoistureDisplay)
+//!   adapter (the ST7789 TFT), showing *unavailable* the moment a reading ages out.
 //!
 //! ## Host-testable shell
 //!
@@ -29,10 +32,12 @@
 //! [`EarthUnit`](plant_core::SoilSensor) adapter in.
 
 mod clock;
+mod display;
 mod sampler;
 mod shared;
 
 pub use clock::Monotonic;
+pub use display::{spawn_display, DisplayConfig, DisplayTask, DISPLAY_STACK_SIZE, RENDER_PERIOD};
 pub use sampler::{
     spawn_sampler, Sampler, SamplerConfig, SAMPLER_STACK_SIZE, SAMPLE_PERIOD, STALENESS_PERIODS,
 };
