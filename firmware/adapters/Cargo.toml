@@ -15,9 +15,21 @@ path = "src/lib.rs"
 [package.metadata.hex-arch]
 role = "driven-adapter"
 
-# The Clock re-home (qhw.15), the WS2812 RMT encoder (qqh.1) and the ST7789
-# display arrive in their own beads, pulling their peripherals then.
+# The Clock re-home (qhw.15) and the WS2812 RMT encoder (qqh.1) arrive in their own
+# beads, pulling their peripherals then.
 [dependencies]
+# The ST7789 display adapter (qhw.6): mipidsi drives the panel over SPI and
+# embedded-graphics renders the text. mipidsi 0.10 bundles its own SPI interface
+# (mipidsi::interface), so no separate display-interface-spi dep is needed.
+# embedded-hal names the SPI mode (MODE_0) and the traits mipidsi builds on.
+mipidsi = "0.10"
+embedded-graphics = "0.8"
+embedded-hal = "1.0"
+# The render path stays off the heap on a 520 KB no-PSRAM chip: heapless builds
+# each text line in a stack buffer (no `format!` allocation), and static-cell gives
+# mipidsi's pixel-batch buffer a truly `static` home instead of a leaked `Box`.
+heapless = "0.8"
+static_cell = "2"
 # Host crates, referenced by path across the host/firmware workspace seam; both
 # are no_std + zero-dep and cross-compile to xtensa cleanly. plant-core owns the
 # SoilSensor port the `adc` adapter implements; firmware-core owns the pure

@@ -25,11 +25,15 @@
 //! moisture *percent* is not yet trustworthy: it rides a provisional calibration
 //! ([`PROVISIONAL_CAL`]) until qhw.29 captures the probe's real dry/wet endpoints.
 
+use std::cell::RefCell;
 use std::sync::Arc;
 use std::thread;
 
 use adapters::adc::{EarthUnit, SAMPLES};
 use adapters::probe_power::AlwaysOn;
+use adapters::st7789::St7789Display;
+use board_support::{internal_i2c, Axp192};
+use embedded_hal_bus::i2c::RefCellDevice;
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
@@ -44,7 +48,9 @@ use log::{error, info, warn};
 use plant_core::moisture::Calibration;
 use plant_core::ports::MAX_READING;
 use plant_core::Tick;
-use plant_shell::{spawn_sampler, Monotonic, SamplerConfig, SharedMoisture};
+use plant_shell::{
+    spawn_display, spawn_sampler, DisplayConfig, Monotonic, SamplerConfig, SharedMoisture,
+};
 
 /// Provisional soil calibration — placeholder dry/wet endpoints, *not* measured.
 ///
@@ -141,6 +147,30 @@ fn main() {
         mdns::ESPHOME_API_PORT
     );
 
+    // Power the LCD/TFT rails before building the display — an unpowered panel takes
+    // a correct ST7789 init and still shows nothing (qhw.20). The AXP192 latches its
+    // LDO enables, so this bring-up is scoped: once the rails are up the PMIC and its
+    // bus can be dropped (the rails stay on). The internal I2C is wrapped in a
+    // RefCellDevice so the MPU6886/RTC on the same bus can join later without
+    // rewiring; qhw.31 (probe-power gating) reopens this to hold the AXP192 for
+    // runtime LDO toggling. Fatal on failure: a dark screen is a broken monitor.
+    {
+        let i2c = internal_i2c(
+            peripherals.i2c0,
+            peripherals.pins.gpio21,
+            peripherals.pins.gpio22,
+        )
+        .expect("internal I2C bring-up");
+        let i2c_bus: RefCell<_> = RefCell::new(i2c);
+        let mut axp: Axp192<_> = Axp192::new(RefCellDevice::new(&i2c_bus));
+        axp.power_on().expect("AXP192 LCD/TFT rail power-on");
+        match axp.rails_enabled() {
+            Ok(true) => info!("axp192: LCD/TFT rails enabled (reg 0x12 read back)"),
+            Ok(false) => warn!("axp192: rails did not read back as enabled"),
+            Err(err) => warn!("axp192: rail read-back failed: {err}"),
+        }
+    }
+
     // AlwaysOn: the probe stays powered for now. qhw.31 swaps this for a real
     // ProbePower (AXP192 rail / GPIO switch) — the only wiring change — and the
     // adapter energizes the electrodes only across each read.
@@ -170,6 +200,29 @@ fn main() {
     let _sampler =
         spawn_sampler(earth, shared.clone(), clock, config).expect("spawn plant-sampler thread");
     info!("sampler thread up: {period:?} period, unavailable after {max_age} ms stale");
+
+    // The onboard TFT mirrors what HA sees: the ST7789 adapter renders the raw ADC
+    // count and the moisture percent pulled from the SAME shared cache, on the SAME
+    // clock and staleness bound, so the glass shows *unavailable* the instant a
+    // reading ages out — never a frozen value. The render loop + freshness are
+    // host-tested in plant-shell (qhw.6); this root only binds the real panel. The
+    // rails were powered above, so the panel is live. Bring-up failure is fatal (a
+    // mis-wired panel is worth surfacing loudly); a later render error only skips a
+    // frame — the loop logs it and repaints next tick.
+    let display: St7789Display = St7789Display::new(
+        peripherals.spi2,
+        peripherals.pins.gpio13, // SCLK
+        peripherals.pins.gpio15, // MOSI
+        peripherals.pins.gpio5,  // CS
+        peripherals.pins.gpio23, // DC
+        peripherals.pins.gpio18, // RST
+    )
+    .expect("ST7789 display bring-up");
+    let display_config: DisplayConfig = DisplayConfig::new(max_age);
+    let display_period: core::time::Duration = display_config.period;
+    let _display =
+        spawn_display(display, shared.clone(), clock, display_config).expect("spawn plant-display");
+    info!("display thread up: ST7789 rendering raw + percent every {display_period:?}");
 
     // The native-API device HA adopts: one Soil Moisture sensor whose live value is
     // PULLED from the shared cache on every server poll. The freshness check lives
@@ -232,7 +285,7 @@ fn main() {
             error!("wifi reconnect failed: {err}");
         }
         match shared.latest(clock.now(), max_age) {
-            Some(moisture) => info!("serving moisture = {}%", moisture.percent()),
+            Some(m) => info!("serving moisture = {}% (raw {})", m.percent(), m.raw()),
             None => warn!("moisture unavailable — no fresh sample within {max_age} ms"),
         }
     }

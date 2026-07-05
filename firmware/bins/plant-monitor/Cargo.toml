@@ -45,8 +45,15 @@ esphome-api = { path = "../../../esphome-api" }
 # the aioesphomeapi oracle, so this bin only binds it and hands it the device.
 esphome-server = { path = "../../../esphome-server" }
 # The driven adapters (firmware workspace). The composition root reaches for
-# `adapters::adc::EarthUnit` to bind the SoilSensor port to real ADC1 hardware.
+# `adapters::adc::EarthUnit` to bind the SoilSensor port to real ADC1 hardware, and
+# `adapters::st7789::St7789Display` to bind the MoistureDisplay port to the TFT.
 adapters = { path = "../../adapters" }
+# The board-support package: brings up the internal I2C bus and powers the AXP192
+# LCD/TFT rails (qhw.20) — load-bearing for the display, which is dark otherwise.
+board-support = { path = "../../board-support" }
+# Shares the one internal I2C bus across bus devices; here it hands the AXP192 a
+# RefCellDevice so the MPU6886/RTC can join the same bus later without rewiring.
+embedded-hal-bus = "0.3"
 # Firmware infrastructure (same workspace): WiFi STA bring-up (qhw.7). The
 # composition root takes the modem + system event loop + NVS and hands them to
 # `firmware_infra::wifi::WifiStation` so the board joins the network before the

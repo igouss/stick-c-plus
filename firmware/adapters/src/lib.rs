@@ -20,3 +20,4 @@
 
 pub mod adc;
 pub mod probe_power;
+pub mod st7789;
