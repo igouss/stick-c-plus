@@ -6,7 +6,7 @@ scope: board:m5stickc-plus
 derived-from: []
 supersedes: []
 reviewed: 2026-07-03
-check: manual   # inspect src/AXP192.cpp::begin in the factory-firmware submodule
+check: grep -q ScreenBreath kb/sources/m5stack-m5stickc-plus/src/AXP192.cpp && grep -q 0x28 kb/sources/m5stack-m5stickc-plus/src/AXP192.cpp   # LDO2-backlight regs still present in the pinned factory source
 ---
 
 **Claim:** On the M5StickC Plus the display and its backlight are dark until the

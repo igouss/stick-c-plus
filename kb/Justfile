@@ -1,0 +1,101 @@
+# kb/Justfile — verify the knowledge base against itself.
+#
+# The KB's contract: belief is falsifiable (every findings/*.md carries an
+# executable `check:`) and the cross-links form a navigable lineage. This turns
+# both into a gate. Run `just kb` from the repo root, or `just -f kb/Justfile
+# verify` from anywhere. Pure-read, needs no board, CI-safe.
+#
+# Prereq: `git submodule update --init` — a few finding checks grep their evidence
+# out of the pinned source submodules. A missing submodule reads as a check FAIL,
+# which is the honest signal: the evidence isn't reproducible right now.
+
+set shell := ["bash", "-uc"]
+
+# repo root = parent of kb/. Finding checks reference repo-relative paths
+# (domain/…, kb/…, firmware/…), so every check runs from there.
+root := justfile_directory() / ".."
+
+# Full gate: link integrity + finding checks + script sanity. This is `just kb`.
+default: verify
+
+# Run all three gates, aggregating (one failure never hides the others).
+verify:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    echo "▶ links";   just -f "{{justfile()}}" links   || rc=1
+    echo "▶ checks";  just -f "{{justfile()}}" checks  || rc=1
+    echo "▶ scripts"; just -f "{{justfile()}}" scripts || rc=1
+    [ "$rc" -eq 0 ] && echo "✅ kb verify: clean" || echo "❌ kb verify: failures above"
+    exit "$rc"
+
+# ---- link integrity -------------------------------------------------------
+
+# Every relative *.md cross-link in our KB resolves (the dangling link, caught the
+# moment it's written), and every finding/guide/source/experiment is reachable
+# from INDEX.md. Never descends into the source submodules.
+links:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    shopt -s nullglob
+    cd "{{root}}"
+    fail=0
+    docs=(kb/*.md kb/findings/*.md kb/guides/*.md kb/sources/*.md kb/templates/*.md kb/experiments/*/README.md)
+    for f in "${docs[@]}"; do
+      dir=$(dirname "$f")
+      while IFS= read -r link; do
+        case "$link" in http*|\#*|mailto:*) continue ;; esac
+        rel=${link%%#*}                                 # drop #anchor
+        case "$rel" in *.md) ;; *) continue ;; esac     # doc links only
+        [ -f "$(realpath -m "$dir/$rel")" ] || { printf '  ✗ DEADLINK  %s → %s\n' "$f" "$link"; fail=$((fail+1)); }
+      done < <(grep -oE '\]\([^)]+\)' "$f" | sed -E 's/.*\]\(([^)]+)\)/\1/')
+    done
+    for f in kb/findings/*.md kb/guides/*.md kb/sources/*.md kb/experiments/*/README.md; do
+      needle=$(basename "$f"); [ "$needle" = README.md ] && needle=$(basename "$(dirname "$f")")
+      grep -q "$needle" kb/INDEX.md || { printf '  ✗ UNINDEXED %s\n' "$f"; fail=$((fail+1)); }
+    done
+    [ "$fail" -eq 0 ] && echo "  ✓ links: every cross-link resolves; INDEX covers every file"
+    exit $(( fail > 0 ? 1 : 0 ))
+
+# ---- finding checks -------------------------------------------------------
+
+# Run each findings/*.md `check:` — the executable falsifier. `manual`/`expensive`
+# sentinels are skipped (and counted); a finding with no check: fails.
+checks:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    shopt -s nullglob
+    cd "{{root}}"
+    git submodule status 2>/dev/null | grep -q '^-' && \
+      echo "  ⚠ some submodules uninitialized — evidence greps may FAIL (git submodule update --init)"
+    fail=0 ran=0 skip=0
+    for f in kb/findings/*.md; do
+      id=$(basename "$f" .md)
+      val=$(sed -n 's/^check:[[:space:]]*//p' "$f" | head -1)
+      first=$(awk '{print $1; exit}' <<<"$val")
+      case "$first" in
+        manual|expensive) printf '  – SKIP %-44s (%s)\n' "$id" "$first"; skip=$((skip+1)) ;;
+        "")               printf '  ✗ MISS %-44s (no check:)\n' "$id"; fail=$((fail+1)) ;;
+        *)                ran=$((ran+1))
+          if sh -c "$val" >/dev/null 2>&1; then printf '  ✓ PASS %-44s\n' "$id"
+          else printf '  ✗ FAIL %-44s  check: %s\n' "$id" "$val"; fail=$((fail+1)); fi ;;
+      esac
+    done
+    printf '  ── %d ran · %d skipped (manual/expensive) · %d failed\n' "$ran" "$skip" "$fail"
+    exit $(( fail > 0 ? 1 : 0 ))
+
+# ---- script sanity --------------------------------------------------------
+
+# bash -n every fetch.sh / experiment script — a syntax break in a regeneration
+# recipe is silent reproducibility rot.
+scripts:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    shopt -s nullglob
+    cd "{{root}}"
+    fail=0
+    for s in kb/sources/*/fetch.sh kb/experiments/*/*.sh; do
+      if bash -n "$s" 2>/dev/null; then printf '  ✓ %s\n' "$s"; else printf '  ✗ SYNTAX %s\n' "$s"; fail=$((fail+1)); fi
+    done
+    [ "$fail" -eq 0 ] && echo "  ✓ scripts: all parse"
+    exit $(( fail > 0 ? 1 : 0 ))

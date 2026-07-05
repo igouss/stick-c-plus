@@ -60,4 +60,32 @@ kb/
   reads this tree; the firmware boundary (`../firmware`) only *mirrors* what the
   hardware sources teach. Dependencies still point inward.
 
+## Frontmatter link vocabulary
+
+Back-links are the query surface — keep to these keys per layer so the lineage
+stays greppable and no file invents a synonym:
+
+| Layer | Keys | Points at |
+|-------|------|-----------|
+| `source` | `seeds:` | experiment / finding ids this source seeded |
+| `experiment` | `source:`, `findings:` | source ids probed · finding ids fed |
+| `finding` | `derived-from:`, `supersedes:` | experiment ids that earn it · finding ids it replaces |
+| `guide` | `distils:` | source / experiment ids it synthesizes |
+
+## Verify
+
+The KB checks itself. From the repo root:
+
+```sh
+just kb            # or, from anywhere: just -f kb/Justfile verify
+```
+
+Three gates, all pure-read and CI-safe: **links** (every relative `.md` cross-link
+resolves; every file is reachable from `INDEX.md`), **checks** (each finding's
+executable `check:`; `manual` / `expensive` are skipped and counted), and
+**scripts** (`bash -n` on every `fetch.sh` + experiment script). Run one alone with
+`just kb links` / `checks` / `scripts`. It assumes submodules are present
+(`git submodule update --init`) — a few checks grep evidence out of the pinned
+sources, and a missing one honestly reads as a FAIL.
+
 Start at [INDEX.md](INDEX.md).

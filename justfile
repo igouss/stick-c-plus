@@ -181,6 +181,14 @@ clean:
     cargo clean
     cd firmware && cargo clean
 
+# ---- Knowledge base ----
+
+# Verify the KB against itself: dangling cross-links, finding checks, script
+# sanity. `just kb` runs the full gate; target one with `just kb links` /
+# `checks` / `scripts`. Pure-read, no board. See kb/Justfile and kb/README.md.
+kb *args:
+    @just --justfile {{justfile_directory()}}/kb/Justfile {{args}}
+
 # ---- Beads (issue tracking) ----
 #
 # Two tools over one dependency graph in .beads/. `br` (github.com/gastownhall/beads)
