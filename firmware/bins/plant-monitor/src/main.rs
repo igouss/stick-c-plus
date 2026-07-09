@@ -18,7 +18,7 @@
 //! host-tested apart (the sampler + freshness in `plant-shell`, the `SensorDevice`
 //! against the real HA client in the `esphome-server` oracle); this composition
 //! root is the one place they are wired together — the source closure that reads
-//! [`SharedMoisture::latest`] and hands the value to the api core.
+//! [`SharedMoisture::observe`] and hands the value to the api core.
 //!
 //! The plumbing (a live cache tracking the probe as it wets and dries, going
 //! *unavailable* when the sensor stops reporting) is what qhw.21 proves. The
@@ -47,7 +47,7 @@ use firmware_infra::wifi::{self, WifiStation};
 use log::{error, info, warn};
 use plant_core::moisture::Calibration;
 use plant_core::ports::MAX_READING;
-use plant_core::Tick;
+use plant_core::{Observation, Tick};
 use plant_shell::{
     spawn_display, spawn_sampler, DisplayConfig, Monotonic, SamplerConfig, SharedMoisture,
 };
@@ -226,7 +226,7 @@ fn main() {
 
     // The native-API device HA adopts: one Soil Moisture sensor whose live value is
     // PULLED from the shared cache on every server poll. The freshness check lives
-    // in the pure `SharedMoisture::latest` (host-tested in plant-shell): a stale or
+    // in the pure `SharedMoisture::observe` (host-tested in plant-shell): a stale or
     // absent reading returns `None`, which `SensorDevice` serves as `missing_state`
     // — HA shows *unavailable*, never a frozen last value. This closure is the one
     // point the plant and api bounded contexts meet; everything either side of it
@@ -251,8 +251,9 @@ fn main() {
         let shared: SharedMoisture = shared.clone();
         move || {
             shared
-                .latest(clock.now(), max_age)
-                .map(|m| f32::from(m.percent()))
+                .observe(clock.now(), max_age)
+                .measurement()
+                .map(|m: plant_core::Measurement| f32::from(m.percent()))
         }
     };
     let device: Arc<SensorDevice<_>> = Arc::new(SensorDevice::new(device_info, sensor, source));
@@ -279,14 +280,26 @@ fn main() {
     // Supervisory loop: keep the WiFi link up (a no-op while connected, a re-join
     // once the router returns — qhw.7) and log a heartbeat so the serial console
     // shows liveness. The server thread is the real consumer of the shared cache.
+    //
+    // The heartbeat prints the whole Observation, not just "available / not". A
+    // faulted probe and a dead sampler thread are different lines, because they are
+    // different problems: one wants a new probe, the other wants a stack trace.
     loop {
         FreeRtos::delay_ms(1000);
         if let Err(err) = wifi.ensure_connected() {
             error!("wifi reconnect failed: {err}");
         }
-        match shared.latest(clock.now(), max_age) {
-            Some(m) => info!("serving moisture = {}% (raw {})", m.percent(), m.raw()),
-            None => warn!("moisture unavailable — no fresh sample within {max_age} ms"),
+        match shared.observe(clock.now(), max_age) {
+            Observation::Fresh(m) => {
+                info!("serving moisture = {}% (raw {})", m.percent(), m.raw())
+            }
+            Observation::Faulted(fault) => {
+                warn!("sampler alive, probe faulted — serving unavailable: {fault}")
+            }
+            Observation::Stale => error!(
+                "no fresh sample within {max_age} ms — the sampler thread may be dead or hung"
+            ),
+            Observation::NeverSampled => info!("waiting for the first sample"),
         }
     }
 }

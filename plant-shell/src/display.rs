@@ -1,7 +1,7 @@
 //! The display thread — read the shared cache, render the latest measurement.
 //!
 //! The imperative shell's second background loop, companion to the sampler: every
-//! [`RENDER_PERIOD`] it reads the freshest [`Measurement`] from the
+//! [`RENDER_PERIOD`] it reads the freshest [`Observation`] from the
 //! [`SharedMoisture`] cache and, *only when it changed*, hands it to a
 //! [`MoistureDisplay`] adapter to draw. It owns the *render cadence* and the
 //! change-suppression; the pixel-pushing stays in the adapter (the ST7789 TFT
@@ -14,8 +14,10 @@
 //! - A **render error** is logged and skipped, never fatal: a flaky panel must not
 //!   take a plant monitor down, and the next cycle repaints regardless.
 //! - The display reads the *same* cache and the *same* staleness bound as the
-//!   native-API server, so once the sensor dies the glass shows *unavailable* within
-//!   a render cycle of the reading ageing out — never a frozen last value.
+//!   native-API server, so once the sensor dies the glass says so within a render
+//!   cycle — never a frozen last value. Because it is handed an [`Observation`] and
+//!   not an `Option`, it can name the *reason*: a faulted probe reads differently
+//!   from a sampler that stopped.
 //!
 //! Nothing here is ESP-specific, so the whole loop is exercised on the host against
 //! a fake display; the composition root only wires the real ST7789 adapter in.
@@ -27,7 +29,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use log::warn;
-use plant_core::{Measurement, MoistureDisplay, Tick};
+use plant_core::{MoistureDisplay, Observation, Tick};
 
 use crate::clock::Monotonic;
 use crate::shared::SharedMoisture;
@@ -131,11 +133,11 @@ where
 }
 
 /// What is currently on the glass: `None` before anything is drawn, else the last
-/// reading handed to the display (itself `Some`/`None` for a value/unavailable).
+/// [`Observation`] handed to the display.
 ///
-/// The outer option distinguishes "nothing drawn yet" from "drew the unavailable
-/// state", so the very first tick always paints — even when there is no reading.
-type Shown = Option<Option<Measurement>>;
+/// The option distinguishes "nothing drawn yet" from "drew the never-sampled
+/// state", so the very first tick always paints — even before a reading exists.
+type Shown = Option<Observation>;
 
 /// The thread body: on each tick, redraw only if the reading changed — until asked
 /// to stop.
@@ -156,17 +158,17 @@ fn render_loop<D>(
     }
 }
 
-/// One render cycle: read the freshest measurement and draw it *only if it changed*.
+/// One render cycle: read the freshest observation and draw it *only if it changed*.
 ///
 /// The whole shell↔adapter seam, in isolation and testable without a thread. The
-/// freshness decision is the cache's ([`SharedMoisture::latest`]), so a stale or
-/// absent reading arrives as `None` and the adapter shows its unavailable
-/// placeholder. Change-suppression keeps the panel steady: a reading equal to what
-/// is already on the glass is *not* redrawn, so a steady probe is painted once and
-/// then left alone — no per-tick redraw, no flicker. A transition (value → value,
-/// value → unavailable, or the first paint) does redraw. A render error is logged,
-/// not propagated, and leaves `shown` unchanged so the next tick retries. Returns
-/// the value now on the glass.
+/// freshness decision is the cache's ([`SharedMoisture::observe`]), so the adapter
+/// receives a verdict — a measurement, a named probe fault, staleness, or
+/// never-sampled — and renders whichever it is. Change-suppression keeps the panel
+/// steady: an observation equal to what is already on the glass is *not* redrawn, so
+/// a steady probe is painted once and then left alone — no per-tick redraw, no
+/// flicker. Any transition does redraw, including one fault giving way to another. A
+/// render error is logged, not propagated, and leaves `shown` unchanged so the next
+/// tick retries. Returns the observation now on the glass.
 fn render_once<D>(
     display: &mut D,
     shared: &SharedMoisture,
@@ -178,12 +180,12 @@ where
     D: MoistureDisplay,
     D::Error: std::fmt::Display,
 {
-    let reading: Option<Measurement> = shared.latest(now, max_age);
-    if shown == Some(reading) {
+    let observation: Observation = shared.observe(now, max_age);
+    if shown == Some(observation) {
         return shown; // unchanged — leave the glass untouched.
     }
-    match display.show(reading) {
-        Ok(()) => Some(reading),
+    match display.show(observation) {
+        Ok(()) => Some(observation),
         Err(err) => {
             warn!("plant-display: render failed, skipping this cycle: {err}");
             shown // keep the prior state; retry next tick.
@@ -197,7 +199,7 @@ mod tests {
     use std::sync::mpsc::{channel, Sender};
     use std::sync::Mutex;
 
-    use plant_core::Moisture;
+    use plant_core::{Measurement, Moisture, ProbeFault};
 
     /// A measurement at `percent`, with a raw count derived from it so a test can
     /// confirm the exact value reached the glass.
@@ -225,15 +227,15 @@ mod tests {
     /// makes every `show` error (still recording first); `ping` signals each render
     /// so a test can await a real repaint rather than poll.
     struct FakeDisplay {
-        shown: Arc<Mutex<Vec<Option<Measurement>>>>,
+        shown: Arc<Mutex<Vec<Observation>>>,
         fail: bool,
         ping: Option<Sender<()>>,
     }
 
     impl FakeDisplay {
         /// A healthy display and a handle onto everything it is shown.
-        fn new() -> (Self, Arc<Mutex<Vec<Option<Measurement>>>>) {
-            let shown: Arc<Mutex<Vec<Option<Measurement>>>> = Arc::new(Mutex::new(Vec::new()));
+        fn new() -> (Self, Arc<Mutex<Vec<Observation>>>) {
+            let shown: Arc<Mutex<Vec<Observation>>> = Arc::new(Mutex::new(Vec::new()));
             let display: FakeDisplay = FakeDisplay {
                 shown: Arc::clone(&shown),
                 fail: false,
@@ -261,8 +263,8 @@ mod tests {
     impl MoistureDisplay for FakeDisplay {
         type Error = TestError;
 
-        fn show(&mut self, reading: Option<Measurement>) -> Result<(), TestError> {
-            self.shown.lock().expect("shown log lock").push(reading);
+        fn show(&mut self, observation: Observation) -> Result<(), TestError> {
+            self.shown.lock().expect("shown log lock").push(observation);
             if let Some(tx) = &self.ping {
                 // Unbounded channel: the send never blocks the display thread.
                 let _ = tx.send(());
@@ -280,46 +282,91 @@ mod tests {
         // The happy path: with nothing yet on the glass (`None`), a published
         // reading within the bound is painted — raw and percent both reach it.
         let shared: SharedMoisture = SharedMoisture::new();
-        shared.publish(measurement(30), 10);
+        shared.publish(Ok(measurement(30)), 10);
         let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
 
         let after: Shown = render_once(&mut display, &shared, 20, 50, None);
 
-        let log: Vec<Option<Measurement>> = shown.lock().unwrap().clone();
-        assert_eq!(log, vec![Some(measurement(30))]);
+        let log: Vec<Observation> = shown.lock().unwrap().clone();
+        assert_eq!(log, vec![Observation::Fresh(measurement(30))]);
         assert_eq!(
-            log[0].unwrap().raw(),
+            log[0].measurement().unwrap().raw(),
             300,
             "the raw count reaches the display"
         );
-        assert_eq!(after, Some(Some(measurement(30))), "it is now on the glass");
+        assert_eq!(
+            after,
+            Some(Observation::Fresh(measurement(30))),
+            "it is now on the glass"
+        );
     }
 
     #[test]
-    fn the_first_paint_of_an_empty_cache_shows_unavailable() {
-        // Nothing measured yet: the first paint still happens, showing `None`, so
-        // the adapter draws its unavailable placeholder rather than a blank screen.
+    fn the_first_paint_of_an_empty_cache_shows_never_sampled() {
+        // Nothing measured yet: the first paint still happens, so the adapter draws
+        // a placeholder rather than leaving a blank screen — and it is told the
+        // device has simply not sampled yet, not that something broke.
         let shared: SharedMoisture = SharedMoisture::new();
         let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
 
         let after: Shown = render_once(&mut display, &shared, 100, 50, None);
 
-        assert_eq!(shown.lock().unwrap().clone(), vec![None]);
-        assert_eq!(after, Some(None));
+        assert_eq!(
+            shown.lock().unwrap().clone(),
+            vec![Observation::NeverSampled]
+        );
+        assert_eq!(after, Some(Observation::NeverSampled));
     }
 
     #[test]
-    fn a_stale_reading_shows_unavailable() {
-        // A reading past the staleness bound reaches the display as `None` — the
-        // dead-sensor case: the glass shows unavailable, never a frozen last value.
+    fn a_stale_reading_shows_stale() {
+        // A reading past the staleness bound reaches the display as `Stale` — the
+        // dead-sampler case: never a frozen last value.
         let shared: SharedMoisture = SharedMoisture::new();
-        shared.publish(measurement(42), 0);
+        shared.publish(Ok(measurement(42)), 0);
         let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
 
         // age = 51 > max_age 50.
         render_once(&mut display, &shared, 51, 50, None);
 
-        assert_eq!(shown.lock().unwrap().clone(), vec![None]);
+        assert_eq!(shown.lock().unwrap().clone(), vec![Observation::Stale]);
+    }
+
+    #[test]
+    fn a_faulted_probe_reaches_the_glass_as_its_own_fault() {
+        // The glass must be able to say WHY there is no number. A fault is not the
+        // same picture as staleness, and the reason survives to the adapter.
+        let shared: SharedMoisture = SharedMoisture::new();
+        shared.publish(Err(ProbeFault::OverRange), 10);
+        let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
+
+        render_once(&mut display, &shared, 20, 50, None);
+
+        assert_eq!(
+            shown.lock().unwrap().clone(),
+            vec![Observation::Faulted(ProbeFault::OverRange)]
+        );
+    }
+
+    #[test]
+    fn one_fault_giving_way_to_another_repaints() {
+        // Fault -> fault is a real transition, not a steady state: an operator
+        // watching the glass must see the reason change.
+        let shared: SharedMoisture = SharedMoisture::new();
+        shared.publish(Err(ProbeFault::OverRange), 0);
+        let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
+
+        let s0: Shown = render_once(&mut display, &shared, 1, 50, None);
+        shared.publish(Err(ProbeFault::Unreadable), 2);
+        render_once(&mut display, &shared, 3, 50, s0);
+
+        assert_eq!(
+            shown.lock().unwrap().clone(),
+            vec![
+                Observation::Faulted(ProbeFault::OverRange),
+                Observation::Faulted(ProbeFault::Unreadable)
+            ]
+        );
     }
 
     #[test]
@@ -327,7 +374,7 @@ mod tests {
         // The flicker fix: three ticks over an unchanging reading paint exactly
         // once. A steady probe is drawn and then left alone — no per-tick redraw.
         let shared: SharedMoisture = SharedMoisture::new();
-        shared.publish(measurement(30), 10);
+        shared.publish(Ok(measurement(30)), 10);
         let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
 
         let s0: Shown = render_once(&mut display, &shared, 20, 50, None);
@@ -339,7 +386,7 @@ mod tests {
             1,
             "a steady reading is painted once, not per tick"
         );
-        assert_eq!(s2, Some(Some(measurement(30))));
+        assert_eq!(s2, Some(Observation::Fresh(measurement(30))));
     }
 
     #[test]
@@ -347,33 +394,36 @@ mod tests {
         // A genuinely new value does repaint: the two distinct readings both reach
         // the glass, in order, with no redundant frame between them.
         let shared: SharedMoisture = SharedMoisture::new();
-        shared.publish(measurement(30), 10);
+        shared.publish(Ok(measurement(30)), 10);
         let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
 
         let s0: Shown = render_once(&mut display, &shared, 11, 50, None);
-        shared.publish(measurement(60), 20);
+        shared.publish(Ok(measurement(60)), 20);
         render_once(&mut display, &shared, 21, 50, s0);
 
         assert_eq!(
             shown.lock().unwrap().clone(),
-            vec![Some(measurement(30)), Some(measurement(60))]
+            vec![
+                Observation::Fresh(measurement(30)),
+                Observation::Fresh(measurement(60))
+            ]
         );
     }
 
     #[test]
-    fn a_transition_to_unavailable_is_redrawn() {
-        // Value → unavailable is a change, so it repaints: the glass follows a dying
-        // probe from its last value to the unavailable placeholder.
+    fn a_transition_to_stale_is_redrawn() {
+        // Value → stale is a change, so it repaints: the glass follows a dying
+        // sampler from its last value to the stale placeholder.
         let shared: SharedMoisture = SharedMoisture::new();
-        shared.publish(measurement(42), 0);
+        shared.publish(Ok(measurement(42)), 0);
         let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
 
-        let s0: Shown = render_once(&mut display, &shared, 10, 50, None); // fresh -> Some(42)
-        render_once(&mut display, &shared, 60, 50, s0); // age 60 > 50 -> None
+        let s0: Shown = render_once(&mut display, &shared, 10, 50, None); // fresh
+        render_once(&mut display, &shared, 60, 50, s0); // age 60 > 50 -> Stale
 
         assert_eq!(
             shown.lock().unwrap().clone(),
-            vec![Some(measurement(42)), None]
+            vec![Observation::Fresh(measurement(42)), Observation::Stale]
         );
     }
 
@@ -383,7 +433,7 @@ mod tests {
         // logs the error, returns the *prior* state (so the next tick retries the
         // same reading), and does not advance `shown` past a failed paint.
         let shared: SharedMoisture = SharedMoisture::new();
-        shared.publish(measurement(55), 0);
+        shared.publish(Ok(measurement(55)), 0);
         let mut display: FakeDisplay = FakeDisplay::failing();
 
         let after: Shown = render_once(&mut display, &shared, 0, 50, None);
@@ -401,7 +451,7 @@ mod tests {
         // join without a panic. Blocking on pings (not polling) keeps it robust.
         let clock: Monotonic = Monotonic::start();
         let shared: SharedMoisture = SharedMoisture::new();
-        shared.publish(measurement(45), clock.now());
+        shared.publish(Ok(measurement(45)), clock.now());
         let (tx, rx): (Sender<()>, _) = channel();
         let (base, shown): (FakeDisplay, _) = FakeDisplay::new();
         let display: FakeDisplay = base.pinging(tx);
@@ -419,7 +469,7 @@ mod tests {
         rx.recv_timeout(Duration::from_secs(2))
             .expect("the display must paint the first value");
         // A genuine change re-arms a paint.
-        shared.publish(measurement(50), clock.now());
+        shared.publish(Ok(measurement(50)), clock.now());
         rx.recv_timeout(Duration::from_secs(2))
             .expect("a changed value must re-render");
 
@@ -429,7 +479,10 @@ mod tests {
         // Exactly the two distinct values, deduped across the many 1 ms ticks.
         assert_eq!(
             shown.lock().unwrap().clone(),
-            vec![Some(measurement(45)), Some(measurement(50))]
+            vec![
+                Observation::Fresh(measurement(45)),
+                Observation::Fresh(measurement(50))
+            ]
         );
     }
 }

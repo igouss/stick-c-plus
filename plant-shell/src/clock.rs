@@ -1,6 +1,6 @@
 //! Monotonic — the shared time base for the sampler and its consumers.
 //!
-//! Freshness ([`plant_core::fresh`]) is measured against a [`Tick`]: the writer
+//! Freshness ([`plant_core::observe`]) is measured against a [`Tick`]: the writer
 //! stamps each reading and the readers ask "how old is it now?". For that
 //! comparison to mean anything, both sides must read the *same* clock — a
 //! monotonic one, so a wall-clock adjustment (NTP, an RTC sync) can never make a
@@ -17,7 +17,7 @@ use plant_core::Tick;
 /// A monotonic millisecond clock from a fixed origin.
 ///
 /// Copying a `Monotonic` copies its origin, so every copy agrees on "now" — the
-/// property [`plant_core::fresh`] relies on. Only differences from the origin are
+/// property [`plant_core::observe`] relies on. Only differences from the origin are
 /// exposed, never wall-clock time, so the reported tick is immune to clock
 /// adjustments.
 #[derive(Clone, Copy)]

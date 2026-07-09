@@ -18,7 +18,7 @@ use esp_idf_hal::gpio::Gpio33;
 use esp_idf_sys::EspError;
 use firmware_core::{gated_read, oversampled_mean, unsaturated, ProbePower, Saturation};
 use plant_core::ports::MAX_READING;
-use plant_core::SoilSensor;
+use plant_core::{ProbeFault, SoilFault, SoilSensor};
 
 /// Why a [`read_raw`](SoilSensor::read_raw) yielded no usable count.
 ///
@@ -50,6 +50,31 @@ impl fmt::Display for ReadError {
                 "earth unit reading is not a measurement: {rail} — probe open, soil past \
                  the readable range, or the probe rail is down"
             ),
+        }
+    }
+}
+
+/// Classify this adapter's failures into the domain's [`ProbeFault`] vocabulary.
+///
+/// This adapter is the only layer that knows what its converter's rails *mean*, so
+/// it is the only layer entitled to make this call. The domain never sees an
+/// `EspError`; the log still does, because the `Display` above carries detail this
+/// classification necessarily discards.
+///
+/// The mapping is faithful to the Earth Unit's divider (soil in the lower leg,
+/// pulled up through 10 kΩ to the probe's local 3.3 V):
+///
+/// - **ceiling** → [`ProbeFault::OverRange`]: the soil leg is not conducting.
+/// - **floor** → [`ProbeFault::UnderRange`]: nothing is pulling the node up, which
+///   after probe power-gating (qhw.31) is what a rail that failed to energize
+///   looks like.
+/// - **an outright read failure** → [`ProbeFault::Unreadable`].
+impl SoilFault for ReadError {
+    fn fault(&self) -> ProbeFault {
+        match self {
+            ReadError::Adc(_) => ProbeFault::Unreadable,
+            ReadError::Saturated(Saturation::Ceiling) => ProbeFault::OverRange,
+            ReadError::Saturated(Saturation::Floor) => ProbeFault::UnderRange,
         }
     }
 }

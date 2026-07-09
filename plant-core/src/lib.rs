@@ -19,19 +19,25 @@
 //!   a raw ADC reading to a percentage.
 //! - **Control**: [`step`] — the sampling use case (average → calibrate →
 //!   report-on-change), a pure function of its inputs.
-//! - **Control / policy**: [`fresh`] — the staleness rule that turns a cached
-//!   [`Reading`] unavailable once it ages out, so a dead sensor never keeps
-//!   reporting its last healthy value.
+//! - **Entities**: [`Observation`] and [`ProbeFault`] — what a consumer learns when
+//!   it asks about the soil. Carries two orthogonal facts a bare `Option` cannot:
+//!   whether the *sampler* is alive, and whether the *probe* is honest.
+//! - **Control / policy**: [`observe`] — the staleness rule that turns a cached
+//!   [`Reading`] into an [`Observation`], so a dead sensor never keeps reporting
+//!   its last healthy value and a lying probe is never mistaken for a dead one.
 //! - **Ports**: [`SoilSensor`] — the driven interface the firmware's ADC
-//!   adapter implements; [`MoistureDisplay`] — the driven interface the ST7789
-//!   TFT adapter implements to render the value.
+//!   adapter implements, with [`SoilFault`] classifying its failures into domain
+//!   faults; [`MoistureDisplay`] — the driven interface the ST7789 TFT adapter
+//!   implements to render the observation.
 
 pub mod freshness;
 pub mod moisture;
+pub mod observation;
 pub mod ports;
 pub mod sampler;
 
-pub use freshness::{fresh, Reading, Tick};
+pub use freshness::{observe, Outcome, Reading, Tick};
 pub use moisture::{to_percent, Calibration, Measurement, Moisture};
-pub use ports::{MoistureDisplay, SoilSensor};
+pub use observation::{Observation, ProbeFault};
+pub use ports::{MoistureDisplay, SoilFault, SoilSensor};
 pub use sampler::{step, Sample};

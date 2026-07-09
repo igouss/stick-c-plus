@@ -2,11 +2,11 @@
 //!
 //! The driven adapter for [`plant_core::MoistureDisplay`]: it drives the 1.14″
 //! ST7789V2 panel over SPI with `mipidsi` and renders the current soil
-//! [`Measurement`] — the raw ADC count and the moisture percent — with
-//! `embedded-graphics`. All freshness and cadence live inward (the pure
-//! [`fresh`](plant_core::fresh) policy and the `spawn_display` loop in
-//! `plant-shell`); this adapter is the thin hardware translation that turns a
-//! measurement into pixels, and nothing more.
+//! [`Observation`] — the raw ADC count and the moisture percent, or the named
+//! reason there is neither — with `embedded-graphics`. All freshness and cadence
+//! live inward (the pure [`observe`](plant_core::observe) policy and the
+//! `spawn_display` loop in `plant-shell`); this adapter is the thin hardware
+//! translation that turns an observation into pixels, and nothing more.
 //!
 //! ## Panel quirks (M5StickC Plus, verified against the factory firmware)
 //!
@@ -33,7 +33,7 @@ use esp_idf_hal::units::FromValueType;
 use mipidsi::models::ST7789;
 use mipidsi::options::{ColorInversion, ColorOrder, Orientation, Rotation};
 use mipidsi::{interface::SpiInterface, Builder, Display};
-use plant_core::{Measurement, MoistureDisplay};
+use plant_core::{MoistureDisplay, Observation, ProbeFault};
 use static_cell::StaticCell;
 
 /// Native (unrotated) panel width — the short axis, in portrait.
@@ -200,20 +200,41 @@ impl St7789Display {
 /// Render the latest measurement, or the unavailable state.
 ///
 /// A fresh reading paints two lines — the raw ADC count and the percent; a `None`
-/// (nothing measured yet, or a reading that aged out) paints an unavailable
-/// placeholder in red, so a dead probe reads as unavailable on the glass rather than
-/// as a frozen last value. Rendering only: the freshness decision was made upstream.
+/// (a faulted probe, a stopped sampler, or a device that has not sampled yet) paints
+/// its own placeholder, so the glass names the reason rather than showing one
+/// indiscriminate "unavailable". Rendering only: the verdict was decided upstream.
+/// A [`ProbeFault`] as a label that fits [`LINE_WIDTH`] characters of `FONT_10X20`.
+///
+/// The domain's own [`Display`](core::fmt::Display) for a fault is a full sentence,
+/// written for a log line or a Home Assistant text sensor. A 135-pixel-wide panel
+/// cannot show a sentence, so this adapter chooses words for its own pixel budget —
+/// which is exactly the sort of decision a boundary exists to make. The words stay
+/// faithful to the domain's caution: `RAW HIGH` reports what was *observed*, and
+/// does not assert "corroded", which the reading alone cannot establish.
+const fn fault_label(fault: ProbeFault) -> &'static str {
+    match fault {
+        ProbeFault::OverRange => "RAW HIGH",
+        ProbeFault::UnderRange => "RAW LOW",
+        ProbeFault::Unreadable => "ADC ERROR",
+    }
+}
+
 impl MoistureDisplay for St7789Display {
     type Error = St7789Error;
 
-    fn show(&mut self, reading: Option<Measurement>) -> Result<(), St7789Error> {
+    fn show(&mut self, observation: Observation) -> Result<(), St7789Error> {
         // No full-screen clear: each line paints its own row over an opaque
         // background (see `line`), so only the two text rows change and there is no
         // flash. The initial black background was laid down once in `new`. Numbers
         // are right-aligned in a fixed field so the digits hold a steady column as
         // the value's width changes.
-        match reading {
-            Some(m) => {
+        //
+        // Each unavailable state gets its OWN words, in red. An operator glancing at
+        // the glass should be able to tell a lying probe from a stopped sampler
+        // without attaching a serial cable — that distinction is the whole reason
+        // this method takes an Observation rather than an Option.
+        match observation {
+            Observation::Fresh(m) => {
                 self.line(RAW_Y, Rgb565::WHITE, format_args!("RAW  {:>4}", m.raw()))?;
                 self.line(
                     PCT_Y,
@@ -221,9 +242,17 @@ impl MoistureDisplay for St7789Display {
                     format_args!("SOIL {:>3}%", m.percent()),
                 )?;
             }
-            None => {
-                self.line(RAW_Y, Rgb565::RED, format_args!("SOIL --"))?;
-                self.line(PCT_Y, Rgb565::RED, format_args!("no probe"))?;
+            Observation::Faulted(fault) => {
+                self.line(RAW_Y, Rgb565::RED, format_args!("FAULT"))?;
+                self.line(PCT_Y, Rgb565::RED, format_args!("{}", fault_label(fault)))?;
+            }
+            Observation::Stale => {
+                self.line(RAW_Y, Rgb565::RED, format_args!("STALE"))?;
+                self.line(PCT_Y, Rgb565::RED, format_args!("NO SAMPLE"))?;
+            }
+            Observation::NeverSampled => {
+                self.line(RAW_Y, Rgb565::WHITE, format_args!("SOIL --"))?;
+                self.line(PCT_Y, Rgb565::WHITE, format_args!("starting"))?;
             }
         }
         Ok(())

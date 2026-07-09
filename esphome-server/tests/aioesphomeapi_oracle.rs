@@ -52,7 +52,7 @@ fn the_real_ha_client_adopts_the_sensor_device_over_the_server_host() {
 
     // The production device: identity + the moisture descriptor + a live source. A
     // shared flag stands in for the sampler's freshest reading; the source pulls it
-    // on every poll, exactly as it will pull `SharedMoisture::latest` on-device.
+    // on every poll, exactly as it will pull `SharedMoisture::observe` on-device.
     let high: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     let source = {
         let high: Arc<AtomicBool> = Arc::clone(&high);

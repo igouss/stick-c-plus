@@ -75,7 +75,8 @@ pub fn step(prev: Option<Measurement>, raws: &[u16], cal: Calibration) -> Sample
 mod tests {
     use super::*;
     use crate::moisture::RAW_MAX;
-    use crate::ports::SoilSensor;
+    use crate::observation::ProbeFault;
+    use crate::ports::{SoilFault, SoilSensor};
 
     /// A calibration where a raw count maps to the same number as a percent
     /// (`raw N → N %` for `N <= 100`), so tests can read the arithmetic
@@ -106,11 +107,23 @@ mod tests {
         }
     }
 
+    /// The fake's read failure: the script ran out. Classifies as `Unreadable`,
+    /// the same way a real ADC error would — the port requires every failure to be
+    /// nameable as a domain fault.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    struct Exhausted;
+
+    impl SoilFault for Exhausted {
+        fn fault(&self) -> ProbeFault {
+            ProbeFault::Unreadable
+        }
+    }
+
     impl SoilSensor for ScriptedSensor {
-        type Error = ();
+        type Error = Exhausted;
 
         fn read_raw(&mut self) -> Result<u16, Self::Error> {
-            let value: u16 = *self.script.get(self.next).ok_or(())?;
+            let value: u16 = *self.script.get(self.next).ok_or(Exhausted)?;
             self.next += 1;
             Ok(value)
         }

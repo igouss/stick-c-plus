@@ -7,15 +7,21 @@
 //! owns the *timing* and the *cache*; every scrap of averaging and calibration
 //! stays inward in `plant-core`, so this loop's body is a straight line.
 //!
-//! ## Two failure modes, both fail-visible
+//! ## Two failure modes, told apart
 //!
-//! - A **failed read** publishes nothing. The last reading is left to age out, so
-//!   consumers see it go unavailable ([`fresh`](plant_core::fresh)) rather than
-//!   frozen — a sensor that starts erroring must not keep serving its last
-//!   healthy value.
-//! - A **dead thread** (a panic, a hang) likewise stops refreshing the cache, so
-//!   the same staleness rule retires the value within [`STALENESS_PERIODS`]
-//!   periods. No supervisor is needed: staleness *is* the liveness check.
+//! - A **failed read** publishes a [`ProbeFault`], stamped at the current tick. The
+//!   last healthy value is replaced, never served again — a sensor that starts
+//!   erroring must not keep reporting what it saw before. Because the publish is
+//!   fresh, consumers see [`Observation::Faulted`](plant_core::Observation): the
+//!   sampler is alive and the probe is lying.
+//! - A **dead thread** (a panic, a hang) stops refreshing the cache entirely, so
+//!   [`observe`](plant_core::observe) retires the slot within [`STALENESS_PERIODS`]
+//!   periods and consumers see `Stale`. No supervisor is needed: staleness *is* the
+//!   liveness check.
+//!
+//! These were once the same state. Collapsing them cost a serial capture and a board
+//! reset to untangle, so they are now distinct at the type level and the sampler
+//! publishes on every cycle to keep them that way.
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,7 +31,7 @@ use std::time::Duration;
 
 use log::warn;
 use plant_core::sampler::step;
-use plant_core::{Calibration, Measurement, Sample, SoilSensor, Tick};
+use plant_core::{Calibration, Measurement, ProbeFault, Sample, SoilFault, SoilSensor, Tick};
 
 use crate::clock::Monotonic;
 use crate::shared::SharedMoisture;
@@ -87,7 +93,7 @@ impl SamplerConfig {
     /// The maximum age (in [`Tick`] milliseconds) a reading may reach before
     /// consumers treat it as unavailable: `period * staleness_periods`.
     ///
-    /// The reader passes this to [`SharedMoisture::latest`]; keeping the arithmetic
+    /// The reader passes this to [`SharedMoisture::observe`]; keeping the arithmetic
     /// here means the writer's period and the reader's bound can never drift apart.
     pub fn max_age(&self) -> Tick {
         let period_ms: Tick = self.period.as_millis().min(u128::from(Tick::MAX)) as Tick;
@@ -164,14 +170,21 @@ fn sample_loop<S>(
     }
 }
 
-/// One sampling cycle: read, fold through the pure [`step`], publish on success.
+/// One sampling cycle: read, fold through the pure [`step`], publish the outcome.
 ///
-/// The whole shell↔core seam, in isolation and testable without a thread: on a
-/// good read it calibrates through [`step`] and publishes the latest
-/// [`Measurement`] (raw count and calibrated percent) at `now`; on a failed read
-/// it publishes *nothing* — the last reading ages out — and carries `prev`
-/// forward. Returns the measurement state to carry into the next cycle. Complexity
-/// is one branch: read ok, or not.
+/// The whole shell↔core seam, in isolation and testable without a thread: on a good
+/// read it calibrates through [`step`] and publishes the latest [`Measurement`]
+/// (raw count and calibrated percent) at `now`; on a failed read it classifies the
+/// adapter's error into a [`ProbeFault`] and publishes *that*, also at `now`.
+/// Returns the measurement state to carry into the next cycle. Complexity is one
+/// branch: read ok, or not.
+///
+/// Publishing the fault is the point. A cycle that published nothing would let the
+/// slot age out, and an aged-out slot is what a **dead sampler thread** looks like —
+/// so a lying probe and a dead device would be indistinguishable to every consumer.
+/// By stamping the fault, the writer proves it ran; staleness then means one thing
+/// only. The adapter's own error still reaches the log, where its detail (an
+/// `EspError`, a panel fault) is worth more than the classified verdict.
 fn sample_once<S>(
     sensor: &mut S,
     shared: &SharedMoisture,
@@ -189,12 +202,14 @@ where
             // oversampling), and the pure step calibrates + reports-on-change.
             let sample: Sample = step(prev, &[raw], calibration);
             if let Some(measurement) = sample.state {
-                shared.publish(measurement, now);
+                shared.publish(Ok(measurement), now);
             }
             sample.state
         }
         Err(err) => {
-            warn!("plant-sampler: soil read failed, letting last reading age out: {err}");
+            let fault: ProbeFault = err.fault();
+            warn!("plant-sampler: publishing probe fault ({fault}); adapter said: {err}");
+            shared.publish(Err(fault), now);
             prev
         }
     }
@@ -203,6 +218,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plant_core::Observation;
     use std::collections::VecDeque;
     use std::sync::mpsc::{channel, Sender};
 
@@ -227,13 +243,24 @@ mod tests {
     }
 
     /// A read error whose message is [`Display`], as the sampler's log bound
-    /// requires; [`Clone`] so the fake can hand it out on every exhausted read.
+    /// requires, and which classifies into a [`ProbeFault`], as the port requires.
+    /// [`Clone`] so the fake can hand it out on every exhausted read.
+    ///
+    /// It carries its own fault rather than hardcoding one, so a test can prove the
+    /// *adapter's* classification reaches the cache untouched — a sampler that
+    /// published a constant fault would pass a lesser fake.
     #[derive(Clone, Debug)]
-    struct TestError(&'static str);
+    struct TestError(&'static str, ProbeFault);
 
     impl std::fmt::Display for TestError {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.write_str(self.0)
+        }
+    }
+
+    impl SoilFault for TestError {
+        fn fault(&self) -> ProbeFault {
+            self.1
         }
     }
 
@@ -251,16 +278,17 @@ mod tests {
         fn dead() -> Self {
             Self {
                 queue: VecDeque::new(),
-                after: Err(TestError("sensor offline")),
+                after: Err(TestError("sensor offline", ProbeFault::Unreadable)),
                 ping: None,
             }
         }
 
-        /// Yields `readings` once, then errors forever — a probe that dies.
-        fn readings_then_dies(readings: &[u16]) -> Self {
+        /// Yields `readings` once, then reports `fault` forever — a probe that
+        /// works and then fails, the way a corroding one does.
+        fn readings_then_faults(readings: &[u16], fault: ProbeFault) -> Self {
             Self {
                 queue: readings.iter().copied().collect(),
-                after: Err(TestError("sensor died")),
+                after: Err(TestError("sensor died", fault)),
                 ping: None,
             }
         }
@@ -298,13 +326,15 @@ mod tests {
         let carried: Option<Measurement> = sample_once(&mut sensor, &shared, LINEAR, 5, None);
 
         assert_eq!(carried, Some(measured(30)), "state carries the new reading");
-        assert_eq!(shared.latest(5, 1000), Some(measured(30)));
+        assert_eq!(shared.observe(5, 1000), Observation::Fresh(measured(30)));
     }
 
     #[test]
-    fn a_failed_read_publishes_nothing_and_keeps_state() {
-        // An injected read error must not touch the cache: nothing is published,
-        // and the prior state is carried forward untouched.
+    fn a_failed_read_publishes_the_fault_and_keeps_state() {
+        // An injected read error replaces the cached value with a *fresh fault*:
+        // the last healthy reading is never served again, and the fault proves the
+        // sampler ran. The prior state is still carried forward internally so the
+        // next successful read can report-on-change against it.
         let shared: SharedMoisture = SharedMoisture::new();
         let mut sensor: FakeSensor = FakeSensor::dead();
 
@@ -316,7 +346,27 @@ mod tests {
             Some(measured(40)),
             "prior state survives a bad read"
         );
-        assert_eq!(shared.latest(5, 1000), None, "a bad read publishes nothing");
+        let observed: Observation = shared.observe(5, 1000);
+        assert_eq!(observed, Observation::Faulted(ProbeFault::Unreadable));
+        assert!(
+            observed.writer_is_alive(),
+            "a published fault proves the sampler ran"
+        );
+    }
+
+    #[test]
+    fn the_adapters_own_classification_reaches_the_cache() {
+        // The sampler must not invent a fault: whatever the adapter classified is
+        // what a consumer sees. A saturated probe is OverRange, not Unreadable.
+        let shared: SharedMoisture = SharedMoisture::new();
+        let mut sensor: FakeSensor = FakeSensor::readings_then_faults(&[], ProbeFault::OverRange);
+
+        let _carried: Option<Measurement> = sample_once(&mut sensor, &shared, LINEAR, 5, None);
+
+        assert_eq!(
+            shared.observe(5, 1000),
+            Observation::Faulted(ProbeFault::OverRange)
+        );
     }
 
     #[test]
@@ -329,37 +379,71 @@ mod tests {
         let max_age: Tick = 50;
 
         let prev: Option<Measurement> = sample_once(&mut sensor, &shared, LINEAR, 0, None);
-        assert_eq!(shared.latest(0, max_age), Some(measured(50)));
+        assert_eq!(shared.observe(0, max_age), Observation::Fresh(measured(50)));
         // Without a new sample, the reading ages out.
-        assert_eq!(shared.latest(100, max_age), None);
+        assert_eq!(shared.observe(100, max_age), Observation::Stale);
         // A live sensor resamples, refreshing the stamp — fresh again at t=100.
         let _prev: Option<Measurement> = sample_once(&mut sensor, &shared, LINEAR, 100, prev);
-        assert_eq!(shared.latest(100, max_age), Some(measured(50)));
+        assert_eq!(
+            shared.observe(100, max_age),
+            Observation::Fresh(measured(50))
+        );
     }
 
+    /// A probe that fails is visible on the *very next cycle*, not three periods
+    /// later, and it reports as `Faulted` — never as the `Stale` that a dead thread
+    /// produces. This is the behaviour the old "publish nothing" sampler could not
+    /// offer: it made a broken probe wait out the staleness bound and then
+    /// impersonate a broken device.
     #[test]
-    fn a_dying_sensor_goes_unavailable_within_the_staleness_bound() {
-        // The core safety property: once the sensor stops producing readings, the
-        // cache flips to unavailable within STALENESS_PERIODS periods of the last
-        // healthy reading — a dead sensor never keeps serving its last value.
+    fn a_failing_sensor_reports_faulted_at_once_and_never_looks_stale() {
         let shared: SharedMoisture = SharedMoisture::new();
-        let mut sensor: FakeSensor = FakeSensor::readings_then_dies(&[60]);
+        let mut sensor: FakeSensor = FakeSensor::readings_then_faults(&[60], ProbeFault::OverRange);
         let config: SamplerConfig = SamplerConfig::new(LINEAR); // 2 s period, 3 periods
         let cal: Calibration = config.calibration;
         let max_age: Tick = config.max_age(); // 6000 ms
 
         // t=0: the one healthy reading is published.
         let mut prev: Option<Measurement> = sample_once(&mut sensor, &shared, cal, 0, None);
-        assert_eq!(shared.latest(0, max_age), Some(measured(60)));
+        assert_eq!(shared.observe(0, max_age), Observation::Fresh(measured(60)));
 
-        // The sensor is dead now; the next cycles publish nothing.
+        // t=2000: the probe fails. The very next observation is Faulted — the last
+        // healthy value is gone immediately, with no staleness bound to wait out.
         prev = sample_once(&mut sensor, &shared, cal, 2000, prev);
-        prev = sample_once(&mut sensor, &shared, cal, 4000, prev);
-        // At exactly the bound (age 6000 == max_age) it is still just available.
-        assert_eq!(shared.latest(6000, max_age), Some(measured(60)));
-        let _prev: Option<Measurement> = sample_once(&mut sensor, &shared, cal, 6000, prev);
-        // One tick past the bound: unavailable — flipped within 3 periods.
-        assert_eq!(shared.latest(6001, max_age), None);
+        assert_eq!(
+            shared.observe(2000, max_age),
+            Observation::Faulted(ProbeFault::OverRange)
+        );
+
+        // The sampler keeps running and keeps republishing the fault, so the slot
+        // never ages out and never masquerades as a dead thread.
+        let _prev: Option<Measurement> = sample_once(&mut sensor, &shared, cal, 8000, prev);
+        let observed: Observation = shared.observe(8000, max_age);
+        assert_eq!(observed, Observation::Faulted(ProbeFault::OverRange));
+        assert!(observed.writer_is_alive());
+    }
+
+    /// The other half of the distinction: when the sampler *stops running*, nothing
+    /// republishes, and the slot goes `Stale` within the bound — whatever it held.
+    #[test]
+    fn a_sampler_that_stops_running_goes_stale_within_the_bound() {
+        let shared: SharedMoisture = SharedMoisture::new();
+        let mut sensor: FakeSensor = FakeSensor::constant(60);
+        let config: SamplerConfig = SamplerConfig::new(LINEAR);
+        let max_age: Tick = config.max_age(); // 6000 ms
+
+        let _prev: Option<Measurement> =
+            sample_once(&mut sensor, &shared, config.calibration, 0, None);
+
+        // No further cycles: the thread died. At exactly the bound it is still fresh.
+        assert_eq!(
+            shared.observe(6000, max_age),
+            Observation::Fresh(measured(60))
+        );
+        // One tick past it, stale — and stale does not claim the writer is alive.
+        let observed: Observation = shared.observe(6001, max_age);
+        assert_eq!(observed, Observation::Stale);
+        assert!(!observed.writer_is_alive());
     }
 
     #[test]
@@ -388,7 +472,10 @@ mod tests {
             .expect("a second reading proves the first publish landed");
 
         // A generous max_age so scheduler jitter can't masquerade as staleness.
-        assert_eq!(shared.latest(clock.now(), 60_000), Some(measured(45)));
+        assert_eq!(
+            shared.observe(clock.now(), 60_000),
+            Observation::Fresh(measured(45))
+        );
 
         sampler.stop();
         sampler.join().expect("the sampler thread must not panic");

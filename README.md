@@ -66,13 +66,17 @@ host domain crates by **path** across the boundary.
 ## Status
 
 - **`led-core`**, **`plant-core`** — domains done, host-tested (unit + property +
-  Gherkin). `plant-core` includes the `fresh` staleness policy: a cached reading
-  goes unavailable once it ages out.
+  Gherkin). `plant-core` includes the `observe` policy, which answers two questions
+  at once: an `Observation` says whether the *sampler* is alive **and** whether the
+  *probe* is honest. A fresh `Faulted` (a corroded probe) is a different state from
+  `Stale` (a dead sampler thread) — collapsing them into one `Option` once cost a
+  two-day silent failure.
 - **`firmware-core`**, **`plant-shell`** — the host-testable shell. `firmware-core`
-  is the pure shared kernel (ADC oversampling, probe-power gating); `plant-shell`
-  is the imperative shell — the shared moisture cache and the sampler thread
-  (read → `step` → publish), with its staleness-on-death and panic-isolation rules
-  proven on the host.
+  is the pure shared kernel (ADC oversampling, probe-power gating, and the
+  saturation rule that refuses to pass a rail-pinned ADC count off as a reading);
+  `plant-shell` is the imperative shell — the shared cache and the sampler thread
+  (read → `step` → publish, faults included), with its staleness-on-death and
+  panic-isolation rules proven on the host.
 - **`esphome-api`** — native-API framework: prost message types, the frame codec,
   the entity model, the connection FSM, the Light entity, and the `Device` port a
   host serves — with `SensorDevice`, a one-sensor device whose value is pulled from
