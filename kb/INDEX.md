@@ -29,6 +29,15 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
 - `finding` [axp192-powers-lcd-backlight](findings/axp192-powers-lcd-backlight.md)
   — `high` · display stays dark until the AXP192 (`0x34`) is programmed; backlight
   is the **LDO2** rail (I2C reg `0x28`), not a GPIO/PWM. Bring the PMU up first.
+  (Its old "Grove 5 V needs no PMU" aside is **corrected** — see below.)
+- `experiment` [2026-07-08 · Does AXP192 EXTEN gate the Grove 5 V rail?](experiments/2026-07-08-probe-rail-gating/README.md)
+  — **confirmed**: clearing reg `0x12` bit 6 drops the Earth Unit's node from a
+  saturated 4095 to a hard 0 in 500 ms, three for three. Measured with the ADC, not
+  a multimeter: an open-electrode probe reports its own rail.
+- `finding` [axp192-exten-gates-grove-5v](findings/axp192-exten-gates-grove-5v.md)
+  — `high` · **EXTEN** (reg `0x12` bit 6) is the Grove 5 V pin's enable, so probe
+  power-gating (qhw.31) is firmware-only. Corrects the aside above. The settle delay
+  is *not* established — re-measure it against a conducting probe.
 - `finding` [ws2812-grb-byte-order](findings/ws2812-grb-byte-order.md) — `high` ·
   WS2812 latches **G-R-B**; the WS2812 boundary adapter (qqh.1) does the one swap —
   keep `Rgb` as RGB in the domain and don't double-swap at the boundary.
@@ -105,7 +114,13 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
   PMU); the matching silicon lives in [datasheets](sources/m5stickc-plus-datasheets.md).
 - `source` [m5-earth-unit](sources/m5-earth-unit.md) — the **resistive** soil probe
   (U019) on **ADC1 ch5 / G33** (ADC2 dies under WiFi); power-gated, two-endpoint
-  calibration. Schematic via `fetch.sh` (PDF gitignored).
+  calibration. Schematic via `fetch.sh` (PDF gitignored). Records the **divider**:
+  local HT7533 3.3 V, 10 kΩ pull-up, **soil in the lower leg**.
+- `finding` [saturated-adc-reading-is-not-a-measurement](findings/saturated-adc-reading-is-not-a-measurement.md)
+  — `high` · `raw` 4095 (electrodes open) or 0 (rail down) is a **diagnostic, not a
+  reading**; the calibration curve happily turns both into a confident 0 %/100 %.
+  Reject the rails at the adapter → *unavailable*. A **floating** (unplugged) probe
+  lands mid-scale and needs an excitation delta instead.
 
 ## Workflow — issue tracking & triage
 

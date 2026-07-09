@@ -33,6 +33,35 @@ Two consequences the domain already encodes:
 - **ADC1 for WiFi coexistence** — the probe must sit on **ADC1** (G33); ADC2 is
   unusable while WiFi is active on the ESP32. This pins the wiring choice.
 
+## The divider, read off the schematic (2026-07-08)
+
+```
+Grove 5V ──[ U3 HT7533 LDO ]── +3.3V ──[ R1 10 kΩ ]──┬── Ain ── G33 (ADC1 ch5)
+                                                     │
+                                             [ soil electrodes ]
+                                                     │
+                                                    GND
+```
+
+Three facts that are not obvious from the prose, and that cost two days when
+guessed at instead of read:
+
+1. **The probe regulates its own 3.3 V** (U3, HT7533). It never presents 5 V to
+   G33, so there is no over-voltage hazard on the pad.
+2. **The soil is the *lower* leg.** Dry soil (high resistance) pulls `Ain` **up**;
+   wet soil pulls it down. Electrodes corroded open ⇒ `Ain` = 3.3 V ⇒ a saturated
+   `raw = 4095`, which is *above* the ADC's 12 dB ceiling and carries no
+   information. An unpowered rail ⇒ `Ain` = 0. Both are faults that read as
+   perfectly ordinary percentages — see
+   [saturated-adc-reading-is-not-a-measurement](../findings/saturated-adc-reading-is-not-a-measurement.md).
+3. **`Ain` also drives an LM393 comparator** (U1A) against a 10 kΩ trim pot (R3),
+   which is the *digital* out on G32. The analog path we use is the bare divider
+   node; there is no on-board ADC.
+
+The bias across the electrodes comes from R1, so it exists whenever the probe has
+power — sampling rate is irrelevant to corrosion. Only cutting Grove 5 V stops it
+([axp192-exten-gates-grove-5v](../findings/axp192-exten-gates-grove-5v.md)).
+
 The `plant-core` domain turns its raw 12-bit reading (`0..=4095`) into a
 calibrated `Moisture` percentage; this note is the hardware record behind that.
 

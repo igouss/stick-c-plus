@@ -24,9 +24,16 @@ calls `Axp.begin()` *before* `Lcd.begin()`; the order is load-bearing.
 **Holds when:** driving the on-board 1.14" ST7789V2 display or relying on any rail
 the AXP192 gates (it also feeds the ESP32 core rails at boot).
 
-**Breaks when:** — not really; it's structural to this board. (An external strip on
-the Grove 5 V pin does **not** need the AXP192, so a pure-LED firmware can ignore
-the PMU — until it wants the screen.)
+**Breaks when:** — not really; it's structural to this board.
+
+> **Correction (2026-07-08).** This finding used to claim here that "an external
+> strip on the Grove 5 V pin does **not** need the AXP192, so a pure-LED firmware
+> can ignore the PMU." **That is wrong.** The Grove 5 V pin is fed by the external
+> boost that AXP192 **EXTEN** (reg `0x12` bit 6) enables — which `power_on()` sets
+> as part of the factory sequence. Clearing it kills Grove 5 V; measured in
+> [2026-07-08-probe-rail-gating](../experiments/2026-07-08-probe-rail-gating/README.md).
+> Anything drawing power from the Grove port — an LED strip, the Earth Unit — needs
+> the PMU brought up. See [axp192-exten-gates-grove-5v](axp192-exten-gates-grove-5v.md).
 
 **How to apply:** When a display or IMU adapter is added to `../../firmware`, bring
 up an AXP192 adapter **first** in the composition root, mirroring `begin()`'s order
