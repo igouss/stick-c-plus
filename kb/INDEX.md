@@ -41,6 +41,14 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
 - `finding` [ws2812-grb-byte-order](findings/ws2812-grb-byte-order.md) — `high` ·
   WS2812 latches **G-R-B**; the WS2812 boundary adapter (qqh.1) does the one swap —
   keep `Rgb` as RGB in the domain and don't double-swap at the boundary.
+- `experiment` [2026-07-09 · RGB or BGR on the onboard TFT?](experiments/2026-07-09-panel-colour-order/README.md)
+  — **confirmed**: under `mipidsi`, `ColorOrder::Bgr` renders red as blue. Three
+  labelled bands through the production init; green invariant, white stayed white.
+- `finding` [st7789-wants-rgb-colour-order](findings/st7789-wants-rgb-colour-order.md)
+  — `high` · the TFT needs **`ColorOrder::Rgb`**, though the factory library resolves
+  to `TFT_MAD_BGR` and mipidsi's `Bgr` sets that same MADCTL bit. A MADCTL value does
+  **not** transfer across driver stacks. White-on-black cannot test colour, so this
+  shipped unseen until the first coloured pixel.
 - `finding` [esp-idf-managed-component-wiring](findings/esp-idf-managed-component-wiring.md)
   — `high` · pulling an IDF managed component (`espressif/mdns`, qhw.8) needs both
   `extra_components` metadata **and** `ESP_IDF_SYS_ROOT_CRATE` — a virtual workspace

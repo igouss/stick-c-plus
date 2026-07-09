@@ -8,14 +8,33 @@
 //! `spawn_display` loop in `plant-shell`); this adapter is the thin hardware
 //! translation that turns an observation into pixels, and nothing more.
 //!
-//! ## Panel quirks (M5StickC Plus, verified against the factory firmware)
+//! ## Panel quirks (M5StickC Plus)
 //!
 //! The panel is a *partial* window on a 240×320 controller framebuffer, so it needs
-//! the CGRAM offset (col 52 / row 40 in the native portrait orientation), and both
-//! **INVON** (colour inversion) *and* **BGR** colour order — miss either and the
-//! image is shifted or the colours are wrong. The backlight and panel rails are
-//! powered by the AXP192 (`board-support`), not a GPIO, so the composition root must
-//! power those rails *before* this adapter is built or the screen stays black.
+//! the CGRAM offset (col 52 / row 40 in the native portrait orientation) and **INVON**
+//! (colour inversion) — miss either and the image is shifted or inverted. The
+//! backlight and panel rails are powered by the AXP192 (`board-support`), not a GPIO,
+//! so the composition root must power those rails *before* this adapter is built or
+//! the screen stays black.
+//!
+//! ### Colour order is `Rgb`, and the factory driver will lie to you about it
+//!
+//! This adapter must pass [`ColorOrder::Rgb`]. That contradicts the pinned factory
+//! library, whose `TFT_MAD_COLOR_ORDER` resolves to `TFT_MAD_BGR` (its `TFT_RGB_ORDER`
+//! is undefined while `CGRAM_OFFSET` is defined) — and `mipidsi`'s `ColorOrder::Bgr`
+//! sets that very same MADCTL bit 3. On paper the two inits agree. On the glass they
+//! do not: with `Bgr`, `Rgb565::RED` renders blue.
+//!
+//! The bit is not portable because the pixel pipeline around it is not. TFT_eSPI and
+//! `mipidsi` do not hand the controller identical bytes, so a MADCTL value lifted from
+//! one stack means nothing in the other. Measured, not reasoned — see
+//! `kb/experiments/2026-07-09-panel-colour-order/` and [`Self::colour_check`], which
+//! makes the claim falsifiable in one flash.
+//!
+//! This hid for the display's entire life because white and black are symmetric in
+//! red and blue: `0xFFFF` and `0x0000` cannot show a swap. It surfaced the first time
+//! a genuinely coloured pixel shipped — the red `FAULT` line — and it would have been
+//! caught on day one by drawing three bands instead of two text rows.
 
 use core::fmt::Write as _;
 
@@ -23,6 +42,7 @@ use embedded_graphics::mono_font::ascii::FONT_10X20;
 use embedded_graphics::mono_font::{MonoTextStyle, MonoTextStyleBuilder};
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
+use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Baseline, Text};
 use embedded_hal::spi::MODE_0;
 use esp_idf_hal::delay::Ets;
@@ -110,7 +130,9 @@ pub struct St7789Display {
 
 impl St7789Display {
     /// Bring up the panel: build the SPI device, drive DC/RST, and run the ST7789
-    /// init with the M5StickC Plus offsets, colour inversion and BGR order.
+    /// init with the M5StickC Plus offsets, colour inversion and **RGB** colour order
+    /// (see the module docs — `Bgr` renders red as blue here, whatever the factory
+    /// library's MADCTL bit says).
     ///
     /// The pins are fixed by the board (MOSI 15, SCLK 13, DC 23, RST 18, CS 5), so
     /// they are taken by concrete type. Requires the AXP192 LCD/TFT rails already
@@ -152,7 +174,9 @@ impl St7789Display {
             .display_offset(OFFSET_X, OFFSET_Y)
             .orientation(Orientation::new().rotate(Rotation::Deg90))
             .invert_colors(ColorInversion::Inverted)
-            .color_order(ColorOrder::Bgr)
+            // Rgb, NOT Bgr — measured on the glass, not inferred from the factory
+            // driver. See the module docs: `Bgr` renders red as blue on this panel.
+            .color_order(ColorOrder::Rgb)
             .reset_pin(rst)
             .init(&mut delay)
             .map_err(|e| fault("init", e))?;
@@ -164,6 +188,53 @@ impl St7789Display {
         panel.clear(Rgb565::BLACK).map_err(|e| fault("clear", e))?;
 
         Ok(Self { panel })
+    }
+
+    /// Bring-up self-test: paint three full-width bands — **red, green, blue**, top
+    /// to bottom — each labelled in white with the colour it is *meant* to be.
+    ///
+    /// Text on this panel has only ever been white on black, and neither white nor
+    /// black can reveal a red/blue swap: the two channels are symmetric in
+    /// `0xFFFF` and `0x0000`. So a wrong [`ColorOrder`] stayed invisible until the
+    /// first genuinely coloured pixel was drawn. This method makes the panel's
+    /// colour handling falsifiable, through the *same* init path production uses.
+    ///
+    /// Read it like this:
+    ///
+    /// - **R / G / B in order** — the colour order is right.
+    /// - **bands read B / G / R** — red and blue are swapped: the [`ColorOrder`] in
+    ///   [`Self::new`] is wrong for this panel. Green is invariant under that swap,
+    ///   which is what makes the diagnosis unambiguous.
+    /// - **green looks magenta** (and red cyan, blue yellow) — the inversion is
+    ///   wrong, not the order. This should be impossible while white renders white,
+    ///   which is why the labels are drawn in white.
+    pub fn colour_check(&mut self) -> Result<(), St7789Error> {
+        let size: Size = self.panel.bounding_box().size;
+        let band_h: u32 = size.height / 3;
+        let bands: [(Rgb565, &str); 3] = [
+            (Rgb565::RED, "RED"),
+            (Rgb565::GREEN, "GREEN"),
+            (Rgb565::BLUE, "BLUE"),
+        ];
+
+        for (index, (colour, label)) in bands.into_iter().enumerate() {
+            let top: i32 = (index as u32 * band_h) as i32;
+            Rectangle::new(Point::new(0, top), Size::new(size.width, band_h))
+                .into_styled(PrimitiveStyle::with_fill(colour))
+                .draw(&mut self.panel)
+                .map_err(|e| fault("colour band", e))?;
+
+            // White label: unaffected by a red/blue swap, so it stays readable and
+            // names what the band is *supposed* to be.
+            let style: MonoTextStyle<'_, Rgb565> = MonoTextStyleBuilder::new()
+                .font(&FONT_10X20)
+                .text_color(Rgb565::WHITE)
+                .build();
+            Text::with_baseline(label, Point::new(TEXT_X, top + 8), style, Baseline::Top)
+                .draw(&mut self.panel)
+                .map_err(|e| fault("colour label", e))?;
+        }
+        Ok(())
     }
 
     /// Draw one baseline-top text line at `y`, padded to [`LINE_WIDTH`] with an

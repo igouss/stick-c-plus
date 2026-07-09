@@ -22,6 +22,13 @@ path = "src/main.rs"
 name = "probe-rail-check"
 path = "src/probe_rail_check.rs"
 
+# A second bench tool: paints RGB bands through the production display init, so the
+# panel's colour order is falsifiable. White-on-black text cannot reveal a red/blue
+# swap, which is how a wrong ColorOrder hid until the first coloured pixel shipped.
+[[bin]]
+name = "display-colour-check"
+path = "src/display_colour_check.rs"
+
 # The imperative shell's outermost layer: it composes adapters and owns effects,
 # so it is the one crate the effect-audit `domain` gate must never tag.
 [package.metadata.hex-arch]
