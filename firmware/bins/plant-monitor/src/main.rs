@@ -164,7 +164,7 @@ fn main() {
         let i2c_bus: RefCell<_> = RefCell::new(i2c);
         let mut axp: Axp192<_> = Axp192::new(RefCellDevice::new(&i2c_bus));
         axp.power_on().expect("AXP192 LCD/TFT rail power-on");
-        match axp.rails_enabled() {
+        match axp.display_rails_enabled() {
             Ok(true) => info!("axp192: LCD/TFT rails enabled (reg 0x12 read back)"),
             Ok(false) => warn!("axp192: rails did not read back as enabled"),
             Err(err) => warn!("axp192: rail read-back failed: {err}"),

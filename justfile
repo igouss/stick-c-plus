@@ -132,6 +132,14 @@ run:
 # `just flash` == `just run` (build + flash + monitor).
 alias flash := run
 
+# Flash and monitor one named bin of the plant-monitor package — the bench tools
+# that live beside the monitor itself. `just run-bin probe-rail-check` measures
+# whether the AXP192's EXTEN bit gates the Grove 5 V probe rail (qhw.31); see
+# kb/experiments/2026-07-08-probe-rail-gating/. Leaves that bin on the board —
+# `just run` puts the monitor back.
+run-bin bin:
+    cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p plant-monitor --bin {{bin}}'
+
 # Attach a serial monitor only, no flash. Ctrl-C to exit. `--non-interactive`
 # skips espflash's crossterm input reader, so no controlling TTY (and no
 # `script` pty shim) is needed — it streams serial straight to stdout, which is

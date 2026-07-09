@@ -21,10 +21,28 @@ pub const ADDRESS: u8 = 0x34;
 /// Register 0x12 — the power-output enable byte (which rails are on).
 const REG_POWER_OUTPUT: u8 = 0x12;
 
-/// The bits of [`REG_POWER_OUTPUT`] the display rails need: EXTEN, LDO3, LDO2,
-/// DCDC1 (`0b0100_1101`). OR-ed into the register so the other rails' state is
+/// The [`REG_POWER_OUTPUT`] bits the on-board display needs: LDO3 (TFT panel),
+/// LDO2 (TFT backlight), DCDC1 (the 3.3 V main rail) — `0b0000_1101`.
+///
+/// Deliberately excludes [`EXTEN`]: the display is lit by these three, and gating
+/// the probe rail must not make a display self-check read as failed.
+const DISPLAY_RAILS: u8 = 0x0D;
+
+/// The [`REG_POWER_OUTPUT`] EXTEN bit (bit 6) — the board's external 5 V boost,
+/// which is what feeds the **Grove port's 5 V pin** and hence the Earth Unit.
+///
+/// This is the only rail the probe cares about. The Earth Unit regulates it down
+/// to 3.3 V locally (HT7533) and pulls its analog output up through a 10 kΩ
+/// resistor, so *the electrodes are DC-biased whenever this bit is set* —
+/// independently of whether the ESP32 ever samples the ADC. Cutting it is
+/// therefore the only way to stop the electrolysis that corrodes the probe
+/// (qhw.31); sampling less often does nothing.
+const EXTEN: u8 = 0x40;
+
+/// Every bit [`Axp192::power_on`] sets: the display rails plus EXTEN
+/// (`0b0100_1101`). OR-ed into the register so the other rails' state is
 /// preserved — this is the write that actually turns the LCD on.
-const RAILS_ON: u8 = 0x4D;
+const RAILS_ON: u8 = DISPLAY_RAILS | EXTEN;
 
 /// The M5StickC Plus AXP192 PMIC, over a shared or owned I2C bus.
 pub struct Axp192<I2C> {
@@ -82,9 +100,36 @@ impl<I2C: I2c> Axp192<I2C> {
         self.read(REG_POWER_OUTPUT)
     }
 
-    /// Whether every display rail ([`RAILS_ON`]) reads back as enabled.
-    pub fn rails_enabled(&mut self) -> Result<bool, I2C::Error> {
-        Ok(self.power_output()? & RAILS_ON == RAILS_ON)
+    /// Whether every display rail ([`DISPLAY_RAILS`]) reads back as enabled.
+    ///
+    /// Does not consider [`EXTEN`], which [`set_exten`](Self::set_exten) toggles at
+    /// runtime: a probe powered down between samples is the healthy steady state,
+    /// not a failed bring-up.
+    pub fn display_rails_enabled(&mut self) -> Result<bool, I2C::Error> {
+        Ok(self.power_output()? & DISPLAY_RAILS == DISPLAY_RAILS)
+    }
+
+    /// Switch the external 5 V boost ([`EXTEN`]) — the Grove port's 5 V pin — on
+    /// or off, preserving every other rail.
+    ///
+    /// A read-modify-write, so it can never disturb DCDC1 (the main 3.3 V rail the
+    /// ESP32 itself runs on) or the display's LDO2/LDO3. This is the mechanism
+    /// behind the probe's [`ProbePower`](firmware_core::ProbePower) gating — see
+    /// [`EXTEN`] for why the probe corrodes without it.
+    ///
+    /// Returns once the register write is acknowledged. The rail itself takes time
+    /// to rise and (much longer) to bleed down through the probe's reservoir caps;
+    /// a caller that intends to *read* the probe must settle afterwards rather than
+    /// assume this call is sufficient.
+    pub fn set_exten(&mut self, on: bool) -> Result<(), I2C::Error> {
+        let power: u8 = self.read(REG_POWER_OUTPUT)?;
+        let next: u8 = if on { power | EXTEN } else { power & !EXTEN };
+        self.write(REG_POWER_OUTPUT, next)
+    }
+
+    /// Whether the external 5 V boost ([`EXTEN`]) reads back as enabled.
+    pub fn exten_enabled(&mut self) -> Result<bool, I2C::Error> {
+        Ok(self.power_output()? & EXTEN == EXTEN)
     }
 
     /// Read one register: write its address, read one byte back.

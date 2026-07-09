@@ -13,6 +13,15 @@ description = "M5StickC Plus + Earth Unit soil-moisture plant monitor (ESPHome-n
 name = "plant-monitor"
 path = "src/main.rs"
 
+# A bench tool, not part of the monitor: it answers whether the AXP192's EXTEN bit
+# gates the Grove 5 V rail, which decides whether probe power-gating (qhw.31) is a
+# firmware change or a hardware one. Lives in this package rather than its own
+# crate because `.cargo/config.toml` pins ESP_IDF_SYS_ROOT_CRATE to `plant-monitor`
+# — a sibling crate would silently lose the `espressif/mdns` managed component.
+[[bin]]
+name = "probe-rail-check"
+path = "src/probe_rail_check.rs"
+
 # The imperative shell's outermost layer: it composes adapters and owns effects,
 # so it is the one crate the effect-audit `domain` gate must never tag.
 [package.metadata.hex-arch]
@@ -51,6 +60,10 @@ adapters = { path = "../../adapters" }
 # The board-support package: brings up the internal I2C bus and powers the AXP192
 # LCD/TFT rails (qhw.20) — load-bearing for the display, which is dark otherwise.
 board-support = { path = "../../board-support" }
+# The pure shared kernel. `probe-rail-check` folds its ADC bursts through the same
+# `oversampled_mean` the EarthUnit adapter uses, so the raw counts it prints are
+# directly comparable with the ones the monitor logs and renders.
+firmware-core = { path = "../../../firmware-core" }
 # Shares the one internal I2C bus across bus devices; here it hands the AXP192 a
 # RefCellDevice so the MPU6886/RTC can join the same bus later without rewiring.
 embedded-hal-bus = "0.3"

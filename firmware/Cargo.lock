@@ -1148,6 +1148,7 @@ dependencies = [
  "esp-idf-sys",
  "esphome-api",
  "esphome-server",
+ "firmware-core",
  "firmware-infra",
  "log",
  "plant-core",
