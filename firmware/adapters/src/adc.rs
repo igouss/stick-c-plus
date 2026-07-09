@@ -7,6 +7,7 @@
 //! oversampling and power-gating live in `firmware-core`; this adapter is the
 //! thin hardware translation that binds them.
 
+use core::fmt;
 use core::num::NonZeroU16;
 
 use esp_idf_hal::adc::attenuation::DB_12;
@@ -15,8 +16,43 @@ use esp_idf_hal::adc::oneshot::{AdcChannelDriver, AdcDriver};
 use esp_idf_hal::adc::{ADC1, ADCCH5, ADCU1};
 use esp_idf_hal::gpio::Gpio33;
 use esp_idf_sys::EspError;
-use firmware_core::{gated_read, oversampled_mean, ProbePower};
+use firmware_core::{gated_read, oversampled_mean, unsaturated, ProbePower, Saturation};
+use plant_core::ports::MAX_READING;
 use plant_core::SoilSensor;
+
+/// Why a [`read_raw`](SoilSensor::read_raw) yielded no usable count.
+///
+/// Two genuinely different failures, kept apart rather than flattened into one
+/// opaque error: the ADC (or the probe's power rail) refused to talk, versus it
+/// talked and produced a number that means nothing.
+///
+/// Both reach [`plant_shell`]'s sampler as a failed read, which publishes nothing
+/// and lets the cached reading age out — so the display and Home Assistant show
+/// *unavailable* instead of a fabricated percentage. That path already existed for
+/// a dead sensor; [`Self::Saturated`] is what routes a *lying* one into it too.
+///
+/// [`plant_shell`]: https://docs.rs/plant-shell
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ReadError {
+    /// The conversion, or the probe's power rail, failed outright.
+    Adc(EspError),
+    /// The conversion succeeded but pinned an ADC rail, so it carries no
+    /// information — an open probe, a bone-dry pot, or a rail that never rose.
+    Saturated(Saturation),
+}
+
+impl fmt::Display for ReadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReadError::Adc(err) => write!(f, "earth unit read failed: {err}"),
+            ReadError::Saturated(rail) => write!(
+                f,
+                "earth unit reading is not a measurement: {rail} — probe open, soil past \
+                 the readable range, or the probe rail is down"
+            ),
+        }
+    }
+}
 
 /// Raw ADC conversions folded into one [`read_raw`](SoilSensor::read_raw).
 ///
@@ -75,19 +111,37 @@ impl<'d, P: ProbePower<Error = EspError>> EarthUnit<'d, P> {
 }
 
 /// One [`read_raw`](SoilSensor::read_raw) energizes the probe, takes the mean of
-/// [`SAMPLES`] rapid conversions, and de-energizes — a single denoised count in
-/// `0..=`[`MAX_READING`](plant_core::ports::MAX_READING).
+/// [`SAMPLES`] rapid conversions, de-energizes, and rejects the result if it pinned
+/// an ADC rail — yielding a single denoised count strictly inside
+/// `0..`[`MAX_READING`].
 ///
 /// The gating ([`gated_read`]) powers the electrodes only across the burst so a
 /// 24/7 monitor doesn't electrolyze them; the oversampling ([`oversampled_mean`])
-/// suppresses per-conversion electrical noise. Both are pure and host-tested in
-/// `firmware-core`; the temporal averaging in [`plant_core::sampler::step`] —
-/// smoothing readings taken seconds apart — stays a separate, inward concern.
+/// suppresses per-conversion electrical noise; the range check ([`unsaturated`])
+/// refuses to pass off a saturated conversion as a measurement. All three are pure
+/// and host-tested in `firmware-core`; the temporal averaging in
+/// [`plant_core::sampler::step`] — smoothing readings taken seconds apart — stays a
+/// separate, inward concern.
+///
+/// The saturation check sits *outside* [`gated_read`] deliberately. Gating's
+/// contract is corrosion safety — the probe is powered down on every exit path — and
+/// its read closure must share the power mechanism's error type. Layering the range
+/// verdict on afterwards keeps that contract intact and keeps the "is this a
+/// measurement?" decision at the adapter boundary, where qhw.32 says it belongs,
+/// rather than smuggling it into the gating primitive.
+///
+/// Because [`oversampled_mean`] averages [`SAMPLES`] conversions with integer
+/// division, a saturated mean requires *every* conversion in the burst to have
+/// pinned. A reading one count shy of the rail is passed through — the check fires
+/// only when the ADC is unambiguously out of range, never on a noisy sample that
+/// merely grazed it.
 impl<P: ProbePower<Error = EspError>> SoilSensor for EarthUnit<'_, P> {
-    type Error = EspError;
+    type Error = ReadError;
 
     fn read_raw(&mut self) -> Result<u16, Self::Error> {
         let Self { channel, power } = self;
-        gated_read(power, || oversampled_mean(SAMPLES, || channel.read_raw()))
+        let raw: u16 = gated_read(power, || oversampled_mean(SAMPLES, || channel.read_raw()))
+            .map_err(ReadError::Adc)?;
+        unsaturated(raw, MAX_READING).map_err(ReadError::Saturated)
     }
 }

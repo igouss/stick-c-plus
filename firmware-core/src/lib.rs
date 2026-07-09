@@ -10,6 +10,9 @@
 //! - [`probe_power`] — the [`ProbePower`] port and [`gated_read`], which powers a
 //!   probe only across a read so a 24/7 monitor cannot electrolyze its
 //!   electrodes.
+//! - [`saturation`] — reject a count that pinned an ADC rail, so a probe that has
+//!   failed open (or a rail that never came up) reads as *unavailable* rather than
+//!   as a confident 0 % or 100 %.
 //!
 //! The concrete adapters (an `esp-idf-hal` ADC channel, an AXP192 power rail)
 //! live in the firmware workspace and implement these seams; this crate names no
@@ -17,6 +20,8 @@
 
 pub mod oversample;
 pub mod probe_power;
+pub mod saturation;
 
 pub use oversample::oversampled_mean;
 pub use probe_power::{gated_read, ProbePower};
+pub use saturation::{unsaturated, Saturation};
