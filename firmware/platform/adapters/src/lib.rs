@@ -12,6 +12,8 @@
 //!   port: a one-line active-low level read, with the pure debounce living inward.
 //! - [`LedcBuzzer`] — the passive buzzer (G2) as the [`Tone`](platform_core::Tone) port, driven
 //!   as an LEDC PWM square wave.
+//! - [`PdmMic`] — the SPM1423 PDM microphone (G0 / G34) as the [`AudioIn`](platform_core::AudioIn)
+//!   port, decimated to PCM by the I2S peripheral. Used by the chime self-test to hear the buzzer.
 //!
 //! The composition root builds these from the board's peripherals and injects them; the
 //! picture, the gesture policy, and the melodies all live in the pure crates inward.
@@ -19,7 +21,9 @@
 mod button;
 mod buzzer;
 mod panel;
+mod pdm_mic;
 
 pub use button::GpioButton;
 pub use buzzer::LedcBuzzer;
 pub use panel::{Panel, PanelScreen, PanelTarget, St7789Error};
+pub use pdm_mic::PdmMic;

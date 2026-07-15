@@ -51,15 +51,29 @@ impl<'d, S: SpeedMode> LedcBuzzer<'d, S> {
         Ok(Self { timer, channel })
     }
 
-    /// Sound one note: set the frequency and a 50 % duty for a tone, or duty 0 for a rest, then
-    /// hold for the note's duration.
-    fn sound(&mut self, note: Note) -> Result<(), EspError> {
-        if note.freq_hz > 0 {
-            self.timer.set_frequency(u32::from(note.freq_hz).Hz())?;
-            self.channel.set_duty(self.channel.get_max_duty() / 2)?;
+    /// Begin — or retune to — a sustained tone at `freq_hz`, or fall silent for a rest (0 Hz).
+    ///
+    /// Non-blocking: it sets the LEDC frequency and a 50 % duty and returns at once; the tone
+    /// holds until the next `start` or [`silence`](Self::silence). A blocking melody is just
+    /// `start` + a delay per note (see [`sound`](Self::sound)); the chime self-test instead
+    /// holds one tone with `start` while it captures the mic, then calls `silence`.
+    pub fn start(&mut self, freq_hz: u16) -> Result<(), EspError> {
+        if freq_hz > 0 {
+            self.timer.set_frequency(u32::from(freq_hz).Hz())?;
+            self.channel.set_duty(self.channel.get_max_duty() / 2)
         } else {
-            self.channel.set_duty(0)?;
+            self.channel.set_duty(0)
         }
+    }
+
+    /// Stop any tone — duty to 0. Idempotent.
+    pub fn silence(&mut self) -> Result<(), EspError> {
+        self.channel.set_duty(0)
+    }
+
+    /// Sound one note: start its tone (or a rest), then hold for the note's duration.
+    fn sound(&mut self, note: Note) -> Result<(), EspError> {
+        self.start(note.freq_hz)?;
         FreeRtos::delay_ms(u32::from(note.ms));
         Ok(())
     }
@@ -71,6 +85,6 @@ impl<S: SpeedMode> Tone for LedcBuzzer<'_, S> {
     /// Play `notes` in order, then fall silent.
     fn play(&mut self, notes: &[Note]) -> Result<(), EspError> {
         notes.iter().try_for_each(|note: &Note| self.sound(*note))?;
-        self.channel.set_duty(0)
+        self.silence()
     }
 }
