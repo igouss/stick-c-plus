@@ -162,3 +162,28 @@ FSM + on-device screen / buttons / buzzer); the plant monitor's WiFi, mDNS, ADC 
 the Sensor entity served over the native-API host (verified host-first against the real HA
 client; the on-device adoption pass awaits the board). Next up: the plant monitor's on-device
 display + Noise encryption + OTA, then the WS2812 driver and the rover on the same platform.
+
+## License
+
+The code here is dual-licensed under either of
+
+- Apache License, Version 2.0 ([`LICENSE-APACHE`](LICENSE-APACHE) or
+  <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([`LICENSE-MIT`](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
+
+at your option. Each crate's `license` field is the source of truth — every first-party crate
+carries this pair, with one deliberate exception: `platform/esphome-api` is **MIT-only**, because
+its message types are vendored from [aioesphomeapi](https://github.com/esphome/aioesphomeapi)
+(MIT); see its [`PROVENANCE.md`](platform/esphome-api/PROVENANCE.md).
+
+Two things the dual licence does **not** cover:
+
+- **The ClaudePix creature art** in `platform/platform-display`, vendored from
+  [ClaudePix](kb/sources/claudepix.md): its licence is **unresolved**, so it is *not* offered
+  under the terms above. `just sprites` regenerates it — resolve or replace it before any
+  redistribution that needs clean provenance.
+- **The `kb/sources/` submodules** (M5Stack's FactoryTest, aioesphomeapi, UbiHome's
+  esphome-native-api): each keeps its own upstream licence.
+
+Unless you state otherwise, any contribution you intentionally submit for inclusion in the work,
+as defined in the Apache-2.0 licence, shall be dual licensed as above, without additional terms.
