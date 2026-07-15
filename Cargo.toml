@@ -26,6 +26,7 @@ members = [
     # apps/ — one bounded context per app on the shared foundation.
     "apps/pomodoro/pomodoro-core",
     "apps/pomodoro/pomodoro-display",
+    "apps/pomodoro/pomodoro-shell",
 ]
 # The firmware is its own Xtensa workspace; keep it out of the host one.
 exclude = ["firmware"]

@@ -137,6 +137,13 @@ hex-lint:
 build:
     cd firmware && PATH="{{pyshim}}:$PATH" cargo build --release
 
+# Build just the standalone pomodoro timer (Xtensa release). It links the shared ESP-IDF the
+# workspace builds (root crate = plant-monitor); the pomodoro ELF drops the unused mdns
+# symbols, so the flashed image is offline and clean. Set ESP_IDF_SYS_ROOT_CRATE=pomodoro to
+# build a lean mdns-free IDF instead (a separate, slower first build).
+build-pomodoro:
+    cd firmware && PATH="{{pyshim}}:$PATH" cargo build --release -p pomodoro
+
 # Type-check the firmware without linking (fast).
 check:
     cd firmware && PATH="{{pyshim}}:$PATH" cargo check --release
@@ -169,6 +176,11 @@ alias flash := run
 # `just run` puts the monitor back.
 run-bin bin:
     cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p plant-monitor --bin {{bin}}'
+
+# Build, flash, and monitor the standalone pomodoro timer. `just run` puts the plant monitor
+# back. Front tap = start/pause, front hold = reset, side tap = skip.
+run-pomodoro:
+    cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p pomodoro'
 
 # Attach a serial monitor only, no flash. Ctrl-C to exit. `--non-interactive`
 # skips espflash's crossterm input reader, so no controlling TTY (and no

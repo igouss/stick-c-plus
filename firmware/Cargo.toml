@@ -24,6 +24,7 @@ members = [
     "firmware-infra",
     "adapters",
     "bins/plant-monitor",
+    "apps/pomodoro/bin",
 ]
 
 # Profiles live at the (virtual) workspace root; members may not set their own.

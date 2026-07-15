@@ -1,0 +1,43 @@
+[package]
+name = "pomodoro"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "M5StickC Plus standalone offline pomodoro timer — screen, two buttons, and buzzer, on the shared board platform."
+# The timer is the point of this package; a bare `cargo run -p pomodoro` must choose it.
+default-run = "pomodoro"
+
+[[bin]]
+name = "pomodoro"
+path = "src/main.rs"
+
+# The imperative shell's outermost layer: it composes adapters and owns effects, so it is the
+# one crate the effect-audit `domain` gate must never tag.
+[package.metadata.hex-arch]
+role = "composition-root"
+
+[dependencies]
+# The std/ESP-IDF stack. esp-idf-svc re-exports -hal and -sys, but all three are named so the
+# version floor shows.
+esp-idf-svc = "0.52"
+esp-idf-hal = "0.46"
+esp-idf-sys = "0.37"
+log = "0.4"
+# Shares the one internal I2C bus so the AXP192 can be powered up over a RefCellDevice.
+embedded-hal-bus = "0.3"
+# Firmware crates (same workspace): the BSP that powers the LCD rails, and the board-generic
+# panel/button/buzzer adapters.
+board-support = { path = "../../../board-support" }
+platform-adapters = { path = "../../../platform/adapters" }
+# Host crates, referenced by path across the two workspaces. platform-runtime is the generic
+# render loop + Monotonic clock; platform-core the Tick; the pomodoro-* crates are the FSM, the
+# picture, and the input shell — all no_std/std and cross-compile to xtensa cleanly.
+platform-core = { path = "../../../../platform/platform-core" }
+platform-runtime = { path = "../../../../platform/platform-runtime" }
+pomodoro-core = { path = "../../../../apps/pomodoro/pomodoro-core" }
+pomodoro-display = { path = "../../../../apps/pomodoro/pomodoro-display" }
+pomodoro-shell = { path = "../../../../apps/pomodoro/pomodoro-shell" }
+
+[build-dependencies]
+# Emits the ESP-IDF sysenv link/search flags for the final link (via ldproxy).
+embuild = "0.33"

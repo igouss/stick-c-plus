@@ -1207,6 +1207,51 @@ dependencies = [
 ]
 
 [[package]]
+name = "pomodoro"
+version = "0.1.0"
+dependencies = [
+ "board-support",
+ "embedded-hal-bus",
+ "embuild",
+ "esp-idf-hal",
+ "esp-idf-svc",
+ "esp-idf-sys",
+ "log",
+ "platform-adapters",
+ "platform-core",
+ "platform-runtime",
+ "pomodoro-core",
+ "pomodoro-display",
+ "pomodoro-shell",
+]
+
+[[package]]
+name = "pomodoro-core"
+version = "0.1.0"
+dependencies = [
+ "platform-core",
+]
+
+[[package]]
+name = "pomodoro-display"
+version = "0.1.0"
+dependencies = [
+ "embedded-graphics",
+ "platform-core",
+ "platform-display",
+ "pomodoro-core",
+]
+
+[[package]]
+name = "pomodoro-shell"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "platform-core",
+ "pomodoro-core",
+]
+
+[[package]]
 name = "portable-atomic"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
