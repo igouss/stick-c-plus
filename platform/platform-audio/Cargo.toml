@@ -1,0 +1,26 @@
+[package]
+name = "platform-audio"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Pure, host-testable acoustic analysis for the M5StickC Plus: the DC-removed RMS level of a PCM block and the sound-present verdict, so an app can tell whether the buzzer actually sounded a note through the mic — framework-free and no_std."
+
+[lib]
+name = "platform_audio"
+path = "src/lib.rs"
+
+# A pure domain core like the others: acoustic-level analysis over PCM samples, no HAL and no
+# effects, so the whole acoustic rule is host-tested. context = "shared" so an adapter or
+# composition root in any bounded context may depend on it.
+[package.metadata.hex-arch]
+role = "domain"
+context = "shared"
+
+# The one dependency a domain core here carries: libm supplies `sqrt` for the RMS, which core
+# has no equivalent of under `no_std`. Pure Rust, no_std, no effects.
+[dependencies]
+libm = "0.2"
+
+# Host-only; never reaches the Xtensa build (a dependent excludes dev-deps).
+[dev-dependencies]
+proptest = "1"

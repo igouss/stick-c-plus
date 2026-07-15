@@ -11,6 +11,7 @@ members = [
     # platform/ — the reusable, app-agnostic foundation (context = "shared", plus the
     # portable ESPHome native-API crates every network app reuses).
     "platform/platform-core",
+    "platform/platform-audio",
     "platform/platform-display",
     "platform/platform-runtime",
     "platform/firmware-core",
