@@ -13,11 +13,11 @@ path = "src/lib.rs"
 # passage of time into repeated calls on the domain's `step`, reading the
 # `SoilSensor` port (the concrete EarthUnit is injected by the composition-root,
 # never named here) and publishing into the shared cache. It owns effects (a
-# std::thread, an Arc<Mutex> cache, a monotonic clock) but names no hardware, so
-# every rule is exercised on the host — its sibling `esphome-server` holds the
-# host-testable native-API socket loop the same way. It may
-# depend only on domain / usecase / port-and-adapter; here that is just plant-core
-# (domain). context=plant scopes it to the plant bounded context.
+# std::thread, an Arc<Mutex> cache) but names no hardware and takes its clock as an
+# injected port, so every rule is exercised on the host — its sibling `esphome-server`
+# holds the host-testable native-API socket loop the same way. It may depend only on
+# domain / usecase / port-and-adapter; here that is plant-core and platform-core (both
+# domain). context=plant scopes it to the plant bounded context.
 [package.metadata.hex-arch]
 role = "driving-adapter"
 context = "plant"
@@ -26,13 +26,12 @@ context = "plant"
 # The pure soil-moisture domain: the SoilSensor port the sampler drives, the
 # `step` use case it folds readings through, and the `fresh` staleness policy the
 # shared cache enforces. no_std + zero-dep, so it cross-compiles to xtensa cleanly
-# — this crate adds only std (threads, Arc/Mutex, Instant) on top.
+# — this crate adds only std (threads, Arc/Mutex) on top.
 plant-core = { path = "../plant-core" }
-# The render loop asks plant-display which creature frame is due, and whether it moves at
-# all — two pure functions. That is what sets the loop's cadence, so a healthy monitor
-# ticks once a second and an unhealthy one animates. hex-lint: driving-adapter may depend
-# on port-and-adapter.
-plant-display = { path = "../plant-display" }
+# The board-generic kernel (context = "shared"): the injected Clock port the sampler
+# stamps readings against. The concrete Monotonic is wired by the composition root; the
+# render loop and clock adapter themselves now live in platform-runtime.
+platform-core = { path = "../platform/platform-core" }
 # The shell logs a failed soil read so a dead probe is observable; on-device these
 # records reach the ESP-IDF logger the composition root installs, on the host they
 # are inert without a logger.

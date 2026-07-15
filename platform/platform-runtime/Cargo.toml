@@ -1,0 +1,26 @@
+[package]
+name = "platform-runtime"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The board-generic imperative runtime for the M5StickC Plus: a monotonic millisecond Clock and the change-suppressing display render loop, generic over any Animated app state and Screen adapter — the effectful driver a composition root wires, host-testable and portable to esp-idf std unchanged."
+
+[lib]
+name = "platform_runtime"
+path = "src/lib.rs"
+
+# A driving (primary) adapter, like plant-shell's sampler: the render loop turns the
+# passage of time into repeated calls on the Screen port, reading the Animated contract to
+# decide cadence and frame — so it is domain-aware and may depend on the platform-core
+# ports (a driving-adapter may depend on domain; infra may not). Only a composition-root
+# constructs and wires it. context = "shared": any app's composition root may depend on it.
+[package.metadata.hex-arch]
+role = "driving-adapter"
+context = "shared"
+
+[dependencies]
+# The ports it drives: Clock (which Monotonic implements), Animated + Screen (which the
+# render loop reads and calls). Path dep on the shared kernel; no_std, zero-dep.
+platform-core = { path = "../platform-core" }
+# The render loop logs a dropped-frame warning and a skipped render, no more.
+log = "0.4"

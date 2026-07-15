@@ -48,9 +48,9 @@ use log::{error, info, warn};
 use plant_core::moisture::Calibration;
 use plant_core::ports::MAX_READING;
 use plant_core::{Observation, Tick};
-use plant_shell::{
-    spawn_display, spawn_sampler, DisplayConfig, Monotonic, SamplerConfig, SharedMoisture,
-};
+use plant_display::Glass;
+use plant_shell::{spawn_sampler, SamplerConfig, SharedMoisture};
+use platform_runtime::{spawn_display, DisplayConfig, Monotonic};
 
 /// Provisional soil calibration — placeholder dry/wet endpoints, *not* measured.
 ///
@@ -218,10 +218,19 @@ fn main() {
         peripherals.pins.gpio18, // RST
     )
     .expect("ST7789 display bring-up");
-    let display_config: DisplayConfig = DisplayConfig::new(max_age);
+    let display_config: DisplayConfig = DisplayConfig::default();
     let display_period: core::time::Duration = display_config.period;
+    // The source the generic render loop pulls each tick: the freshest Observation from the
+    // SAME cache and staleness bound the native-API server reads, wrapped in the Glass view
+    // the ST7789 Screen adapter paints. `now` is the render loop's own clock — the same
+    // Monotonic the sampler stamps against — so the glass flips to *unavailable* the instant
+    // a reading ages out, never a frozen value.
+    let display_source = {
+        let shared: SharedMoisture = shared.clone();
+        move |now: Tick| Glass(shared.observe(now, max_age))
+    };
     let _display =
-        spawn_display(display, shared.clone(), clock, display_config).expect("spawn plant-display");
+        spawn_display(display, display_source, clock, display_config).expect("spawn plant-display");
     info!("display thread up: ST7789 rendering raw + percent every {display_period:?}");
 
     // The native-API device HA adopts: one Soil Moisture sensor whose live value is

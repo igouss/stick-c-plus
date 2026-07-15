@@ -1,10 +1,10 @@
-//! `st7789` — the M5StickC Plus onboard TFT as a [`MoistureDisplay`].
+//! `st7789` — the M5StickC Plus onboard TFT as a [`Screen`] of a plant [`Glass`].
 //!
-//! The driven adapter for [`plant_core::MoistureDisplay`]: it drives the 1.14″
-//! ST7789V2 panel over SPI with `mipidsi`, and hands the panel to `plant-display`,
-//! which paints the current soil [`Observation`] onto it. All freshness and cadence
-//! live inward (the pure [`observe`](plant_core::observe) policy and the
-//! `spawn_display` loop in `plant-shell`); the *picture* lives in `plant-display`.
+//! The driven adapter for [`platform_core::Screen`]: it drives the 1.14″ ST7789V2 panel
+//! over SPI with `mipidsi`, and hands the panel to `plant-display`, which paints the
+//! current soil [`plant_core::Observation`] (wrapped in a [`Glass`]) onto it. All freshness
+//! and cadence live inward (the pure [`observe`](plant_core::observe) policy and the generic
+//! `spawn_display` loop in `platform-runtime`); the *picture* lives in `plant-display`.
 //! What is left here — and all that should be — is the hardware: the SPI bus, the
 //! pins, and the panel's own quirks.
 //!
@@ -52,8 +52,8 @@ use esp_idf_hal::units::FromValueType;
 use mipidsi::models::ST7789;
 use mipidsi::options::{ColorInversion, ColorOrder, Orientation, Rotation};
 use mipidsi::{interface::SpiInterface, Builder, Display};
-use plant_core::{MoistureDisplay, Observation, Tick};
-use plant_display::{RenderError, SCREEN_SIZE};
+use plant_display::{Glass, RenderError, SCREEN_SIZE};
+use platform_core::{Screen, Tick};
 use static_cell::StaticCell;
 
 /// Native (unrotated) panel width — the short axis, in portrait.
@@ -212,14 +212,16 @@ impl St7789Display {
     }
 }
 
-impl MoistureDisplay for St7789Display {
+impl Screen<Glass> for St7789Display {
     type Error = St7789Error;
 
     /// Hand the panel to the renderer. What appears — the wording, the colours, the two
     /// rows, the creature and its frame, the in-place erase — is `plant-display`'s
     /// decision, made once and reviewable on the host. This adapter's contribution is the
-    /// panel it draws on.
-    fn show(&mut self, observation: Observation, elapsed: Tick) -> Result<(), St7789Error> {
+    /// panel it draws on. It serves the plant's [`Glass`] view of the generic
+    /// [`Screen`] port; the pomodoro timer serves its own view through the same port.
+    fn show(&mut self, state: Glass, elapsed: Tick) -> Result<(), St7789Error> {
+        let Glass(observation) = state;
         plant_display::render(&mut self.panel, observation, elapsed)
             .map_err(|err| render_fault("render", err))
     }

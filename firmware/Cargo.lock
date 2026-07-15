@@ -14,6 +14,7 @@ dependencies = [
  "mipidsi",
  "plant-core",
  "plant-display",
+ "platform-core",
  "static_cell",
 ]
 
@@ -1141,6 +1142,7 @@ version = "0.1.0"
 dependencies = [
  "embedded-graphics",
  "plant-core",
+ "platform-core",
  "platform-display",
 ]
 
@@ -1161,7 +1163,9 @@ dependencies = [
  "firmware-infra",
  "log",
  "plant-core",
+ "plant-display",
  "plant-shell",
+ "platform-runtime",
 ]
 
 [[package]]
@@ -1170,8 +1174,12 @@ version = "0.1.0"
 dependencies = [
  "log",
  "plant-core",
- "plant-display",
+ "platform-core",
 ]
+
+[[package]]
+name = "platform-core"
+version = "0.1.0"
 
 [[package]]
 name = "platform-display"
@@ -1179,6 +1187,14 @@ version = "0.1.0"
 dependencies = [
  "embedded-graphics",
  "heapless 0.8.0",
+]
+
+[[package]]
+name = "platform-runtime"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "platform-core",
 ]
 
 [[package]]

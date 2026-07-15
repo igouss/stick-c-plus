@@ -32,8 +32,8 @@ use std::time::Duration;
 use log::warn;
 use plant_core::sampler::step;
 use plant_core::{Calibration, Measurement, ProbeFault, Sample, SoilFault, SoilSensor, Tick};
+use platform_core::Clock;
 
-use crate::clock::Monotonic;
 use crate::shared::SharedMoisture;
 
 /// The interval between soil readings.
@@ -125,23 +125,24 @@ impl Sampler {
 
 /// Spawn the sampler thread: `sensor` → [`step`] → `shared`, every `config.period`.
 ///
-/// The thread is named and sized per `config`. `clock` is the shared time base —
-/// the same [`Monotonic`] the consumers read — so a published reading's age is
-/// measured on one clock. `sensor` moves into the thread, so it must be
-/// [`Send`] + `'static`; its error must be [`Display`](std::fmt::Display) so a
-/// failed read can be logged.
+/// The thread is named and sized per `config`. `clock` is the shared time base — an injected
+/// [`Clock`] (the composition root's `Monotonic`), the same one the consumers read — so a
+/// published reading's age is measured on one clock. `sensor` and `clock` move into the
+/// thread, so both must be [`Send`] + `'static`; the sensor's error must be
+/// [`Display`](std::fmt::Display) so a failed read can be logged.
 ///
 /// Returns the [`Sampler`] handle, or the [`io::Error`] from failing to spawn the
 /// OS/RTOS thread.
-pub fn spawn_sampler<S>(
+pub fn spawn_sampler<S, C>(
     sensor: S,
     shared: SharedMoisture,
-    clock: Monotonic,
+    clock: C,
     config: SamplerConfig,
 ) -> io::Result<Sampler>
 where
     S: SoilSensor + Send + 'static,
     S::Error: std::fmt::Display,
+    C: Clock + Send + 'static,
 {
     let stop: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     let stop_in_thread: Arc<AtomicBool> = Arc::clone(&stop);
@@ -153,15 +154,16 @@ where
 }
 
 /// The thread body: sample, publish, sleep — until asked to stop.
-fn sample_loop<S>(
+fn sample_loop<S, C>(
     mut sensor: S,
     shared: SharedMoisture,
-    clock: Monotonic,
+    clock: C,
     config: SamplerConfig,
     stop: Arc<AtomicBool>,
 ) where
     S: SoilSensor,
     S::Error: std::fmt::Display,
+    C: Clock,
 {
     let mut prev: Option<Measurement> = None;
     while !stop.load(Ordering::Relaxed) {
@@ -221,6 +223,29 @@ mod tests {
     use plant_core::Observation;
     use std::collections::VecDeque;
     use std::sync::mpsc::{channel, Sender};
+    use std::time::Instant;
+
+    /// A monotonic test clock over [`Instant`]. plant-shell cannot depend on the runtime's
+    /// `Monotonic` (that is infra, wired by the composition root), so the one integration
+    /// test that needs a real advancing clock brings its own `Clock` adapter.
+    #[derive(Clone, Copy)]
+    struct TestClock {
+        origin: Instant,
+    }
+
+    impl TestClock {
+        fn start() -> Self {
+            Self {
+                origin: Instant::now(),
+            }
+        }
+    }
+
+    impl Clock for TestClock {
+        fn now(&self) -> Tick {
+            self.origin.elapsed().as_millis().min(u128::from(Tick::MAX)) as Tick
+        }
+    }
 
     /// A calibration where raw `N` maps to `N %` (`N <= 100`), so a reading reads
     /// straight through: raw 30 → 30 %. Same convention as `plant-core`'s tests.
@@ -452,7 +477,7 @@ mod tests {
         // through the loop, publish into the shared cache, stop and join without a
         // panic. Blocking on two pings (rather than polling) makes it robust: the
         // second read starting proves the first publish completed.
-        let clock: Monotonic = Monotonic::start();
+        let clock: TestClock = TestClock::start();
         let shared: SharedMoisture = SharedMoisture::new();
         let (tx, rx): (Sender<()>, _) = channel();
         let sensor: FakeSensor = FakeSensor::constant(45).pinging(tx);

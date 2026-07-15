@@ -5,9 +5,8 @@
 //! rendering the value ([`MoistureDisplay`]); the domain depends only on these
 //! traits, so dependencies point inward.
 
-use crate::freshness::Tick;
 use crate::moisture::RAW_MAX;
-use crate::observation::{Observation, ProbeFault};
+use crate::observation::ProbeFault;
 
 /// Classifies an adapter's own read failure into a domain [`ProbeFault`].
 ///
@@ -56,33 +55,8 @@ pub trait SoilSensor {
 /// ceiling from the port module it implements against.
 pub const MAX_READING: u16 = RAW_MAX;
 
-/// A driven display that renders the latest [`Observation`] of the soil.
-///
-/// The driving side hands the adapter the freshest observation each render cycle;
-/// the firmware supplies the adapter (the on-board ST7789 TFT), and the domain
-/// depends only on this trait, so dependencies point inward. Rendering only: an
-/// adapter translates an observation to pixels and owns no sampling or calibration.
-///
-/// It takes an [`Observation`] rather than an `Option<Measurement>` so the glass
-/// can say *why* there is no number — a corroded probe, a rail that never rose, a
-/// sampler that stopped — instead of showing one indiscriminate placeholder. The
-/// freshness decision was already made upstream by [`observe`](crate::observe); the
-/// adapter only chooses words and pixels for the verdict it is handed.
-///
-/// `Error` is associated so an adapter can surface its own failure type — an SPI
-/// or panel error — without the domain naming any concrete driver error.
-pub trait MoistureDisplay {
-    /// The adapter's own render-failure type.
-    type Error;
-
-    /// Render `observation` — the latest measurement, the fault that replaced it,
-    /// or the reason there is neither.
-    ///
-    /// `elapsed` is how long this observation has been the current one, in [`Tick`]
-    /// milliseconds. The domain has no opinion on what an adapter does with it; a glass
-    /// that only prints a number ignores it, and one that wants to draw attention to a
-    /// fault has the clock it needs to do so without inventing its own. It is *not* the
-    /// reading's age — [`observe`](crate::observe) has already ruled on freshness, and a
-    /// verdict of `Stale` grows older the longer the sampler stays dead.
-    fn show(&mut self, observation: Observation, elapsed: Tick) -> Result<(), Self::Error>;
-}
+// The display port is no longer here. Rendering an Observation is one instance of the
+// board-generic `platform_core::Screen<S>` port (implemented for `plant_display::Glass`,
+// which wraps an Observation) — so the plant monitor and the pomodoro timer share one
+// display port and one render loop. The freshness policy that produces the Observation
+// still lives here, in [`observe`](crate::observe); only the pixels moved out.

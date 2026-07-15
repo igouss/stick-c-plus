@@ -39,6 +39,9 @@ static_cell = "2"
 plant-core = { path = "../../plant-core" }
 firmware-core = { path = "../../firmware-core" }
 plant-display = { path = "../../plant-display" }
+# The board-generic Screen port the st7789 adapter now implements (over a plant Glass),
+# and the Tick it renders against. Shared kernel; no_std, cross-compiles to xtensa.
+platform-core = { path = "../../platform/platform-core" }
 # The ESP-IDF HAL supplies the oneshot ADC driver the `adc` adapter wraps;
 # esp-idf-sys is named alongside it for `EspError` (the adapters' port error
 # type), so its version floor stays visible next to the -hal it re-exports.

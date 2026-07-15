@@ -27,8 +27,9 @@
 //!   its last healthy value and a lying probe is never mistaken for a dead one.
 //! - **Ports**: [`SoilSensor`] — the driven interface the firmware's ADC
 //!   adapter implements, with [`SoilFault`] classifying its failures into domain
-//!   faults; [`MoistureDisplay`] — the driven interface the ST7789 TFT adapter
-//!   implements to render the observation.
+//!   faults. (The display port is the board-generic `platform_core::Screen`, rendering a
+//!   `plant_display::Glass` wrapper over the [`Observation`] — so the pixels are no longer
+//!   a plant-core concern.)
 
 pub mod freshness;
 pub mod moisture;
@@ -39,5 +40,5 @@ pub mod sampler;
 pub use freshness::{observe, Outcome, Reading, Tick};
 pub use moisture::{to_percent, Calibration, Measurement, Moisture};
 pub use observation::{Observation, ProbeFault};
-pub use ports::{MoistureDisplay, SoilFault, SoilSensor};
+pub use ports::{SoilFault, SoilSensor};
 pub use sampler::{step, Sample};

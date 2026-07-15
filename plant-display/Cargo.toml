@@ -27,6 +27,9 @@ plant-core = { path = "../plant-core" }
 # fixed-width text primitives, the colour self-test, and RenderError. This crate holds
 # only the plant-specific picture on top of it.
 platform-display = { path = "../platform/platform-display" }
+# The board-generic kernel (context = "shared"): the Animated contract `Glass` implements,
+# and the Tick it speaks in, so a plant Observation drives the one generic render loop.
+platform-core = { path = "../platform/platform-core" }
 # The graphics port (DrawTarget) plus the text/primitive drawing the layout asserts use.
 embedded-graphics = "0.8"
 

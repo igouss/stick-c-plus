@@ -1,0 +1,584 @@
+//! The display thread — pull the freshest app state, render it when the picture changed.
+//!
+//! The board's one reusable render loop, generic over any [`Animated`] app state `S` and any
+//! [`Screen`] adapter that paints it. A composition root hands it a `source` closure (which
+//! computes the current `S` from whatever the app owns — a moisture cache, a timer) and a
+//! `Screen`; the loop owns the *render cadence* and the *change suppression*, and nothing
+//! else. The pixel-pushing stays in the adapter, the state policy in the app, so this loop's
+//! body is a straight line.
+//!
+//! ## The picture, not the value
+//!
+//! The glass shows a creature beside the app's value, and for the states that must draw
+//! attention that creature *animates* ([`Animated::is_animated`]). So the loop suppresses on
+//! the pair `(state, frame)` rather than on the state alone, and takes its cadence from the
+//! same policy:
+//!
+//! - a **still** state → a constant pair → painted once, then left alone at [`RENDER_PERIOD`];
+//!   nothing keeps the CPU awake between changes.
+//! - an **animated** state → the frame advances on the creature's own clock, so the panel
+//!   repaints at [`ANIMATION_PERIOD`] — and only on the ticks where a new frame is due.
+//!
+//! ## The animation clock, and the anchor
+//!
+//! The clock for a state's creature is `now - since`, where `since` is when the state's
+//! [`anchor`](Animated::anchor) last changed — *not* when the state last changed. A pomodoro
+//! screen's `mm:ss` value changes every second, but its creature must keep animating on the
+//! phase's clock rather than restarting each second; the anchor (the phase, not the value) is
+//! what the loop resets on. For a plant `Observation`, the anchor is the whole observation, so
+//! this reproduces the original behaviour exactly.
+//!
+//! ## Fail-visible
+//!
+//! A render error is logged and skipped, never fatal: a flaky panel must not take an app
+//! down, and the next cycle repaints regardless. Nothing here is ESP-specific, so the whole
+//! loop is exercised on the host against a fake screen; a composition root wires the real
+//! ST7789 adapter in.
+
+use std::fmt::Display;
+use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
+
+use log::warn;
+use platform_core::{Animated, Clock, Screen, Tick};
+
+/// How often the panel is repainted while a state is **still**.
+///
+/// A shorter tick than the app's own value cadence lets a transition show promptly, and
+/// repainting a couple of lines is cheap. A still state suppresses anyway, so this is only
+/// the interval at which the loop *checks* whether the picture changed.
+pub const RENDER_PERIOD: Duration = Duration::from_secs(1);
+
+/// How often the panel is repainted while the creature is **animating**.
+///
+/// The shortest sprite frame hold is 60 ms, so waking every 50 ms lands on every frame. This
+/// cadence applies only while a state animates; a still state falls back to [`RENDER_PERIOD`],
+/// so a resting device is not kept awake. Waking is not repainting: a tick that finds the
+/// same frame due touches no pixels and no SPI bus.
+pub const ANIMATION_PERIOD: Duration = Duration::from_millis(50);
+
+/// The shortest sleep the loop will ever take.
+///
+/// A paint that outran its tick budget would otherwise sleep for zero and the thread would
+/// never yield — starving lower-priority FreeRTOS tasks on a single core. That happened for
+/// real: before the sprite fill was made contiguous, a paint took 85 ms against a 50 ms
+/// budget. The loop survived on luck, and luck is not a scheduling policy.
+pub const MIN_YIELD: Duration = Duration::from_millis(1);
+
+/// The display thread's stack, in bytes.
+///
+/// On-device this sizes a FreeRTOS task stack, so it is set explicitly. embedded-graphics
+/// text + a screen clear stream through the adapter's SPI buffer at constant stack depth, so
+/// 8 KiB holds it with headroom on the ESP32's scarce SRAM — but, like every stack here, it
+/// is validated against the true high-water mark on the metal before it is trusted.
+pub const DISPLAY_STACK_SIZE: usize = 8 * 1024;
+
+/// How the display loop is tuned: its two cadences and its stack.
+///
+/// [`Default`] gives the module constants, which is what every app so far wants; the fields
+/// are public so a composition root can override one. [`Copy`], so it can be built and still
+/// moved into the thread.
+#[derive(Clone, Copy)]
+pub struct DisplayConfig {
+    /// The interval between ticks while the picture is still.
+    pub period: Duration,
+    /// The interval between ticks while the creature animates.
+    pub animation_period: Duration,
+    /// The display thread's stack size, in bytes.
+    pub stack_size: usize,
+}
+
+impl Default for DisplayConfig {
+    fn default() -> Self {
+        Self {
+            period: RENDER_PERIOD,
+            animation_period: ANIMATION_PERIOD,
+            stack_size: DISPLAY_STACK_SIZE,
+        }
+    }
+}
+
+impl DisplayConfig {
+    /// How long to sleep after painting `glass`: a fast tick while a creature moves, the slow
+    /// one otherwise (including the very first tick, before anything is drawn).
+    fn tick_period<S: Animated>(&self, glass: Glass<S>) -> Duration {
+        match glass {
+            Some(shown) if shown.state.is_animated() => self.animation_period,
+            _ => self.period,
+        }
+    }
+}
+
+/// A running display thread — a handle to stop and join it.
+///
+/// Dropping the handle detaches the thread (it keeps repainting), which is what a composition
+/// root wants: the app renders for the life of the program. Tests and a future clean-shutdown
+/// path use [`stop`](Self::stop) + [`join`](Self::join).
+pub struct DisplayTask {
+    handle: JoinHandle<()>,
+    stop: Arc<AtomicBool>,
+}
+
+impl DisplayTask {
+    /// Ask the display loop to finish after its current cycle.
+    pub fn stop(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+
+    /// Block until the display thread has exited, propagating a panic it carried.
+    pub fn join(self) -> thread::Result<()> {
+        self.handle.join()
+    }
+}
+
+/// Spawn the display thread: `source` → [`Screen::show`], every `config.period`
+/// (or `animation_period` while the creature moves).
+///
+/// `source` computes the current app state from whatever the app owns; it moves into the
+/// thread, so it must be [`Send`] + `'static`. `clock` is the shared time base — the same one
+/// the app's writer stamps against — so a state's age is measured on one clock. `display`
+/// likewise moves in; its error must be [`Display`] so a render failure can be logged.
+///
+/// Returns the [`DisplayTask`] handle, or the [`io::Error`] from failing to spawn the OS/RTOS
+/// thread.
+pub fn spawn_display<S, D, F, C>(
+    display: D,
+    source: F,
+    clock: C,
+    config: DisplayConfig,
+) -> io::Result<DisplayTask>
+where
+    S: Animated + Send + 'static,
+    D: Screen<S> + Send + 'static,
+    D::Error: Display,
+    F: FnMut(Tick) -> S + Send + 'static,
+    C: Clock + Send + 'static,
+{
+    let stop: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    let stop_in_thread: Arc<AtomicBool> = Arc::clone(&stop);
+    let handle: JoinHandle<()> = thread::Builder::new()
+        .name("platform-display".to_string())
+        .stack_size(config.stack_size)
+        .spawn(move || render_loop(display, source, clock, config, stop_in_thread))?;
+    Ok(DisplayTask { handle, stop })
+}
+
+/// What is currently on the glass: the state painted, the *frame* of its creature that was
+/// painted, and the [`Tick`] at which this state's [`anchor`](Animated::anchor) last changed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Shown<S: Animated> {
+    state: S,
+    frame: usize,
+    since: Tick,
+}
+
+/// The glass, or nothing yet (before the first paint).
+type Glass<S> = Option<Shown<S>>;
+
+/// The thread body: on each tick, redraw only if the picture changed — until asked to stop.
+fn render_loop<S, D, F, C>(
+    mut display: D,
+    mut source: F,
+    clock: C,
+    config: DisplayConfig,
+    stop: Arc<AtomicBool>,
+) where
+    S: Animated,
+    D: Screen<S>,
+    D::Error: Display,
+    F: FnMut(Tick) -> S,
+    C: Clock,
+{
+    let mut glass: Glass<S> = None;
+    while !stop.load(Ordering::Relaxed) {
+        let before: Glass<S> = glass;
+        let started: Instant = Instant::now();
+        glass = render_once(&mut display, &mut source, clock.now(), glass);
+        let budget: Duration = config.tick_period(glass);
+
+        // A paint that outruns its own tick means the creature cannot keep its timing: the
+        // panel silently drops frames and the animation drags. Nothing on the glass says so,
+        // so the loop says it here. Only an actual repaint is measured; a suppressed tick
+        // costs nothing.
+        let painted: bool = glass != before;
+        let took: Duration = started.elapsed();
+        if painted && took > budget {
+            warn!("platform-display: paint took {took:?}, over the {budget:?} tick budget");
+        }
+
+        // The cadence follows what is on the glass: fast while a creature moves, slow once it
+        // is still. The paint's own cost is subtracted so the frame rate does not drift, and
+        // the sleep never reaches zero — see [`MIN_YIELD`].
+        thread::sleep(budget.saturating_sub(took).max(MIN_YIELD));
+    }
+}
+
+/// One render cycle: read the freshest state and draw it *only if the picture changed*.
+///
+/// The whole shell↔adapter seam, in isolation and testable without a thread. The picture is
+/// the pair `(state, frame)`, where the frame comes from [`Animated::frame_index`]. Suppression
+/// compares the pair, so a still state (constant frame) paints once, while an animated state
+/// repaints only on the ticks a new frame is due.
+///
+/// `since` — when the current state's anchor last changed — is the animation's zero. It is
+/// kept while the anchor holds and reset when it changes, so a creature always starts at its
+/// first frame on a real transition but keeps counting across the app's value updates.
+///
+/// A render error is logged, not propagated, and leaves the glass unchanged so the next tick
+/// retries.
+fn render_once<S, D, F>(display: &mut D, source: &mut F, now: Tick, glass: Glass<S>) -> Glass<S>
+where
+    S: Animated,
+    D: Screen<S>,
+    D::Error: Display,
+    F: FnMut(Tick) -> S,
+{
+    let state: S = source(now);
+
+    // The animation's zero: the tick this state's anchor became current. A changed anchor
+    // restarts the creature; an unchanged one keeps counting across value updates.
+    let since: Tick = match glass {
+        Some(shown) if shown.state.anchor() == state.anchor() => shown.since,
+        _ => now,
+    };
+    let elapsed: Tick = now.saturating_sub(since);
+    let frame: usize = state.frame_index(elapsed);
+
+    let next: Shown<S> = Shown {
+        state,
+        frame,
+        since,
+    };
+    if glass == Some(next) {
+        return glass; // same picture — leave the glass untouched.
+    }
+    match display.show(state, elapsed) {
+        Ok(()) => Some(next),
+        Err(err) => {
+            warn!("platform-display: render failed, skipping this cycle: {err}");
+            glass // keep the prior state; retry next tick.
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::sync::mpsc::{channel, Sender};
+    use std::sync::Mutex;
+
+    use crate::clock::Monotonic;
+
+    /// Frames advance every this many ms in the test's [`Moving`](TestState::Moving) state.
+    const FRAME_HOLD: Tick = 100;
+    /// Frames in the moving loop.
+    const FRAMES: usize = 4;
+
+    /// A test app state: a value that is drawn, with an [`anchor`](Animated::anchor) that
+    /// deliberately excludes the value — so `Still(30)` and `Still(60)` share an anchor, the
+    /// way a pomodoro's `mm:ss` value shares the phase's anchor. `Still` is motionless (frame
+    /// 0 forever); `Moving` animates on its own clock.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum TestState {
+        Still(u8),
+        Moving(u8),
+    }
+
+    impl Animated for TestState {
+        /// 0 = still, 1 = moving — the drawn value is *not* part of the identity that resets
+        /// the animation clock.
+        type Anchor = u8;
+
+        fn anchor(&self) -> u8 {
+            match self {
+                TestState::Still(_) => 0,
+                TestState::Moving(_) => 1,
+            }
+        }
+
+        fn is_animated(&self) -> bool {
+            matches!(self, TestState::Moving(_))
+        }
+
+        fn frame_index(&self, elapsed_ms: Tick) -> usize {
+            match self {
+                TestState::Still(_) => 0,
+                TestState::Moving(_) => ((elapsed_ms / FRAME_HOLD) as usize) % FRAMES,
+            }
+        }
+    }
+
+    /// A render error whose message is [`Display`], as the loop's log bound requires.
+    #[derive(Clone, Debug)]
+    struct TestError(&'static str);
+
+    impl Display for TestError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.0)
+        }
+    }
+
+    /// A [`Screen`] fake that records every `(state, elapsed)` it is shown, so a test can
+    /// assert the exact sequence the loop painted. `fail` makes every `show` error (still
+    /// recording first); `ping` signals each render so a thread test can await a real repaint.
+    struct FakeScreen {
+        shown: Arc<Mutex<Vec<TestState>>>,
+        elapsed: Arc<Mutex<Vec<Tick>>>,
+        fail: bool,
+        ping: Option<Sender<()>>,
+    }
+
+    impl FakeScreen {
+        fn new() -> (Self, Arc<Mutex<Vec<TestState>>>) {
+            let shown: Arc<Mutex<Vec<TestState>>> = Arc::new(Mutex::new(Vec::new()));
+            let screen: FakeScreen = FakeScreen {
+                shown: Arc::clone(&shown),
+                elapsed: Arc::new(Mutex::new(Vec::new())),
+                fail: false,
+                ping: None,
+            };
+            (screen, shown)
+        }
+
+        fn failing() -> Self {
+            FakeScreen {
+                shown: Arc::new(Mutex::new(Vec::new())),
+                elapsed: Arc::new(Mutex::new(Vec::new())),
+                fail: true,
+                ping: None,
+            }
+        }
+
+        fn pinging(mut self, tx: Sender<()>) -> Self {
+            self.ping = Some(tx);
+            self
+        }
+
+        fn elapsed_log(&self) -> Vec<Tick> {
+            self.elapsed.lock().expect("elapsed log lock").clone()
+        }
+    }
+
+    impl Screen<TestState> for FakeScreen {
+        type Error = TestError;
+
+        fn show(&mut self, state: TestState, elapsed: Tick) -> Result<(), TestError> {
+            self.shown.lock().expect("shown log lock").push(state);
+            self.elapsed.lock().expect("elapsed log lock").push(elapsed);
+            if let Some(tx) = &self.ping {
+                let _ = tx.send(());
+            }
+            if self.fail {
+                Err(TestError("panel offline"))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    /// A source that always yields `state`.
+    fn fixed(state: TestState) -> impl FnMut(Tick) -> TestState {
+        move |_now: Tick| state
+    }
+
+    /// The states a glass is showing, in order.
+    fn shown_states(shown: &Arc<Mutex<Vec<TestState>>>) -> Vec<TestState> {
+        shown.lock().expect("shown log lock").clone()
+    }
+
+    #[test]
+    fn the_first_paint_shows_the_state() {
+        let (mut screen, shown): (FakeScreen, _) = FakeScreen::new();
+        let after: Glass<TestState> =
+            render_once(&mut screen, &mut fixed(TestState::Still(30)), 20, None);
+
+        assert_eq!(shown_states(&shown), vec![TestState::Still(30)]);
+        assert!(after.is_some(), "the state is now on the glass");
+    }
+
+    #[test]
+    fn a_steady_still_state_is_drawn_once_then_suppressed() {
+        // Three ticks over an unchanging still state paint exactly once.
+        let (mut screen, shown): (FakeScreen, _) = FakeScreen::new();
+        let mut src = fixed(TestState::Still(30));
+
+        let g0: Glass<TestState> = render_once(&mut screen, &mut src, 20, None);
+        let g1: Glass<TestState> = render_once(&mut screen, &mut src, 21, g0);
+        let _g2: Glass<TestState> = render_once(&mut screen, &mut src, 22, g1);
+
+        assert_eq!(shown_states(&shown).len(), 1, "a steady state repainted");
+    }
+
+    #[test]
+    fn a_still_state_keeps_the_slow_cadence() {
+        let config: DisplayConfig = DisplayConfig::default();
+        let (mut screen, _shown): (FakeScreen, _) = FakeScreen::new();
+        let g0: Glass<TestState> =
+            render_once(&mut screen, &mut fixed(TestState::Still(30)), 0, None);
+        assert_eq!(config.tick_period(g0), RENDER_PERIOD);
+    }
+
+    #[test]
+    fn an_animated_state_repaints_as_its_frame_advances() {
+        // The same moving state, one frame-hold later, is a different frame — a real repaint.
+        let (mut screen, shown): (FakeScreen, _) = FakeScreen::new();
+        let mut src = fixed(TestState::Moving(0));
+
+        let g0: Glass<TestState> = render_once(&mut screen, &mut src, 100, None);
+        let _g1: Glass<TestState> = render_once(&mut screen, &mut src, 100 + FRAME_HOLD, g0);
+
+        assert_eq!(
+            shown_states(&shown),
+            vec![TestState::Moving(0), TestState::Moving(0)],
+            "the moving state must repaint when its frame advances"
+        );
+        assert_eq!(
+            screen.elapsed_log(),
+            vec![0, FRAME_HOLD],
+            "the animation clock"
+        );
+    }
+
+    #[test]
+    fn an_animated_state_is_not_repainted_between_frames() {
+        // Ticks inside one frame's hold repaint nothing: waking is not repainting.
+        let (mut screen, shown): (FakeScreen, _) = FakeScreen::new();
+        let mut src = fixed(TestState::Moving(0));
+
+        let g0: Glass<TestState> = render_once(&mut screen, &mut src, 100, None);
+        let g1: Glass<TestState> = render_once(&mut screen, &mut src, 100 + FRAME_HOLD / 2, g0);
+        let _g2: Glass<TestState> = render_once(&mut screen, &mut src, 100 + FRAME_HOLD - 1, g1);
+
+        assert_eq!(shown_states(&shown).len(), 1, "a mid-frame tick repainted");
+    }
+
+    #[test]
+    fn an_anchor_change_restarts_the_animation_clock() {
+        // A still state giving way to a moving one restarts the creature at frame 0: the
+        // elapsed handed to the second paint is 0, not the age of the first.
+        let (mut screen, _shown): (FakeScreen, _) = FakeScreen::new();
+
+        let g0: Glass<TestState> =
+            render_once(&mut screen, &mut fixed(TestState::Still(9)), 1_000, None);
+        let _g1: Glass<TestState> =
+            render_once(&mut screen, &mut fixed(TestState::Moving(0)), 1_500, g0);
+
+        assert_eq!(
+            screen.elapsed_log(),
+            vec![0, 0],
+            "each new anchor starts its creature at elapsed 0"
+        );
+    }
+
+    #[test]
+    fn a_value_change_within_an_anchor_repaints_and_keeps_the_clock() {
+        // THE pomodoro case: the drawn value changes but the anchor does not, so the panel
+        // repaints the new value while the creature's clock keeps running — it is NOT reset.
+        let (mut screen, shown): (FakeScreen, _) = FakeScreen::new();
+        let cell: Cell<TestState> = Cell::new(TestState::Moving(0));
+        let mut src = |_now: Tick| cell.get();
+
+        let g0: Glass<TestState> = render_once(&mut screen, &mut src, 0, None);
+        cell.set(TestState::Moving(1));
+        let _g1: Glass<TestState> = render_once(&mut screen, &mut src, 250, g0);
+
+        assert_eq!(
+            shown_states(&shown),
+            vec![TestState::Moving(0), TestState::Moving(1)],
+            "a changed value must repaint"
+        );
+        assert_eq!(
+            screen.elapsed_log(),
+            vec![0, 250],
+            "the animation clock kept running across the value change"
+        );
+    }
+
+    #[test]
+    fn a_changed_value_is_redrawn() {
+        let (mut screen, shown): (FakeScreen, _) = FakeScreen::new();
+        let cell: Cell<TestState> = Cell::new(TestState::Still(30));
+        let mut src = |_now: Tick| cell.get();
+
+        let g0: Glass<TestState> = render_once(&mut screen, &mut src, 10, None);
+        cell.set(TestState::Still(60));
+        let _g1: Glass<TestState> = render_once(&mut screen, &mut src, 20, g0);
+
+        assert_eq!(
+            shown_states(&shown),
+            vec![TestState::Still(30), TestState::Still(60)]
+        );
+    }
+
+    #[test]
+    fn a_render_error_keeps_the_prior_state_and_is_not_fatal() {
+        let mut screen: FakeScreen = FakeScreen::failing();
+        let after: Glass<TestState> =
+            render_once(&mut screen, &mut fixed(TestState::Still(55)), 0, None);
+        assert!(
+            after.is_none(),
+            "a failed paint does not advance the shown state"
+        );
+    }
+
+    #[test]
+    fn the_cadence_is_fast_only_while_a_state_animates() {
+        let config: DisplayConfig = DisplayConfig::default();
+        let animating: Glass<TestState> = Some(Shown {
+            state: TestState::Moving(0),
+            frame: 0,
+            since: 0,
+        });
+        let still: Glass<TestState> = Some(Shown {
+            state: TestState::Still(30),
+            frame: 0,
+            since: 0,
+        });
+
+        assert_eq!(config.tick_period(animating), ANIMATION_PERIOD);
+        assert_eq!(config.tick_period(still), RENDER_PERIOD);
+        assert_eq!(config.tick_period::<TestState>(None), RENDER_PERIOD);
+    }
+
+    #[test]
+    fn the_spawned_thread_redraws_on_change_and_stops_cleanly() {
+        // The one integration test: spawn the real thread, paint the first value, suppress
+        // the steady ticks, repaint on a change, then stop and join without a panic. Blocking
+        // on pings (not polling) keeps it robust.
+        let clock: Monotonic = Monotonic::start();
+        let state: Arc<Mutex<TestState>> = Arc::new(Mutex::new(TestState::Still(45)));
+        let (tx, rx): (Sender<()>, _) = channel();
+        let (base, shown): (FakeScreen, _) = FakeScreen::new();
+        let screen: FakeScreen = base.pinging(tx);
+        let config: DisplayConfig = DisplayConfig {
+            period: Duration::from_millis(1),
+            animation_period: Duration::from_millis(1),
+            stack_size: 256 * 1024,
+        };
+        let source = {
+            let state: Arc<Mutex<TestState>> = Arc::clone(&state);
+            move |_now: Tick| *state.lock().expect("state lock")
+        };
+
+        let task: DisplayTask =
+            spawn_display(screen, source, clock, config).expect("spawn display thread");
+
+        rx.recv_timeout(Duration::from_secs(2))
+            .expect("the display must paint the first value");
+        *state.lock().expect("state lock") = TestState::Still(50);
+        rx.recv_timeout(Duration::from_secs(2))
+            .expect("a changed value must re-render");
+
+        task.stop();
+        task.join().expect("the display thread must not panic");
+
+        assert_eq!(
+            shown_states(&shown),
+            vec![TestState::Still(45), TestState::Still(50)]
+        );
+    }
+}

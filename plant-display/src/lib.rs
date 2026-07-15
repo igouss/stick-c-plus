@@ -36,10 +36,12 @@
 //! paints `Rgb565::RED` as red whatever the glass would do; only [`colour_bands`] on the
 //! real panel can catch a channel swap.
 
+mod glass;
 mod layout;
 pub mod scene;
 mod screen;
 
+pub use glass::Glass;
 pub use layout::{LINE_WIDTH, PCT_Y, RAW_Y, SPRITE_ORIGIN, SPRITE_SCALE, TEXT_X};
 pub use scene::{frame_index, is_animated, scene, Motion, Scene};
 pub use screen::{fault_label, render};

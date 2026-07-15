@@ -56,6 +56,13 @@ plant-core = { path = "../../../plant-core" }
 # `spawn_sampler`; the shell's staleness + panic-isolation rules are host-tested
 # there, so this bin stays pure wiring.
 plant-shell = { path = "../../../plant-shell" }
+# The board-generic runtime (context=shared): the Monotonic clock this root makes and
+# shares, and the generic spawn_display render loop it wires the ST7789 Screen into. Only
+# a composition root depends on this infra crate.
+platform-runtime = { path = "../../../platform/platform-runtime" }
+# The plant picture: the Glass view the render loop's source wraps each Observation in, so
+# the ST7789 Screen<Glass> adapter can paint it.
+plant-display = { path = "../../../plant-display" }
 # The native-API core (context=api): the `SensorDevice` this root composes and the
 # `DeviceInfoResponse`/`SensorConfig` it fills. Pure + prost-only, cross-compiles
 # to xtensa cleanly. This is the plant<->api cross-context wiring the composition

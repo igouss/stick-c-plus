@@ -14,6 +14,7 @@ members = [
     # platform/ — the reusable, app-agnostic foundation (context = "shared").
     "platform/platform-core",
     "platform/platform-display",
+    "platform/platform-runtime",
     # apps + shared domains.
     "domain",
     "plant-core",

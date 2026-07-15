@@ -911,6 +911,7 @@ dependencies = [
  "embedded-graphics",
  "embedded-graphics-simulator",
  "plant-core",
+ "platform-core",
  "platform-display",
  "proptest",
 ]
@@ -921,7 +922,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "plant-core",
- "plant-display",
+ "platform-core",
 ]
 
 [[package]]
@@ -939,6 +940,14 @@ dependencies = [
  "embedded-graphics-simulator",
  "heapless",
  "proptest",
+]
+
+[[package]]
+name = "platform-runtime"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "platform-core",
 ]
 
 [[package]]
