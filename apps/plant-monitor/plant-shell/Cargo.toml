@@ -31,7 +31,7 @@ plant-core = { path = "../plant-core" }
 # The board-generic kernel (context = "shared"): the injected Clock port the sampler
 # stamps readings against. The concrete Monotonic is wired by the composition root; the
 # render loop and clock adapter themselves now live in platform-runtime.
-platform-core = { path = "../platform/platform-core" }
+platform-core = { path = "../../../platform/platform-core" }
 # The shell logs a failed soil read so a dead probe is observable; on-device these
 # records reach the ESP-IDF logger the composition root installs, on the host they
 # are inert without a logger.

@@ -1,29 +1,26 @@
-# Host workspace: device-independent, host-testable crates (led-core, plant-core,
-# esphome-api, esphome-server, firmware-core, plant-shell). Most are framework-free
-# no_std; the `plant-shell` and `esphome-server` imperative shells link std
-# (threads, Arc/Mutex, sockets) but name no hardware, so they too are verified on
-# the host and cross-compile to esp-idf std unchanged. The firmware is a *detached*
-# workspace (firmware/Cargo.toml has its own [workspace]) so it can carry the
-# Xtensa target + `esp` toolchain without forcing them on `cargo test` here.
-# Firmware crates depend on these host crates by path across the boundary (e.g.
-# adapters -> plant-core, firmware-core; the plant-monitor bin -> plant-shell,
-# esphome-server).
+# Host workspace: device-independent, host-testable crates, organized as a reusable
+# `platform/` foundation and one directory per app under `apps/`. Most are framework-free
+# no_std; the imperative shells link std (threads, Arc/Mutex, sockets) but name no hardware,
+# so they too are verified on the host and cross-compile to esp-idf std unchanged. The
+# firmware is a *detached* workspace (firmware/Cargo.toml has its own [workspace]) so it can
+# carry the Xtensa target + `esp` toolchain without forcing them on `cargo test` here.
+# Firmware crates depend on these host crates by path across the boundary.
 [workspace]
 resolver = "2"
 members = [
-    # platform/ — the reusable, app-agnostic foundation (context = "shared").
+    # platform/ — the reusable, app-agnostic foundation (context = "shared", plus the
+    # portable ESPHome native-API crates every network app reuses).
     "platform/platform-core",
     "platform/platform-display",
     "platform/platform-runtime",
-    # apps + shared domains.
-    "domain",
-    "plant-core",
-    "plant-display",
-    "esphome-api",
-    "esphome-server",
-    "firmware-core",
-    "plant-shell",
+    "platform/firmware-core",
+    "platform/esphome-api",
+    "platform/esphome-server",
     # apps/ — one bounded context per app on the shared foundation.
+    "apps/led-driver/led-core",
+    "apps/plant-monitor/plant-core",
+    "apps/plant-monitor/plant-display",
+    "apps/plant-monitor/plant-shell",
     "apps/pomodoro/pomodoro-core",
     "apps/pomodoro/pomodoro-display",
     "apps/pomodoro/pomodoro-shell",

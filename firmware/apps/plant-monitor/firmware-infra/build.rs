@@ -28,11 +28,17 @@ struct Wifi {
 }
 
 fn main() {
-    // `secrets.toml` sits at the firmware workspace root — one level up from this
-    // crate — so every firmware crate that needs it reads the same file.
+    // `secrets.toml` sits at the firmware workspace root, alongside the committed
+    // `secrets.toml.example`. Walk up from this crate to find that root, so the crate can sit
+    // at any depth under firmware/ (it moved to apps/plant-monitor/ in the reorg) without
+    // hardcoding the number of `..`.
     let manifest_dir: String =
         std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is always set by cargo");
-    let secrets_path: PathBuf = Path::new(&manifest_dir).join("../secrets.toml");
+    let firmware_root: &Path = Path::new(&manifest_dir)
+        .ancestors()
+        .find(|dir: &&Path| dir.join("secrets.toml.example").exists())
+        .expect("firmware workspace root (with secrets.toml.example) not found above this crate");
+    let secrets_path: PathBuf = firmware_root.join("secrets.toml");
 
     // Re-run only when the inputs change: the secrets file or this script itself.
     println!("cargo:rerun-if-changed={}", secrets_path.display());

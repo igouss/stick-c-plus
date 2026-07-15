@@ -26,10 +26,10 @@ plant-core = { path = "../plant-core" }
 # The board-generic display foundation (context = "shared"): the sprite library, the
 # fixed-width text primitives, the colour self-test, and RenderError. This crate holds
 # only the plant-specific picture on top of it.
-platform-display = { path = "../platform/platform-display" }
+platform-display = { path = "../../../platform/platform-display" }
 # The board-generic kernel (context = "shared"): the Animated contract `Glass` implements,
 # and the Tick it speaks in, so a plant Observation drives the one generic render loop.
-platform-core = { path = "../platform/platform-core" }
+platform-core = { path = "../../../platform/platform-core" }
 # The graphics port (DrawTarget) plus the text/primitive drawing the layout asserts use.
 embedded-graphics = "0.8"
 
@@ -37,7 +37,7 @@ embedded-graphics = "0.8"
 [dev-dependencies]
 # The shared host framebuffer (feature `testing`) that the screen tests render into — the
 # same DrawTarget port the panel implements, so a render is proven against real pixels.
-platform-display = { path = "../platform/platform-display", features = ["testing"] }
+platform-display = { path = "../../../platform/platform-display", features = ["testing"] }
 # A host framebuffer that can save a PNG. `default-features = false` drops the SDL window
 # backend — the screenshots example rasterizes to a file, it never opens a window.
 embedded-graphics-simulator = { version = "0.8", default-features = false }

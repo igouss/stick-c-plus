@@ -1,18 +1,16 @@
 # M5StickC Plus FIRMWARE workspace — detached from the host workspace above.
 #
 # Carved into small single-responsibility crates so the hexagon / Functional-
-# Core–Imperative-Shell boundaries are enforceable per crate. The role tags below
-# are DECLARED now; the mechanical gate that reads them lands with qhw.14.
+# Core–Imperative-Shell boundaries are enforceable per crate, and organized to mirror the
+# host workspace: a reusable `platform/` foundation and one directory per app under `apps/`.
 #
-#   board-support/      infra          — M5StickC Plus BSP (AXP192 power-on, pin
-#                                        map, peripheral bring-up); all 3 projects.
-#   firmware-infra/     infra          — WiFi STA, mDNS, OTA; all 3 projects.
-#                                        (the native-API server host is the portable
-#                                        host crate `esphome-server`, not here.)
-#   adapters/           driven-adapter — domain-port adapters (adc, st7789,
-#                                        clock, ws2812) implementing host ports.
-#   bins/plant-monitor/ composition-root — bin #1; wires adapters to the host
-#                                        crates (plant-core, esphome-api) by path.
+#   platform/adapters/        driven-adapter — board-generic adapters (ST7789 panel +
+#                                              PanelScreen, buttons, buzzer); every app.
+#   platform/board-support/   infra          — M5StickC Plus BSP (AXP192, I2C); every app.
+#   apps/plant-monitor/adapters/     driven-adapter — the plant adc + probe-power adapters.
+#   apps/plant-monitor/firmware-infra/ infra        — WiFi STA, mDNS, OTA (plant only).
+#   apps/plant-monitor/bin/   composition-root — the plant-monitor (crate name "plant-monitor").
+#   apps/pomodoro/bin/        composition-root — the standalone pomodoro timer.
 #
 # Detached (own `[workspace]`, `exclude`d up top) so its Xtensa target and `esp`
 # toolchain (rust-toolchain.toml) never touch the host `cargo test`.
@@ -20,10 +18,10 @@
 resolver = "2"
 members = [
     "platform/adapters",
-    "board-support",
-    "firmware-infra",
-    "adapters",
-    "bins/plant-monitor",
+    "platform/board-support",
+    "apps/plant-monitor/adapters",
+    "apps/plant-monitor/firmware-infra",
+    "apps/plant-monitor/bin",
     "apps/pomodoro/bin",
 ]
 

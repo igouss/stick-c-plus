@@ -50,42 +50,42 @@ log = "0.4"
 # cross-workspace seam every downstream bead relies on. plant-core is no_std and
 # zero-dep; plant-shell adds only std (threads, Arc/Mutex), so both cross-compile
 # for xtensa cleanly (esp-idf maps std::thread onto a FreeRTOS task).
-plant-core = { path = "../../../plant-core" }
+plant-core = { path = "../../../../apps/plant-monitor/plant-core" }
 # The imperative shell: the shared moisture cache + the sampler thread. The
 # composition root builds the real EarthUnit adapter and hands it to
 # `spawn_sampler`; the shell's staleness + panic-isolation rules are host-tested
 # there, so this bin stays pure wiring.
-plant-shell = { path = "../../../plant-shell" }
+plant-shell = { path = "../../../../apps/plant-monitor/plant-shell" }
 # The board-generic runtime (context=shared): the Monotonic clock this root makes and
 # shares, and the generic spawn_display render loop it wires the ST7789 Screen into. Only
 # a composition root depends on this infra crate.
-platform-runtime = { path = "../../../platform/platform-runtime" }
+platform-runtime = { path = "../../../../platform/platform-runtime" }
 # The plant picture: the Glass view the render loop's source wraps each Observation in, so
 # the ST7789 Screen<Glass> adapter can paint it.
-plant-display = { path = "../../../plant-display" }
+plant-display = { path = "../../../../apps/plant-monitor/plant-display" }
 # The native-API core (context=api): the `SensorDevice` this root composes and the
 # `DeviceInfoResponse`/`SensorConfig` it fills. Pure + prost-only, cross-compiles
 # to xtensa cleanly. This is the plant<->api cross-context wiring the composition
 # root exists to do — the two bounded contexts stay isolated in the host workspace.
-esphome-api = { path = "../../../esphome-api" }
+esphome-api = { path = "../../../../platform/esphome-api" }
 # The reusable native-API server host (context=api): the blocking accept loop that
 # serves the `SensorDevice` on :6053. std::net over lwIP on-device; host-tested via
 # the aioesphomeapi oracle, so this bin only binds it and hands it the device.
-esphome-server = { path = "../../../esphome-server" }
+esphome-server = { path = "../../../../platform/esphome-server" }
 # The driven adapters (firmware workspace). The composition root reaches for
 # `adapters::adc::EarthUnit` to bind the SoilSensor port to real ADC1 hardware, and
 # `adapters::st7789::St7789Display` to bind the MoistureDisplay port to the TFT.
-adapters = { path = "../../adapters" }
+adapters = { path = "../adapters" }
 # The board-generic driven adapters (shared): the ST7789 Panel + generic PanelScreen the
 # composition root wraps with the plant render function. Buttons/buzzer are unused here.
-platform-adapters = { path = "../../platform/adapters" }
+platform-adapters = { path = "../../../platform/adapters" }
 # The board-support package: brings up the internal I2C bus and powers the AXP192
 # LCD/TFT rails (qhw.20) — load-bearing for the display, which is dark otherwise.
-board-support = { path = "../../board-support" }
+board-support = { path = "../../../platform/board-support" }
 # The pure shared kernel. `probe-rail-check` folds its ADC bursts through the same
 # `oversampled_mean` the EarthUnit adapter uses, so the raw counts it prints are
 # directly comparable with the ones the monitor logs and renders.
-firmware-core = { path = "../../../firmware-core" }
+firmware-core = { path = "../../../../platform/firmware-core" }
 # Shares the one internal I2C bus across bus devices; here it hands the AXP192 a
 # RefCellDevice so the MPU6886/RTC can join the same bus later without rewiring.
 embedded-hal-bus = "0.3"
@@ -93,7 +93,7 @@ embedded-hal-bus = "0.3"
 # composition root takes the modem + system event loop + NVS and hands them to
 # `firmware_infra::wifi::WifiStation` so the board joins the network before the
 # native-API server (qhw.27) needs the link.
-firmware-infra = { path = "../../firmware-infra" }
+firmware-infra = { path = "../firmware-infra" }
 
 [build-dependencies]
 # Emits the ESP-IDF sysenv link/search flags for the final link (via ldproxy).

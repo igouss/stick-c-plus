@@ -27,7 +27,7 @@ log = "0.4"
 embedded-hal-bus = "0.3"
 # Firmware crates (same workspace): the BSP that powers the LCD rails, and the board-generic
 # panel/button/buzzer adapters.
-board-support = { path = "../../../board-support" }
+board-support = { path = "../../../platform/board-support" }
 platform-adapters = { path = "../../../platform/adapters" }
 # Host crates, referenced by path across the two workspaces. platform-runtime is the generic
 # render loop + Monotonic clock; platform-core the Tick; the pomodoro-* crates are the FSM, the

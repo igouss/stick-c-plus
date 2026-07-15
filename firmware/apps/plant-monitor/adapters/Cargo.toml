@@ -23,8 +23,8 @@ role = "driven-adapter"
 # port the `adc` adapter implements; firmware-core owns the pure oversampling
 # reduction and the ProbePower gating port the adapter composes — each host-tested
 # there, so this crate stays a thin on-target shell.
-plant-core = { path = "../../plant-core" }
-firmware-core = { path = "../../firmware-core" }
+plant-core = { path = "../../../../apps/plant-monitor/plant-core" }
+firmware-core = { path = "../../../../platform/firmware-core" }
 # The ESP-IDF HAL supplies the oneshot ADC driver the `adc` adapter wraps;
 # esp-idf-sys is named alongside it for `EspError` (the adapters' port error
 # type), so its version floor stays visible next to the -hal it re-exports.

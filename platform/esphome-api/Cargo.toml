@@ -20,7 +20,7 @@ prost = "0.14"
 # led-core effects. Kept optional so the plant-monitor build (SensorEntity only)
 # never pulls in the LED animation domain. led-core is pure no_std, so it does
 # not disturb effect-audit.
-led-core = { path = "../domain", optional = true }
+led-core = { path = "../../apps/led-driver/led-core", optional = true }
 
 [features]
 # Exactly one api-version feature selects the vendored proto snapshot. Only the
