@@ -34,8 +34,10 @@ through the same ST7789 panel adapter — each app supplies only its own *pictur
 ```
 stick-c-plus/
 ├─ platform/          # the reusable, app-agnostic foundation (context = "shared")
-│  ├─ platform-core/       #   domain          — Tick, the Clock/Screen/Button/Tone ports,
+│  ├─ platform-core/       #   domain          — Tick, the Clock/Screen/Button/Tone/AudioIn ports,
 │  │                       #                      the Animated contract, the pure button Debounce
+│  ├─ platform-audio/      #   domain           — the acoustic level (DC-removed RMS) + sound-present
+│  │                       #                      verdict (the chime self-test's ears, host-tested)
 │  ├─ platform-display/    #   port-and-adapter — the ClaudePix sprite library, the fixed-width
 │  │                       #                      text primitives, the RGB colour self-test
 │  ├─ platform-runtime/    #   driving-adapter  — the Monotonic clock + the generic, change-
@@ -49,8 +51,9 @@ stick-c-plus/
 │  └─ led-driver/          #   led-core (WS2812 effects)
 ├─ firmware/          # the Xtensa boundary — a detached std/ESP-IDF workspace
 │  ├─ platform/            #   board-support (BSP: AXP192, I2C) · adapters (ST7789 panel +
-│  │                       #     generic PanelScreen, G37/G39 buttons, G2 LEDC buzzer)
+│  │                       #     generic PanelScreen, G37/G39 buttons, G2 LEDC buzzer, G0/G34 PDM mic)
 │  └─ apps/                #   plant-monitor/{adapters, firmware-infra, bin} · pomodoro/bin
+│                          #     (pomodoro + the chime-selftest bench tool)
 └─ kb/                # Knowledge base — board facts, sources, findings (kbe-style)
 ```
 
@@ -124,15 +127,23 @@ just ci            # fmt + hex-lint + sprites + clippy (both worlds) + test + bu
 Connect the board (appears as `/dev/ttyUSB0`), then flash the app you want:
 
 ```sh
-just run-pomodoro  # the standalone pomodoro timer (screen + buttons + buzzer, offline)
-just run           # the plant monitor  (a.k.a. `just flash`)
-just monitor       # serial monitor only — pty-free (espflash --non-interactive)
+just run-pomodoro       # the standalone pomodoro timer (screen + buttons + buzzer, offline)
+just run-chime-selftest # play every jingle through the buzzer, hear it back on the PDM mic
+just run                # the plant monitor  (a.k.a. `just flash`)
+just monitor            # serial monitor only — pty-free (espflash --non-interactive)
 ```
 
-The pomodoro controls: **front button (G37) tap** = start / pause / resume, **front hold** =
-reset the current phase, **side button (G39) tap** = skip to the next phase. Durations are
-the classic 25 / 5 / 15 min (long break every 4th focus) — one constant in `pomodoro-core`
-to change, or shrink for a bench test. Serial traps (dialout group, the FT232 baud ceiling)
+The pomodoro controls: **front button (G37) tap** = start / pause / resume, **front
+double-tap** = restart the whole session, **front hold** = reset the current phase, **side
+button (G39) tap** = skip to the next phase. Durations are the classic 25 / 5 / 15 min (long
+break every 4th focus) — one constant in `pomodoro-core` to change, or shrink for a bench
+test. The transition jingles are melodies in intent, but the tiny passive buzzer is not a
+speaker: measured on-device it is loud across ~2–9 kHz yet radiates almost none of its energy at
+the pitch it is driven, so it renders them as loud beeps told apart by rhythm and note count, not
+tune — the notes are simply kept in that loud band. `just run-chime-selftest` proves the
+audibility on-device — it plays every note through the buzzer while listening on the PDM mic and
+logs each note's acoustic level against the silent floor, so audibility is falsifiable instead of
+taken on faith. Serial traps (dialout group, the FT232 baud ceiling)
 are in [`kb/guides/flashing-and-serial-access.md`](kb/guides/flashing-and-serial-access.md).
 
 ## Hardware wiring

@@ -178,9 +178,19 @@ run-bin bin:
     cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p plant-monitor --bin {{bin}}'
 
 # Build, flash, and monitor the standalone pomodoro timer. `just run` puts the plant monitor
-# back. Front tap = start/pause, front hold = reset, side tap = skip.
+# back. Front tap = start/pause, front double-tap = restart session, front hold = reset, side
+# tap = skip.
 run-pomodoro:
     cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p pomodoro'
+
+# Flash and monitor the chime self-test: it plays every jingle note on the buzzer while
+# listening on the PDM mic, and logs each note's acoustic level vs. the silent floor + PASS/FAIL
+# — so "the chime is audible" is checked on-device, not by ear. (The tiny buzzer is a resonant
+# transducer, so the test measures loudness above the floor, not pitch.) Read the floor vs. note
+# levels and, if needed, calibrate MARGIN/MIN_LEVEL in src/chime_selftest.rs. `just run-pomodoro`
+# puts the timer back.
+run-chime-selftest:
+    cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p pomodoro --bin chime-selftest'
 
 # Attach a serial monitor only, no flash. Ctrl-C to exit. `--non-interactive`
 # skips espflash's crossterm input reader, so no controlling TTY (and no
