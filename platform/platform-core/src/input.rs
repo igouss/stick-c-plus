@@ -13,6 +13,15 @@ pub const DEBOUNCE_MS: Tick = 15;
 /// than a [`Tap`](ButtonEvent::Tap), in milliseconds.
 pub const HOLD_MS: Tick = 600;
 
+/// How long a [`Tap`](ButtonEvent::Tap) waits for a second one before it counts as a lone tap,
+/// in milliseconds — the [`TapCadence`] window.
+///
+/// A double-tap can only be told from a single tap by waiting: a lone tap is confirmed once
+/// this window passes with no second tap, so a button routed through [`TapCadence`] reports a
+/// [`Tap`](ButtonEvent::Tap) this much later than a bare [`Debounce`] would. 300 ms is a
+/// comfortable double-click gap yet short enough that start/pause still feels prompt.
+pub const DOUBLE_TAP_MS: Tick = 300;
+
 /// A momentary push-button, read as a raw pressed/released level.
 ///
 /// The driven port for an input pin: the firmware adapter reads the GPIO (active-low on the
@@ -24,14 +33,21 @@ pub trait Button {
     fn poll(&mut self) -> bool;
 }
 
-/// What a debounced button did — the only two gestures this board needs.
+/// What a debounced button did.
+///
+/// [`Debounce`] emits only [`Tap`](ButtonEvent::Tap) and [`Hold`](ButtonEvent::Hold);
+/// [`DoubleTap`](ButtonEvent::DoubleTap) is produced only by [`TapCadence`], which reclassifies
+/// two quick taps. An app maps whichever of these it wants onto its own commands.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ButtonEvent {
-    /// A short press: pressed and released inside [`HOLD_MS`]. Emitted on release.
+    /// A short press: pressed and released inside [`HOLD_MS`]. Emitted on release — or, through
+    /// [`TapCadence`], once its [`DOUBLE_TAP_MS`] window has passed with no second tap.
     Tap,
     /// A long press: held for at least [`HOLD_MS`]. Emitted once, the moment the threshold
     /// passes — while the button is still down — so a hold feels immediate.
     Hold,
+    /// Two taps inside [`DOUBLE_TAP_MS`]. Only [`TapCadence`] emits this.
+    DoubleTap,
 }
 
 /// Turns a raw, bouncing button level into clean [`ButtonEvent`]s, as a pure function of
@@ -114,6 +130,67 @@ impl Debounce {
                 Some(ButtonEvent::Hold)
             }
             _ => None,
+        }
+    }
+}
+
+/// Reclassifies a [`Debounce`]'s [`Tap`](ButtonEvent::Tap) stream into taps and
+/// [`DoubleTap`](ButtonEvent::DoubleTap)s, as a pure function of time.
+///
+/// A double-tap is two taps inside [`DOUBLE_TAP_MS`], so a lone tap cannot be reported until
+/// that window has passed with no second tap — otherwise every double-tap would first fire a
+/// spurious single tap. Fed the event a [`Debounce`] produced (often `None`) and `now` on
+/// *every* poll, it holds one pending tap and answers:
+///
+/// - a first [`Tap`](ButtonEvent::Tap) starts the window and emits nothing yet;
+/// - a second [`Tap`](ButtonEvent::Tap) inside the window emits one
+///   [`DoubleTap`](ButtonEvent::DoubleTap);
+/// - a poll on which the window elapses with no second tap emits the pending
+///   [`Tap`](ButtonEvent::Tap);
+/// - a [`Hold`](ButtonEvent::Hold) passes straight through and cancels any pending tap.
+///
+/// It must be updated on every poll, not only when the debounce produced an event — that is how
+/// a lone tap's window is timed out. Because of that, a pending tap is never older than the
+/// window when a second tap arrives, so `pending.is_some()` alone decides a double-tap.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TapCadence {
+    /// When a lone tap is waiting for a possible second one; `None` while nothing is pending.
+    pending: Option<Tick>,
+}
+
+impl TapCadence {
+    /// A cadence with nothing pending.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Fold one poll `(now, event)` — the event a [`Debounce`] produced this poll, if any —
+    /// into the cadence, returning the gesture to act on now.
+    pub fn update(&mut self, now: Tick, event: Option<ButtonEvent>) -> Option<ButtonEvent> {
+        match event {
+            // A hold is unambiguous and immediate; it also abandons any waiting tap.
+            Some(ButtonEvent::Hold) => {
+                self.pending = None;
+                Some(ButtonEvent::Hold)
+            }
+            // A tap either closes a waiting one into a double-tap, or opens the window itself.
+            Some(ButtonEvent::Tap) => match self.pending.take() {
+                Some(_) => Some(ButtonEvent::DoubleTap),
+                None => {
+                    self.pending = Some(now);
+                    None
+                }
+            },
+            // A double-tap can only reach here if some other producer made one; pass it on.
+            Some(ButtonEvent::DoubleTap) => Some(ButtonEvent::DoubleTap),
+            // No new gesture: release a waiting tap once its window has passed.
+            None => match self.pending {
+                Some(at) if now.saturating_sub(at) >= DOUBLE_TAP_MS => {
+                    self.pending = None;
+                    Some(ButtonEvent::Tap)
+                }
+                _ => None,
+            },
         }
     }
 }
@@ -225,6 +302,87 @@ mod tests {
             ],
         );
         assert_eq!(events, vec![]);
+    }
+
+    /// Feed a cadence a sequence of `(now, event)` polls and collect what it emitted, in order.
+    fn feed_cadence(
+        cadence: &mut TapCadence,
+        polls: &[(Tick, Option<ButtonEvent>)],
+    ) -> Vec<ButtonEvent> {
+        polls
+            .iter()
+            .filter_map(|&(now, event): &(Tick, Option<ButtonEvent>)| cadence.update(now, event))
+            .collect()
+    }
+
+    /// Zero: a cadence fed only empty polls emits nothing, however long it is ticked.
+    #[test]
+    fn an_idle_cadence_emits_nothing() {
+        let mut cadence: TapCadence = TapCadence::new();
+        let events: Vec<ButtonEvent> =
+            feed_cadence(&mut cadence, &[(0, None), (1_000, None), (5_000, None)]);
+        assert_eq!(events, vec![]);
+    }
+
+    /// One: a lone tap is held back through its window and then emitted once as a plain tap.
+    #[test]
+    fn a_lone_tap_is_released_after_the_window() {
+        let mut cadence: TapCadence = TapCadence::new();
+        let events: Vec<ButtonEvent> = feed_cadence(
+            &mut cadence,
+            &[
+                (100, Some(ButtonEvent::Tap)),   // window opens — nothing yet
+                (100 + DOUBLE_TAP_MS - 1, None), // still inside the window — nothing
+                (100 + DOUBLE_TAP_MS, None),     // window elapses -> Tap
+            ],
+        );
+        assert_eq!(events, vec![ButtonEvent::Tap]);
+    }
+
+    /// One: two taps inside the window are exactly one double-tap, and no stray single tap.
+    #[test]
+    fn two_quick_taps_are_one_double_tap() {
+        let mut cadence: TapCadence = TapCadence::new();
+        let events: Vec<ButtonEvent> = feed_cadence(
+            &mut cadence,
+            &[
+                (100, Some(ButtonEvent::Tap)),                      // first tap
+                (100 + DOUBLE_TAP_MS - 50, Some(ButtonEvent::Tap)), // second, inside -> DoubleTap
+                (100 + DOUBLE_TAP_MS + 500, None),                  // long after — silent
+            ],
+        );
+        assert_eq!(events, vec![ButtonEvent::DoubleTap]);
+    }
+
+    /// Many: two taps too far apart are two separate single taps, not a double-tap.
+    #[test]
+    fn two_slow_taps_are_two_single_taps() {
+        let mut cadence: TapCadence = TapCadence::new();
+        let events: Vec<ButtonEvent> = feed_cadence(
+            &mut cadence,
+            &[
+                (100, Some(ButtonEvent::Tap)), // first window opens
+                (100 + DOUBLE_TAP_MS, None),   // it elapses -> Tap
+                (900, Some(ButtonEvent::Tap)), // second window opens
+                (900 + DOUBLE_TAP_MS, None),   // it elapses -> Tap
+            ],
+        );
+        assert_eq!(events, vec![ButtonEvent::Tap, ButtonEvent::Tap]);
+    }
+
+    /// A hold passes straight through, immediately, and cancels a waiting tap so it never fires.
+    #[test]
+    fn a_hold_passes_through_and_cancels_a_pending_tap() {
+        let mut cadence: TapCadence = TapCadence::new();
+        let events: Vec<ButtonEvent> = feed_cadence(
+            &mut cadence,
+            &[
+                (100, Some(ButtonEvent::Tap)),   // a tap starts waiting
+                (150, Some(ButtonEvent::Hold)),  // a hold arrives -> Hold now, tap dropped
+                (100 + DOUBLE_TAP_MS + 1, None), // the old window passes — nothing left
+            ],
+        );
+        assert_eq!(events, vec![ButtonEvent::Hold]);
     }
 
     proptest! {

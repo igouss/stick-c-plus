@@ -12,9 +12,12 @@
 //! - [`Screen`] — a driven display that renders a view of some app state `S`. The ST7789
 //!   panel adapter implements it; the app supplies the picture.
 //! - [`Button`] — a momentary button's raw pressed level, debounced by the pure
-//!   [`Debounce`] into [`ButtonEvent`]s (a tap, or a long hold).
+//!   [`Debounce`] into [`ButtonEvent`]s (a tap, or a long hold); an app that wants a
+//!   double-tap routes that stream through the pure [`TapCadence`].
 //! - [`Tone`] — a buzzer that plays a sequence of [`Note`]s. The app owns the melody; the
 //!   adapter only sounds it.
+//! - [`AudioIn`] — a microphone yielding mono PCM samples. The adapter only transfers samples;
+//!   the pure `platform-audio` crate decides what they mean (e.g. whether a tone is present).
 //!
 //! ## The animation contract
 //! - [`Animated`] — an app state that knows its own animation policy: a coarse
@@ -24,6 +27,7 @@
 //!   render loop (in `platform-runtime`) reads exactly this.
 
 mod animated;
+mod audio;
 mod clock;
 mod input;
 mod screen;
@@ -31,8 +35,9 @@ mod sound;
 mod tick;
 
 pub use animated::Animated;
+pub use audio::AudioIn;
 pub use clock::Clock;
-pub use input::{Button, ButtonEvent, Debounce};
+pub use input::{Button, ButtonEvent, Debounce, TapCadence, DEBOUNCE_MS, DOUBLE_TAP_MS, HOLD_MS};
 pub use screen::Screen;
 pub use sound::{Note, Tone};
 pub use tick::Tick;
