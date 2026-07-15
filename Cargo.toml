@@ -11,6 +11,9 @@
 [workspace]
 resolver = "2"
 members = [
+    # platform/ — the reusable, app-agnostic foundation (context = "shared").
+    "platform/platform-display",
+    # apps + shared domains.
     "domain",
     "plant-core",
     "plant-display",

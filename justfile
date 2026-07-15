@@ -48,23 +48,23 @@ test:
 screens:
     cargo run --quiet -p plant-display --example screenshots
 
-# Regenerate plant-display/src/sprite/generated.rs from the vendored ClaudePix frames
+# Regenerate platform-display/src/sprite/generated.rs from the vendored ClaudePix frames
 # (babashka; no JS, no network). The generator re-hashes every preset and refuses to emit
 # unless all 13 match the digests captured from the live site in a real browser — so a
 # corrupted or silently-edited copy fails here, not on the glass. See
 # kb/sources/claudepix.md.
 sprites:
-    bb plant-display/gen/generate.clj
+    bb platform/platform-display/gen/generate.clj
 
 # Fail if generated.rs has drifted from gen/frames.json. Part of `just ci`.
 sprites-check:
-    bb plant-display/gen/generate.clj --check
+    bb platform/platform-display/gen/generate.clj --check
 
 # Render every vendored sprite to target/screens/sprites.png — six frames sampled across
 # each loop. The sprite unit tests cannot see: a transposed decode still paints a
 # creature-shaped blob. This is how a human checks the creature is a creature.
 sprite-screens:
-    cargo run --quiet -p plant-display --example sprites
+    cargo run --quiet -p platform-display --example sprites
 
 # Run the aioesphomeapi conformance oracles — the #[ignore]d tests that drive the
 # REAL Home Assistant client (aioesphomeapi) against our device: the connection FSM

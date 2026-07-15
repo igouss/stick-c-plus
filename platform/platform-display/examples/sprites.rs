@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use embedded_graphics_simulator::{OutputSettings, OutputSettingsBuilder, SimulatorDisplay};
-use plant_display::sprite::{self, Frame, Sprite, ALL, SPRITE_SIZE};
+use platform_display::sprite::{self, Frame, Sprite, ALL, SPRITE_SIZE};
 
 const OUT_DIR: &str = "target/screens";
 /// Frames sampled per animation — first and last always included.

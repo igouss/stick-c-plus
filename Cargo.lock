@@ -910,8 +910,8 @@ version = "0.1.0"
 dependencies = [
  "embedded-graphics",
  "embedded-graphics-simulator",
- "heapless",
  "plant-core",
+ "platform-display",
  "proptest",
 ]
 
@@ -922,6 +922,16 @@ dependencies = [
  "log",
  "plant-core",
  "plant-display",
+]
+
+[[package]]
+name = "platform-display"
+version = "0.1.0"
+dependencies = [
+ "embedded-graphics",
+ "embedded-graphics-simulator",
+ "heapless",
+ "proptest",
 ]
 
 [[package]]

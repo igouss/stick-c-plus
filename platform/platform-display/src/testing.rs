@@ -15,20 +15,22 @@
 
 use core::convert::Infallible;
 
+use alloc::vec;
+use alloc::vec::Vec;
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 
-use crate::layout::SCREEN_SIZE;
+use crate::SCREEN_SIZE;
 
 /// A [`SCREEN_SIZE`] canvas of `Rgb565`, plus a count of writes that fell outside it.
-pub(crate) struct Framebuffer {
+pub struct Framebuffer {
     pixels: Vec<Rgb565>,
     escaped: usize,
 }
 
 impl Framebuffer {
     /// A blank canvas, black as the panel is after its bring-up clear.
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         let area: usize = (SCREEN_SIZE.width * SCREEN_SIZE.height) as usize;
         Framebuffer {
             pixels: vec![Rgb565::BLACK; area],
@@ -37,12 +39,12 @@ impl Framebuffer {
     }
 
     /// Every pixel, row-major — the whole picture, for comparing two renders.
-    pub(crate) fn pixels(&self) -> &[Rgb565] {
+    pub fn pixels(&self) -> &[Rgb565] {
         &self.pixels
     }
 
     /// How many pixels carry ink (are not the black background).
-    pub(crate) fn lit_pixels(&self) -> usize {
+    pub fn lit_pixels(&self) -> usize {
         self.pixels
             .iter()
             .filter(|colour: &&Rgb565| **colour != Rgb565::BLACK)
@@ -51,7 +53,7 @@ impl Framebuffer {
 
     /// How many writes landed outside the canvas — clipped glyphs, in other words.
     /// A correct layout never produces one.
-    pub(crate) fn escaped(&self) -> usize {
+    pub fn escaped(&self) -> usize {
         self.escaped
     }
 
@@ -67,6 +69,12 @@ impl Framebuffer {
         }
         let index: usize = at.y as usize * SCREEN_SIZE.width as usize + at.x as usize;
         self.pixels[index] = colour;
+    }
+}
+
+impl Default for Framebuffer {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

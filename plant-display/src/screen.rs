@@ -8,11 +8,10 @@
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use plant_core::{Observation, ProbeFault};
+use platform_display::{sprite, text_line, RenderError};
 
-use crate::error::RenderError;
-use crate::layout::{text_line, PCT_Y, RAW_Y, SPRITE_ORIGIN, SPRITE_SCALE};
+use crate::layout::{LINE_WIDTH, PCT_Y, RAW_Y, SPRITE_ORIGIN, SPRITE_SCALE, TEXT_X};
 use crate::scene::{self, Scene};
-use crate::sprite;
 
 /// A [`ProbeFault`] as a label that fits [`LINE_WIDTH`](crate::LINE_WIDTH) characters.
 ///
@@ -83,6 +82,21 @@ where
     )
 }
 
+/// Draw one plant-monitor text row: the platform [`text_line`] primitive bound to this
+/// app's left column ([`TEXT_X`]) and field width ([`LINE_WIDTH`]), so the eight call sites
+/// below carry only their row, colour, and content.
+fn line<D>(
+    target: &mut D,
+    y: i32,
+    color: Rgb565,
+    content: core::fmt::Arguments<'_>,
+) -> Result<(), RenderError<D::Error>>
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    text_line(target, Point::new(TEXT_X, y), color, LINE_WIDTH, content)
+}
+
 /// Paint the two text rows for `observation`.
 fn text<D>(target: &mut D, observation: Observation) -> Result<(), RenderError<D::Error>>
 where
@@ -90,13 +104,13 @@ where
 {
     match observation {
         Observation::Fresh(measurement) => {
-            text_line(
+            line(
                 target,
                 RAW_Y,
                 Rgb565::WHITE,
                 format_args!("RAW  {:>4}", measurement.raw()),
             )?;
-            text_line(
+            line(
                 target,
                 PCT_Y,
                 Rgb565::WHITE,
@@ -104,8 +118,8 @@ where
             )?;
         }
         Observation::Faulted(fault) => {
-            text_line(target, RAW_Y, Rgb565::RED, format_args!("FAULT"))?;
-            text_line(
+            line(target, RAW_Y, Rgb565::RED, format_args!("FAULT"))?;
+            line(
                 target,
                 PCT_Y,
                 Rgb565::RED,
@@ -113,12 +127,12 @@ where
             )?;
         }
         Observation::Stale => {
-            text_line(target, RAW_Y, Rgb565::RED, format_args!("STALE"))?;
-            text_line(target, PCT_Y, Rgb565::RED, format_args!("NO SAMPLE"))?;
+            line(target, RAW_Y, Rgb565::RED, format_args!("STALE"))?;
+            line(target, PCT_Y, Rgb565::RED, format_args!("NO SAMPLE"))?;
         }
         Observation::NeverSampled => {
-            text_line(target, RAW_Y, Rgb565::WHITE, format_args!("SOIL --"))?;
-            text_line(target, PCT_Y, Rgb565::WHITE, format_args!("starting"))?;
+            line(target, RAW_Y, Rgb565::WHITE, format_args!("SOIL --"))?;
+            line(target, PCT_Y, Rgb565::WHITE, format_args!("starting"))?;
         }
     }
     Ok(())
@@ -127,9 +141,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::LINE_WIDTH;
-    use crate::testing::Framebuffer;
     use plant_core::{Measurement, Moisture};
+    use platform_display::testing::Framebuffer;
     use proptest::prelude::*;
 
     fn measurement(raw: u16, percent: u8) -> Measurement {

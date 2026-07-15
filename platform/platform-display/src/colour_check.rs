@@ -20,7 +20,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 
 use crate::error::RenderError;
-use crate::layout::{text_overlay, TEXT_X};
+use crate::text::text_overlay;
 
 /// The bands, top to bottom, each labelled with the colour it is *meant* to be.
 const BANDS: [(Rgb565, &str); 3] = [
@@ -31,6 +31,9 @@ const BANDS: [(Rgb565, &str); 3] = [
 
 /// Inset of a band's label from the band's own top edge.
 const LABEL_INSET_Y: i32 = 8;
+/// Inset of a band's label from the left edge — this self-test owns its own placement
+/// rather than borrowing any app's text column.
+const LABEL_INSET_X: i32 = 8;
 
 /// Paint three full-width bands — **red, green, blue**, top to bottom — each labelled
 /// in white with the colour it is meant to be.
@@ -64,7 +67,7 @@ where
             // names what the band is *supposed* to be.
             text_overlay(
                 target,
-                Point::new(TEXT_X, top + LABEL_INSET_Y),
+                Point::new(LABEL_INSET_X, top + LABEL_INSET_Y),
                 Rgb565::WHITE,
                 label,
             )
@@ -75,8 +78,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::SCREEN_SIZE;
     use crate::testing::Framebuffer;
+    use crate::SCREEN_SIZE;
 
     fn painted() -> Framebuffer {
         let mut fb: Framebuffer = Framebuffer::new();
