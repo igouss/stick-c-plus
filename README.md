@@ -69,7 +69,7 @@ the host workspace, a bounded `context` — `shared` for the platform, one per a
 `hex-lint` enforces the role matrix **and** context isolation on each commit via
 `just precommit`; `effect-audit` holds the functional cores pure. Neither is advisory.
 
-`kb/` is a [`~/kbe`](../../../kbe/README.md)-style knowledge base for everything we learn
+`kb/` is a `~/kbe`-style knowledge base for everything we learn
 about this board — cited sources, on-device experiments, and the findings distilled from
 them. It never compiles into the firmware. Its headline source is M5Stack's shipped
 **FactoryTest** app ([`m5stack/M5StickC-Plus`](https://github.com/m5stack/M5StickC-Plus), a
