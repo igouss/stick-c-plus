@@ -974,6 +974,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pomodoro-display"
+version = "0.1.0"
+dependencies = [
+ "embedded-graphics",
+ "embedded-graphics-simulator",
+ "platform-core",
+ "platform-display",
+ "pomodoro-core",
+]
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"

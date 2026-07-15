@@ -47,6 +47,7 @@ test:
 # glass is wired. For THAT question: `just run-bin display-colour-check`, and look.
 screens:
     cargo run --quiet -p plant-display --example screenshots
+    cargo run --quiet -p pomodoro-display --example screenshots
 
 # Regenerate platform-display/src/sprite/generated.rs from the vendored ClaudePix frames
 # (babashka; no JS, no network). The generator re-hashes every preset and refuses to emit

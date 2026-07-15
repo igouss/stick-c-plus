@@ -1,0 +1,37 @@
+[package]
+name = "pomodoro-display"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Device-independent pixel layout of a pomodoro timer: the mm:ss clock, the phase label, and the Claude creature that codes through a focus and dances through a break — rendered into any embedded-graphics DrawTarget, so the same code drives the ST7789 panel and a host framebuffer."
+
+[lib]
+name = "pomodoro_display"
+path = "src/lib.rs"
+
+# The seam between the pomodoro domain and the graphics port: it turns a PomodoroView
+# (built from a Timer) into pixels through the board-generic platform-display primitives.
+# port-and-adapter may depend on domain (pomodoro-core, platform-core) and other
+# port-and-adapter crates (platform-display). context = "pomodoro".
+[package.metadata.hex-arch]
+role = "port-and-adapter"
+context = "pomodoro"
+
+[dependencies]
+# The timer domain: the Phase/Status/Timer the view is built from, and Durations for the
+# remaining-time arithmetic.
+pomodoro-core = { path = "../pomodoro-core" }
+# The board-generic kernel: the Animated contract the view implements, and Tick.
+platform-core = { path = "../../../platform/platform-core" }
+# The board-generic picture: the sprite library, the fixed-width text primitives, and
+# RenderError. This crate holds only the pomodoro-specific layout on top.
+platform-display = { path = "../../../platform/platform-display" }
+# The graphics port (DrawTarget) plus the Point/Rgb565 the layout speaks in.
+embedded-graphics = "0.8"
+
+# Host-only; never reaches the Xtensa build (a dependent excludes dev-deps).
+[dev-dependencies]
+# The shared host framebuffer the render tests draw into.
+platform-display = { path = "../../../platform/platform-display", features = ["testing"] }
+# A host framebuffer that saves a PNG — the screenshots example rasterizes to a file.
+embedded-graphics-simulator = { version = "0.8", default-features = false }
