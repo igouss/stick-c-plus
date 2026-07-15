@@ -10,7 +10,15 @@
 # esphome-server).
 [workspace]
 resolver = "2"
-members = ["domain", "plant-core", "esphome-api", "esphome-server", "firmware-core", "plant-shell"]
+members = [
+    "domain",
+    "plant-core",
+    "plant-display",
+    "esphome-api",
+    "esphome-server",
+    "firmware-core",
+    "plant-shell",
+]
 # The firmware is its own Xtensa workspace; keep it out of the host one.
 exclude = ["firmware"]
 

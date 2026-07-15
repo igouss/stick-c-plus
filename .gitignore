@@ -45,3 +45,19 @@ secrets.toml
 # The aioesphomeapi conformance-oracle venv, provisioned by `just oracle`. A local
 # dev tool (aioesphomeapi is not a Cargo dep); re-creatable, so never committed.
 /.oracle-venv
+
+# Claude Code runtime files — machine-local state (locks, schedules, worktrees,
+# agent registry). These were ignored only via .git/info/exclude, which is NOT
+# shared across clones; promoted here so every checkout ignores them.
+# settings.json IS committed (shared config); settings.local.json is personal.
+**/.claude/settings.local.json
+**/.claude/scheduled_tasks.lock
+**/.claude/scheduled_tasks.json
+**/.claude/routines/.state/
+**/.claude/worktrees/
+**/.claude/checkpoints/
+**/.claude/mailbox/
+**/.claude/agent-registry.json
+**/.claude/agent-memory-local
+**/.claude/first-run
+**/.claude/assistant-daemon-state.json

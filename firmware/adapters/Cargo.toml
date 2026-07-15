@@ -18,25 +18,27 @@ role = "driven-adapter"
 # The Clock re-home (qhw.15) and the WS2812 RMT encoder (qqh.1) arrive in their own
 # beads, pulling their peripherals then.
 [dependencies]
-# The ST7789 display adapter (qhw.6): mipidsi drives the panel over SPI and
-# embedded-graphics renders the text. mipidsi 0.10 bundles its own SPI interface
-# (mipidsi::interface), so no separate display-interface-spi dep is needed.
-# embedded-hal names the SPI mode (MODE_0) and the traits mipidsi builds on.
+# The ST7789 display adapter (qhw.6): mipidsi drives the panel over SPI. mipidsi 0.10
+# bundles its own SPI interface (mipidsi::interface), so no separate
+# display-interface-spi dep is needed. embedded-hal names the SPI mode (MODE_0) and
+# the traits mipidsi builds on; embedded-graphics supplies the Rgb565 the panel is
+# cleared to and the DrawTarget trait plant-display paints through.
 mipidsi = "0.10"
 embedded-graphics = "0.8"
 embedded-hal = "1.0"
-# The render path stays off the heap on a 520 KB no-PSRAM chip: heapless builds
-# each text line in a stack buffer (no `format!` allocation), and static-cell gives
-# mipidsi's pixel-batch buffer a truly `static` home instead of a leaked `Box`.
-heapless = "0.8"
+# static-cell gives mipidsi's pixel-batch buffer a truly `static` home instead of a
+# leaked `Box`. (`heapless` left with the text rendering, which now lives in
+# plant-display — the render path is still allocation-free, just not from here.)
 static_cell = "2"
-# Host crates, referenced by path across the host/firmware workspace seam; both
-# are no_std + zero-dep and cross-compile to xtensa cleanly. plant-core owns the
-# SoilSensor port the `adc` adapter implements; firmware-core owns the pure
-# oversampling reduction and the ProbePower gating port the adapter composes —
-# both host-tested there, so this crate stays a thin on-target shell.
+# Host crates, referenced by path across the host/firmware workspace seam; all
+# are no_std and cross-compile to xtensa cleanly. plant-core owns the SoilSensor
+# port the `adc` adapter implements; firmware-core owns the pure oversampling
+# reduction and the ProbePower gating port the adapter composes; plant-display owns
+# the picture this adapter's panel shows — each host-tested there, so this crate
+# stays a thin on-target shell.
 plant-core = { path = "../../plant-core" }
 firmware-core = { path = "../../firmware-core" }
+plant-display = { path = "../../plant-display" }
 # The ESP-IDF HAL supplies the oneshot ADC driver the `adc` adapter wraps;
 # esp-idf-sys is named alongside it for `EspError` (the adapters' port error
 # type), so its version floor stays visible next to the -hal it re-exports.

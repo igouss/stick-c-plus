@@ -8,6 +8,11 @@ license = "MIT OR Apache-2.0"
 # SoilSensor adapter is live (qhw.5); WiFi, the native-API host, the sampler
 # thread and the Sensor entity follow in qhw.7 / .8 / .9 / .21 / .27.
 description = "M5StickC Plus + Earth Unit soil-moisture plant monitor (ESPHome-native)."
+# The monitor is the point of this package; the bench tools beside it
+# (probe-rail-check, display-colour-check) are flashed deliberately, by name. Without
+# this, a bare `cargo run -p plant-monitor` cannot choose among three binaries and
+# `just run` fails — which it did, silently, from the moment the second bin landed.
+default-run = "plant-monitor"
 
 [[bin]]
 name = "plant-monitor"

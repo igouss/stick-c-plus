@@ -1,12 +1,17 @@
 //! `st7789` — the M5StickC Plus onboard TFT as a [`MoistureDisplay`].
 //!
 //! The driven adapter for [`plant_core::MoistureDisplay`]: it drives the 1.14″
-//! ST7789V2 panel over SPI with `mipidsi` and renders the current soil
-//! [`Observation`] — the raw ADC count and the moisture percent, or the named
-//! reason there is neither — with `embedded-graphics`. All freshness and cadence
+//! ST7789V2 panel over SPI with `mipidsi`, and hands the panel to `plant-display`,
+//! which paints the current soil [`Observation`] onto it. All freshness and cadence
 //! live inward (the pure [`observe`](plant_core::observe) policy and the
-//! `spawn_display` loop in `plant-shell`); this adapter is the thin hardware
-//! translation that turns an observation into pixels, and nothing more.
+//! `spawn_display` loop in `plant-shell`); the *picture* lives in `plant-display`.
+//! What is left here — and all that should be — is the hardware: the SPI bus, the
+//! pins, and the panel's own quirks.
+//!
+//! That split is what makes the screen reviewable. `plant_display::render` draws into
+//! any `DrawTarget`, so the very same code that paints this panel paints a host
+//! framebuffer: `just screens` writes a PNG of every state the glass can show. The
+//! images are made by the production renderer, not a replica of it.
 //!
 //! ## Panel quirks (M5StickC Plus)
 //!
@@ -36,14 +41,8 @@
 //! a genuinely coloured pixel shipped — the red `FAULT` line — and it would have been
 //! caught on day one by drawing three bands instead of two text rows.
 
-use core::fmt::Write as _;
-
-use embedded_graphics::mono_font::ascii::FONT_10X20;
-use embedded_graphics::mono_font::{MonoTextStyle, MonoTextStyleBuilder};
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
-use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Baseline, Text};
 use embedded_hal::spi::MODE_0;
 use esp_idf_hal::delay::Ets;
 use esp_idf_hal::gpio::{AnyIOPin, Gpio13, Gpio15, Gpio18, Gpio23, Gpio5, Output, PinDriver};
@@ -53,13 +52,18 @@ use esp_idf_hal::units::FromValueType;
 use mipidsi::models::ST7789;
 use mipidsi::options::{ColorInversion, ColorOrder, Orientation, Rotation};
 use mipidsi::{interface::SpiInterface, Builder, Display};
-use plant_core::{MoistureDisplay, Observation, ProbeFault};
+use plant_core::{MoistureDisplay, Observation, Tick};
+use plant_display::{RenderError, SCREEN_SIZE};
 use static_cell::StaticCell;
 
 /// Native (unrotated) panel width — the short axis, in portrait.
-const PANEL_W: u16 = 135;
+///
+/// Derived from `plant-display`'s landscape canvas by swapping the axes back, since
+/// this adapter rotates the panel 90°. One source of truth: a change to the canvas
+/// cannot leave the panel configured for the old geometry.
+const PANEL_W: u16 = SCREEN_SIZE.height as u16;
 /// Native (unrotated) panel height — the long axis, in portrait.
-const PANEL_H: u16 = 240;
+const PANEL_H: u16 = SCREEN_SIZE.width as u16;
 /// CGRAM column offset of the visible window in the native portrait orientation.
 const OFFSET_X: u16 = 52;
 /// CGRAM row offset of the visible window in the native portrait orientation.
@@ -69,23 +73,6 @@ const SPI_HZ: u32 = 27_000_000;
 /// The pixel-batch buffer `mipidsi`'s SPI interface gathers writes into. Larger is
 /// faster; a few hundred bytes is ample for text and a full-screen clear.
 const BUFFER_LEN: usize = 512;
-
-/// Baseline-Top x inset of both text lines.
-const TEXT_X: i32 = 8;
-/// Baseline-Top y of the raw line, and of the percent line (landscape, 240×135).
-const RAW_Y: i32 = 34;
-const PCT_Y: i32 = 80;
-/// Fixed character width both lines are padded to, so a shorter new value's trailing
-/// spaces (painted with the opaque background) erase the leftover glyphs of a longer
-/// old one — no full-screen clear, and therefore no per-update flash.
-const LINE_WIDTH: usize = 10;
-/// Stack capacity of a rendered line — [`LINE_WIDTH`] plus headroom, so a line is
-/// built with no heap allocation on the render path.
-const LINE_CAP: usize = 16;
-
-/// A stack-allocated line buffer: the render path formats into this instead of a
-/// heap [`String`], so a redraw allocates nothing on the ESP32's scarce SRAM.
-type Line = heapless::String<LINE_CAP>;
 
 /// The pixel-batch buffer mipidsi's SPI interface borrows for the program's life.
 /// A `StaticCell` gives it a truly `static` home — no allocator, no leaked `Box` —
@@ -121,6 +108,18 @@ impl std::error::Error for St7789Error {}
 /// Wrap any `Debug` failure with the operation that produced it.
 fn fault<E: core::fmt::Debug>(op: &str, err: E) -> St7789Error {
     St7789Error(format!("ST7789 {op}: {err:?}"))
+}
+
+/// Flatten a `plant-display` render failure into this adapter's error.
+///
+/// The renderer is generic in the target's error, so a panel bus failure arrives
+/// wrapped; a line that would not fit its buffer is the renderer's own complaint. The
+/// port carries neither type outward — only [`St7789Error`].
+fn render_fault<E: core::fmt::Debug>(op: &str, err: RenderError<E>) -> St7789Error {
+    match err {
+        RenderError::Draw(err) => fault(op, err),
+        RenderError::LineOverflow => St7789Error(format!("ST7789 {op}: line buffer overflow")),
+    }
 }
 
 /// The M5StickC Plus onboard ST7789 TFT.
@@ -190,16 +189,15 @@ impl St7789Display {
         Ok(Self { panel })
     }
 
-    /// Bring-up self-test: paint three full-width bands — **red, green, blue**, top
-    /// to bottom — each labelled in white with the colour it is *meant* to be.
+    /// Bring-up self-test: paint the three primary bands on the real glass.
     ///
-    /// Text on this panel has only ever been white on black, and neither white nor
-    /// black can reveal a red/blue swap: the two channels are symmetric in
-    /// `0xFFFF` and `0x0000`. So a wrong [`ColorOrder`] stayed invisible until the
-    /// first genuinely coloured pixel was drawn. This method makes the panel's
-    /// colour handling falsifiable, through the *same* init path production uses.
+    /// The picture is [`plant_display::colour_bands`]; what this method contributes is
+    /// the thing that makes it evidence — the *production* init path in [`Self::new`],
+    /// with this panel's real [`ColorOrder`], inversion and offsets beneath it. The
+    /// same bands drawn into a host framebuffer prove nothing about colour order,
+    /// because a framebuffer paints red as red however the panel is wired.
     ///
-    /// Read it like this:
+    /// Read the glass:
     ///
     /// - **R / G / B in order** — the colour order is right.
     /// - **bands read B / G / R** — red and blue are swapped: the [`ColorOrder`] in
@@ -209,123 +207,20 @@ impl St7789Display {
     ///   wrong, not the order. This should be impossible while white renders white,
     ///   which is why the labels are drawn in white.
     pub fn colour_check(&mut self) -> Result<(), St7789Error> {
-        let size: Size = self.panel.bounding_box().size;
-        let band_h: u32 = size.height / 3;
-        let bands: [(Rgb565, &str); 3] = [
-            (Rgb565::RED, "RED"),
-            (Rgb565::GREEN, "GREEN"),
-            (Rgb565::BLUE, "BLUE"),
-        ];
-
-        for (index, (colour, label)) in bands.into_iter().enumerate() {
-            let top: i32 = (index as u32 * band_h) as i32;
-            Rectangle::new(Point::new(0, top), Size::new(size.width, band_h))
-                .into_styled(PrimitiveStyle::with_fill(colour))
-                .draw(&mut self.panel)
-                .map_err(|e| fault("colour band", e))?;
-
-            // White label: unaffected by a red/blue swap, so it stays readable and
-            // names what the band is *supposed* to be.
-            let style: MonoTextStyle<'_, Rgb565> = MonoTextStyleBuilder::new()
-                .font(&FONT_10X20)
-                .text_color(Rgb565::WHITE)
-                .build();
-            Text::with_baseline(label, Point::new(TEXT_X, top + 8), style, Baseline::Top)
-                .draw(&mut self.panel)
-                .map_err(|e| fault("colour label", e))?;
-        }
-        Ok(())
-    }
-
-    /// Draw one baseline-top text line at `y`, padded to [`LINE_WIDTH`] with an
-    /// opaque black background so it overwrites its whole row in place.
-    ///
-    /// `content` is formatted into a stack [`Line`] — no heap allocation on the
-    /// render path. Trailing spaces pad it to [`LINE_WIDTH`] so a shorter value fully
-    /// erases a longer one it replaces.
-    fn line(
-        &mut self,
-        y: i32,
-        color: Rgb565,
-        content: core::fmt::Arguments,
-    ) -> Result<(), St7789Error> {
-        let mut buf: Line = Line::new();
-        // Content is a handful of ASCII chars into a 16-byte buffer, so this cannot
-        // overflow in practice; surface it as a fault rather than truncate silently.
-        buf.write_fmt(content)
-            .map_err(|_| St7789Error("ST7789 line: format buffer overflow".to_owned()))?;
-        while buf.len() < LINE_WIDTH && buf.push(' ').is_ok() {}
-
-        let style: MonoTextStyle<'_, Rgb565> = MonoTextStyleBuilder::new()
-            .font(&FONT_10X20)
-            .text_color(color)
-            .background_color(Rgb565::BLACK)
-            .build();
-        Text::with_baseline(buf.as_str(), Point::new(TEXT_X, y), style, Baseline::Top)
-            .draw(&mut self.panel)
-            .map_err(|e| fault("draw", e))?;
-        Ok(())
-    }
-}
-
-/// Render the latest measurement, or the unavailable state.
-///
-/// A fresh reading paints two lines — the raw ADC count and the percent; a `None`
-/// (a faulted probe, a stopped sampler, or a device that has not sampled yet) paints
-/// its own placeholder, so the glass names the reason rather than showing one
-/// indiscriminate "unavailable". Rendering only: the verdict was decided upstream.
-/// A [`ProbeFault`] as a label that fits [`LINE_WIDTH`] characters of `FONT_10X20`.
-///
-/// The domain's own [`Display`](core::fmt::Display) for a fault is a full sentence,
-/// written for a log line or a Home Assistant text sensor. A 135-pixel-wide panel
-/// cannot show a sentence, so this adapter chooses words for its own pixel budget —
-/// which is exactly the sort of decision a boundary exists to make. The words stay
-/// faithful to the domain's caution: `RAW HIGH` reports what was *observed*, and
-/// does not assert "corroded", which the reading alone cannot establish.
-const fn fault_label(fault: ProbeFault) -> &'static str {
-    match fault {
-        ProbeFault::OverRange => "RAW HIGH",
-        ProbeFault::UnderRange => "RAW LOW",
-        ProbeFault::Unreadable => "ADC ERROR",
+        plant_display::colour_bands(&mut self.panel)
+            .map_err(|err| render_fault("colour bands", err))
     }
 }
 
 impl MoistureDisplay for St7789Display {
     type Error = St7789Error;
 
-    fn show(&mut self, observation: Observation) -> Result<(), St7789Error> {
-        // No full-screen clear: each line paints its own row over an opaque
-        // background (see `line`), so only the two text rows change and there is no
-        // flash. The initial black background was laid down once in `new`. Numbers
-        // are right-aligned in a fixed field so the digits hold a steady column as
-        // the value's width changes.
-        //
-        // Each unavailable state gets its OWN words, in red. An operator glancing at
-        // the glass should be able to tell a lying probe from a stopped sampler
-        // without attaching a serial cable — that distinction is the whole reason
-        // this method takes an Observation rather than an Option.
-        match observation {
-            Observation::Fresh(m) => {
-                self.line(RAW_Y, Rgb565::WHITE, format_args!("RAW  {:>4}", m.raw()))?;
-                self.line(
-                    PCT_Y,
-                    Rgb565::WHITE,
-                    format_args!("SOIL {:>3}%", m.percent()),
-                )?;
-            }
-            Observation::Faulted(fault) => {
-                self.line(RAW_Y, Rgb565::RED, format_args!("FAULT"))?;
-                self.line(PCT_Y, Rgb565::RED, format_args!("{}", fault_label(fault)))?;
-            }
-            Observation::Stale => {
-                self.line(RAW_Y, Rgb565::RED, format_args!("STALE"))?;
-                self.line(PCT_Y, Rgb565::RED, format_args!("NO SAMPLE"))?;
-            }
-            Observation::NeverSampled => {
-                self.line(RAW_Y, Rgb565::WHITE, format_args!("SOIL --"))?;
-                self.line(PCT_Y, Rgb565::WHITE, format_args!("starting"))?;
-            }
-        }
-        Ok(())
+    /// Hand the panel to the renderer. What appears — the wording, the colours, the two
+    /// rows, the creature and its frame, the in-place erase — is `plant-display`'s
+    /// decision, made once and reviewable on the host. This adapter's contribution is the
+    /// panel it draws on.
+    fn show(&mut self, observation: Observation, elapsed: Tick) -> Result<(), St7789Error> {
+        plant_display::render(&mut self.panel, observation, elapsed)
+            .map_err(|err| render_fault("render", err))
     }
 }

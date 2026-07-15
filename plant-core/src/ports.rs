@@ -5,6 +5,7 @@
 //! rendering the value ([`MoistureDisplay`]); the domain depends only on these
 //! traits, so dependencies point inward.
 
+use crate::freshness::Tick;
 use crate::moisture::RAW_MAX;
 use crate::observation::{Observation, ProbeFault};
 
@@ -76,5 +77,12 @@ pub trait MoistureDisplay {
 
     /// Render `observation` — the latest measurement, the fault that replaced it,
     /// or the reason there is neither.
-    fn show(&mut self, observation: Observation) -> Result<(), Self::Error>;
+    ///
+    /// `elapsed` is how long this observation has been the current one, in [`Tick`]
+    /// milliseconds. The domain has no opinion on what an adapter does with it; a glass
+    /// that only prints a number ignores it, and one that wants to draw attention to a
+    /// fault has the clock it needs to do so without inventing its own. It is *not* the
+    /// reading's age — [`observe`](crate::observe) has already ruled on freshness, and a
+    /// verdict of `Stale` grows older the longer the sampler stays dead.
+    fn show(&mut self, observation: Observation, elapsed: Tick) -> Result<(), Self::Error>;
 }

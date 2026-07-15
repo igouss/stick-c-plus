@@ -37,6 +37,35 @@ default:
 test:
     cargo test --workspace
 
+# Render every screen the TFT can show to target/screens/*.png — the four Observation
+# states, and the RGB colour-check bands. The pixels come from `plant_display::render`,
+# the SAME function the ST7789 adapter calls on the board, drawn into a host
+# framebuffer instead of down an SPI bus. So this is the layout, not a picture of it.
+#
+# What it does NOT show: anything below the DrawTarget — the panel's colour order,
+# CGRAM offset, inversion, or backlight. A framebuffer paints red as red however the
+# glass is wired. For THAT question: `just run-bin display-colour-check`, and look.
+screens:
+    cargo run --quiet -p plant-display --example screenshots
+
+# Regenerate plant-display/src/sprite/generated.rs from the vendored ClaudePix frames
+# (babashka; no JS, no network). The generator re-hashes every preset and refuses to emit
+# unless all 13 match the digests captured from the live site in a real browser — so a
+# corrupted or silently-edited copy fails here, not on the glass. See
+# kb/sources/claudepix.md.
+sprites:
+    bb plant-display/gen/generate.clj
+
+# Fail if generated.rs has drifted from gen/frames.json. Part of `just ci`.
+sprites-check:
+    bb plant-display/gen/generate.clj --check
+
+# Render every vendored sprite to target/screens/sprites.png — six frames sampled across
+# each loop. The sprite unit tests cannot see: a transposed decode still paints a
+# creature-shaped blob. This is how a human checks the creature is a creature.
+sprite-screens:
+    cargo run --quiet -p plant-display --example sprites
+
 # Run the aioesphomeapi conformance oracles — the #[ignore]d tests that drive the
 # REAL Home Assistant client (aioesphomeapi) against our device: the connection FSM
 # (esphome-api) and the qhw.9 Soil Moisture `SensorDevice` served over the full
@@ -182,7 +211,7 @@ setup-hooks:
 
 # Everything CI checks: format, architecture (hex-lint), lint both worlds, test,
 # build. hex-lint runs early — an architecture breach fails fast, before builds.
-ci: (fmt "check") hex-lint lint lint-fw test build
+ci: (fmt "check") hex-lint sprites-check lint lint-fw test build
 
 # Remove build artifacts (host + firmware).
 clean:

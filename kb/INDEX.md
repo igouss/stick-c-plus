@@ -138,3 +138,18 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
   (`ready`/`triage`/`next`/`plan`/`bead-sync`/`bead-check`), the "br never runs
   git" sync discipline, the `--json` / `br schema` contract, and why the cycle
   gate reads `br dep cycles` — not bv's lazily-`null` `Cycles` (a false red).
+
+## Display — assets
+
+- `source` [claudepix](sources/claudepix.md) — the vendored **ClaudePix** 20×20
+  creature animations (13 presets, 216 frames), decoded into `plant-display`'s 4-bit
+  sprite format. **No licence is stated upstream** — resolve before publishing.
+  Records the `window.PRESET` bleed that made one preset silently become another, and
+  the two-path hash verification (`node:vm` vs a real browser) that pins the copy.
+- `experiment` [2026-07-09 · Does a 100×100 sprite frame fit a 50 ms tick?](experiments/2026-07-09-sprite-fill-throughput/README.md)
+  — **confirmed**: 400 per-cell `Rectangle` fills = ~85 ms/frame; one `fill_contiguous`
+  = 0 over-budget paints. Two flashes, same pixels, only the fill strategy changed.
+- `finding` [mipidsi-rectangle-fill-costs-an-address-window](findings/mipidsi-rectangle-fill-costs-an-address-window.md)
+  — `high` · a `Rectangle` fill costs a `CASET`/`RASET`/`RAMWR` window setup, so cost
+  scales with the *fill count*, not the pixel count. Payload arithmetic says 5.9 ms and
+  is confidently wrong. Invisible to every host test **and** to the eye.

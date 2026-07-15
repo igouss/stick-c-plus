@@ -11,9 +11,9 @@ dependencies = [
  "esp-idf-hal",
  "esp-idf-sys",
  "firmware-core",
- "heapless 0.8.0",
  "mipidsi",
  "plant-core",
+ "plant-display",
  "static_cell",
 ]
 
@@ -1136,6 +1136,15 @@ name = "plant-core"
 version = "0.1.0"
 
 [[package]]
+name = "plant-display"
+version = "0.1.0"
+dependencies = [
+ "embedded-graphics",
+ "heapless 0.8.0",
+ "plant-core",
+]
+
+[[package]]
 name = "plant-monitor"
 version = "0.1.0"
 dependencies = [
@@ -1161,6 +1170,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "plant-core",
+ "plant-display",
 ]
 
 [[package]]

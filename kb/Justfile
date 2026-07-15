@@ -86,8 +86,10 @@ checks:
 
 # ---- script sanity --------------------------------------------------------
 
-# bash -n every fetch.sh / experiment script — a syntax break in a regeneration
-# recipe is silent reproducibility rot.
+# Syntax-check every regeneration/experiment script — a break in one is silent
+# reproducibility rot. `bash -n` for shell; babashka reads every form for Clojure (bb
+# has no --syntax-only, and reading the whole file is the same guarantee). Both globs
+# matter: a .clj script that no gate parses rots exactly as quietly as a .sh one.
 scripts:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -96,6 +98,11 @@ scripts:
     fail=0
     for s in kb/sources/*/fetch.sh kb/experiments/*/*.sh; do
       if bash -n "$s" 2>/dev/null; then printf '  ✓ %s\n' "$s"; else printf '  ✗ SYNTAX %s\n' "$s"; fail=$((fail+1)); fi
+    done
+    for s in kb/sources/*/*.clj kb/experiments/*/*.clj; do
+      if bb -e "(with-open [r (java.io.PushbackReader. (clojure.java.io/reader \"$s\"))] (loop [] (when-not (= ::eof (read {:eof ::eof :read-cond :allow} r)) (recur))))" >/dev/null 2>&1; then
+        printf '  ✓ %s\n' "$s"
+      else printf '  ✗ SYNTAX %s\n' "$s"; fail=$((fail+1)); fi
     done
     [ "$fail" -eq 0 ] && echo "  ✓ scripts: all parse"
     exit $(( fail > 0 ? 1 : 0 ))

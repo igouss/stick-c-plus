@@ -1,0 +1,38 @@
+[package]
+name = "plant-display"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Device-independent pixel layout of a soil Observation: renders into any embedded-graphics DrawTarget, so the same code drives the ST7789 panel and a host framebuffer."
+
+[lib]
+name = "plant_display"
+path = "src/lib.rs"
+
+# The seam between the domain and the graphics port. `embedded_graphics::DrawTarget`
+# is the port; the on-target ST7789 panel (firmware/adapters) and the host
+# framebuffer (this crate's tests) are two adapters for it. hex-lint's matrix says a
+# port-and-adapter crate "holds trait definitions and the domain types they speak in"
+# and may depend on domain — and a driven-adapter may depend on us. Context "plant"
+# matches plant-core, whose Observation we render.
+[package.metadata.hex-arch]
+role = "port-and-adapter"
+context = "plant"
+
+[dependencies]
+# The Observation we render. Path dep across the host workspace, as the firmware
+# adapters take it: no_std, zero-dep, cross-compiles to xtensa unchanged.
+plant-core = { path = "../plant-core" }
+# The graphics port (DrawTarget) plus the text/primitive drawing we render through.
+embedded-graphics = "0.8"
+# Each text line is built in a stack buffer, not a heap `format!` — the render path
+# must allocate nothing on a 520 KB no-PSRAM chip.
+heapless = "0.8"
+
+# Host-only; never reaches the Xtensa build (a dependent excludes dev-deps).
+[dev-dependencies]
+# A host framebuffer that implements the same DrawTarget port the panel does, and
+# can save a PNG. `default-features = false` drops the SDL window backend — we
+# rasterize to a file, we never open a window, so no SDL2 is needed to build or test.
+embedded-graphics-simulator = { version = "0.8", default-features = false }
+proptest = "1"

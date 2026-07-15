@@ -24,6 +24,7 @@ root per binary.
 stick-c-plus/
 ├─ domain/            # led-core — pure no_std LED-animation domain (project #2). host-tested.
 ├─ plant-core/        # pure no_std soil-moisture domain (project #1). host-tested.
+├─ plant-display/     # no_std TFT picture — Observation + creature into any DrawTarget. host-rendered to PNG.
 ├─ firmware-core/     # pure no_std shared kernel — ADC oversampling, probe-power gating. host-tested.
 ├─ plant-shell/       # std imperative shell — shared moisture cache + sampler thread. host-tested.
 ├─ esphome-api/       # std ESPHome native-API framework (prost + std::net). host-tested.
@@ -31,7 +32,7 @@ stick-c-plus/
 ├─ firmware/          # the Xtensa boundary — a detached std/ESP-IDF workspace (qhw.2):
 │  ├─ board-support/       #   infra          — BSP: AXP192 power-on, pin map, bring-up
 │  ├─ firmware-infra/      #   infra          — WiFi STA, mDNS, OTA
-│  ├─ adapters/            #   driven-adapter — domain-port adapters (adc/st7789/ws2812/clock/wifi)
+│  ├─ adapters/            #   driven-adapter — domain-port adapters (adc/st7789/ws2812/clock)
 │  └─ bins/plant-monitor/  #   composition-root — bin #1, the composition root
 └─ kb/                # Knowledge base — board facts, sources, findings (kbe-style)
    ├─ sources/        #   Raw: datasheets + the M5 factory firmware (submodule)
@@ -40,8 +41,9 @@ stick-c-plus/
    └─ guides/         #   Derived: toolchain, flashing, pin map, driver crates
 ```
 
-Each firmware crate carries one `[package.metadata.hex-arch] role` tag; the
-mechanical `hex-lint` / `effect-audit` gates that read them land with qhw.14.
+Every crate in both workspaces carries one `[package.metadata.hex-arch] role` tag (and,
+in the host workspace, a bounded `context`). `hex-lint` enforces them on each commit via
+`just precommit`; `effect-audit` holds the functional core pure. Neither is advisory.
 
 `kb/` is a [`~/kbe`](../../../kbe/README.md)-style knowledge base for everything we
 learn about this board — cited sources, on-device experiments, and the findings
@@ -56,8 +58,32 @@ The two worlds build under **different toolchains**, on purpose:
 
 | Crate(s) | Toolchain | Target | Tested |
 |---|---|---|---|
-| host — `led-core`, `plant-core`, `firmware-core`, `plant-shell`, `esphome-api`, `esphome-server` | stable | host | yes — `cargo test --workspace` |
+| host — `led-core`, `plant-core`, `plant-display`, `firmware-core`, `plant-shell`, `esphome-api`, `esphome-server` | stable | host | yes — `cargo test --workspace` |
 | firmware | `esp` fork | `xtensa-esp32-espidf` (`std`) | on device |
+
+### Looking at the screen without a board
+
+`just screens` renders every state the TFT can show — the four `Observation` states and
+the RGB colour-check bands — to `target/screens/*.png`. The pixels come from
+`plant_display::render`, the *same* function the ST7789 adapter calls on the board,
+drawn into a host framebuffer instead of down an SPI bus. It is the layout, not a
+picture of it.
+
+The right-hand third of the panel holds a **creature that is the status**: it breathes,
+motionless, while the reading is healthy; it is startled when the probe is lying, asleep
+when the sampler has stopped, and thinking before the first sample lands. A still creature
+is not decoration — it means the render loop finds nothing to repaint, so a working monitor
+can still sleep between samples. Motion is spent only where it buys an operator
+information. The artwork is vendored from [ClaudePix](kb/sources/claudepix.md), whose
+licence is **unresolved**; `just sprites` regenerates it with babashka, `just sprite-screens`
+draws all 13 presets.
+
+It proves the wording, the alignment, the colour each state is drawn in, and that a
+short value erases the longer one it replaces. It proves **nothing** below the
+`DrawTarget`: the panel's colour order, CGRAM offset, inversion and backlight are the
+adapter's business, and a framebuffer paints red as red however the glass is wired. The
+red/blue swap fixed in `adapters::st7789` would not have shown up here — for that,
+`just run-bin display-colour-check` and look at the board.
 
 `firmware/` is its own workspace (`[workspace]` + root `exclude`) so its Xtensa
 target and `esp` toolchain never touch `cargo test`; firmware crates reach the

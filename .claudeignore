@@ -1,0 +1,42 @@
+# Files Claude should not read or search. Gitignore syntax.
+# Goal: keep build noise out of context, and keep secrets out entirely.
+
+# --- Build artifacts (tens of thousands of generated files) ---
+/target
+/firmware/target
+# esp-idf-sys stages the whole ESP-IDF checkout + Xtensa toolchains here (~2 GB,
+# 44k files). Pure build artifact; re-fetchable from the pins.
+/firmware/.embuild
+**/*.rs.bk
+*.pdb
+
+# Generated ESP-IDF config — derived from sdkconfig.defaults each build.
+/firmware/sdkconfig
+/firmware/sdkconfig.old
+
+# --- Local dev environments (re-creatable) ---
+# aioesphomeapi conformance-oracle venv, provisioned by `just oracle`.
+/.oracle-venv
+
+# --- Beads tracker internals (binary SQLite + locks; JSONL is the readable form) ---
+.beads/*.db
+.beads/*.db-shm
+.beads/*.db-wal
+.beads/.br_history/
+.beads/.sync.lock
+.beads/.write.lock
+.beads/last-touched
+# bv (beads viewer) local config and caches
+.bv/
+
+# --- Large binaries Claude can't usefully read ---
+# Flash dumps pulled off the board — raw bytes, re-fetchable via espflash.
+/kb/**/*.bin
+
+# --- Secrets: never pull these into context ---
+# WiFi creds (qhw.7) and the Noise API PSK (qhw.10). The committed source of
+# truth is secrets.toml.example; real values live here, git-ignored + Bitwarden.
+/firmware/secrets.toml
+secrets.toml
+/firmware/noise_psk.txt
+*.psk

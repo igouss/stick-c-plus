@@ -28,6 +28,11 @@ context = "plant"
 # shared cache enforces. no_std + zero-dep, so it cross-compiles to xtensa cleanly
 # — this crate adds only std (threads, Arc/Mutex, Instant) on top.
 plant-core = { path = "../plant-core" }
+# The render loop asks plant-display which creature frame is due, and whether it moves at
+# all — two pure functions. That is what sets the loop's cadence, so a healthy monitor
+# ticks once a second and an unhealthy one animates. hex-lint: driving-adapter may depend
+# on port-and-adapter.
+plant-display = { path = "../plant-display" }
 # The shell logs a failed soil read so a dead probe is observable; on-device these
 # records reach the ESP-IDF logger the composition root installs, on the host they
 # are inert without a logger.

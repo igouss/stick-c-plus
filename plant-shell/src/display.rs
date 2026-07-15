@@ -1,13 +1,27 @@
 //! The display thread — read the shared cache, render the latest measurement.
 //!
-//! The imperative shell's second background loop, companion to the sampler: every
-//! [`RENDER_PERIOD`] it reads the freshest [`Observation`] from the
-//! [`SharedMoisture`] cache and, *only when it changed*, hands it to a
-//! [`MoistureDisplay`] adapter to draw. It owns the *render cadence* and the
-//! change-suppression; the pixel-pushing stays in the adapter (the ST7789 TFT
-//! on-device) and the freshness rule stays in the pure core, so this loop's body is
-//! a straight line. Redrawing only on change keeps a steady panel from flickering —
-//! it is painted once, then left alone until the value or its availability moves.
+//! The imperative shell's second background loop, companion to the sampler: it reads the
+//! freshest [`Observation`] from the [`SharedMoisture`] cache and, *only when the picture
+//! changed*, hands it to a [`MoistureDisplay`] adapter to draw. It owns the *render
+//! cadence* and the change-suppression; the pixel-pushing stays in the adapter (the ST7789
+//! TFT on-device) and the freshness rule stays in the pure core, so this loop's body is a
+//! straight line.
+//!
+//! ## The picture, not the reading
+//!
+//! The glass shows a creature beside the numbers, and for the states an operator must
+//! notice that creature *animates* (`plant_display::scene`). So the loop suppresses on the
+//! pair `(observation, frame)` rather than on the observation alone, and takes its cadence
+//! from the same policy:
+//!
+//! - **healthy** → a motionless creature → a constant pair → painted once, then left
+//!   alone, at [`RENDER_PERIOD`]. Nothing keeps the CPU awake between samples.
+//! - **faulted / stale / never-sampled** → a moving creature → the pair advances on the
+//!   sprite's own clock, so the panel repaints at [`ANIMATION_PERIOD`] — and only on the
+//!   ticks where a new frame is genuinely due.
+//!
+//! That asymmetry is deliberate and load-bearing: motion costs power, so it is spent only
+//! where it buys an operator information.
 //!
 //! ## Fail-visible, like the sampler
 //!
@@ -26,7 +40,7 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use log::warn;
 use plant_core::{MoistureDisplay, Observation, Tick};
@@ -41,6 +55,23 @@ use crate::shared::SharedMoisture;
 /// placeholder within a second of the reading ageing out rather than waiting a full
 /// sample period. Repainting a couple of text lines is cheap.
 pub const RENDER_PERIOD: Duration = Duration::from_secs(1);
+
+/// How often the display is repainted **while the creature is animating**.
+///
+/// An unhealthy observation draws a moving creature, whose shortest frame hold is 60 ms;
+/// waking every 50 ms is enough to land on every frame. This cadence applies *only* to the
+/// states an operator needs to notice — a healthy reading falls back to [`RENDER_PERIOD`],
+/// so a working monitor is not kept awake by a creature that never moves. Waking is not
+/// repainting: a tick that finds the same frame due touches no pixels and no SPI bus.
+pub const ANIMATION_PERIOD: Duration = Duration::from_millis(50);
+
+/// The shortest sleep the render loop will ever take.
+///
+/// A paint that outran its tick budget would otherwise sleep for zero and the display
+/// thread would never yield — starving lower-priority FreeRTOS tasks on a single core.
+/// That happened for real: before the sprite fill was made contiguous, a paint took 85 ms
+/// against a 50 ms budget. The loop survived on luck, and luck is not a scheduling policy.
+pub const MIN_YIELD: Duration = Duration::from_millis(1);
 
 /// The display thread's stack, in bytes.
 ///
@@ -59,8 +90,10 @@ pub const DISPLAY_STACK_SIZE: usize = 8 * 1024;
 /// [`Copy`], so the composition root can build it and still move it into the thread.
 #[derive(Clone, Copy)]
 pub struct DisplayConfig {
-    /// The interval between repaints.
+    /// The interval between ticks while the glass is still (a healthy reading).
     pub period: Duration,
+    /// The interval between ticks while the creature animates (any unhealthy state).
+    pub animation_period: Duration,
     /// The staleness bound (in [`Tick`] milliseconds) past which a reading is shown
     /// as unavailable — the same bound the sampler and native-API server use.
     pub max_age: Tick,
@@ -69,13 +102,25 @@ pub struct DisplayConfig {
 }
 
 impl DisplayConfig {
-    /// A config for the staleness bound `max_age`, with the cadence and stack size
+    /// A config for the staleness bound `max_age`, with the cadences and stack size
     /// defaulted to the module constants.
     pub fn new(max_age: Tick) -> Self {
         Self {
             period: RENDER_PERIOD,
+            animation_period: ANIMATION_PERIOD,
             max_age,
             stack_size: DISPLAY_STACK_SIZE,
+        }
+    }
+
+    /// How long to sleep after painting `glass`.
+    ///
+    /// The whole cadence policy: a moving creature earns a fast tick, everything else
+    /// (including the very first tick, before anything is drawn) gets the slow one.
+    fn tick_period(&self, glass: Glass) -> Duration {
+        match glass {
+            Some(shown) if plant_display::is_animated(shown.observation) => self.animation_period,
+            _ => self.period,
         }
     }
 }
@@ -132,12 +177,21 @@ where
     Ok(DisplayTask { handle, stop })
 }
 
-/// What is currently on the glass: `None` before anything is drawn, else the last
-/// [`Observation`] handed to the display.
+/// What is currently on the glass: `None` before anything is drawn.
 ///
-/// The option distinguishes "nothing drawn yet" from "drew the never-sampled
-/// state", so the very first tick always paints — even before a reading exists.
-type Shown = Option<Observation>;
+/// Carries three things: the [`Observation`] painted, the *frame* of its creature that was
+/// painted, and the [`Tick`] at which this observation first appeared. The option
+/// distinguishes "nothing drawn yet" from "drew the never-sampled state", so the very
+/// first tick always paints — even before a reading exists.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Shown {
+    observation: Observation,
+    frame: usize,
+    since: Tick,
+}
+
+/// The glass, or nothing yet.
+type Glass = Option<Shown>;
 
 /// The thread body: on each tick, redraw only if the reading changed — until asked
 /// to stop.
@@ -151,44 +205,93 @@ fn render_loop<D>(
     D: MoistureDisplay,
     D::Error: std::fmt::Display,
 {
-    let mut shown: Shown = None;
+    let mut glass: Glass = None;
     while !stop.load(Ordering::Relaxed) {
-        shown = render_once(&mut display, &shared, clock.now(), config.max_age, shown);
-        thread::sleep(config.period);
+        let before: Glass = glass;
+        let started: Instant = Instant::now();
+        glass = render_once(&mut display, &shared, clock.now(), config.max_age, glass);
+        let budget: Duration = config.tick_period(glass);
+
+        // A paint that outruns its own tick means the creature cannot keep its timing: the
+        // panel silently drops frames and the animation drags. Nothing on the glass says
+        // so — a slow creature still looks like a creature — so the loop says it here.
+        // Only an actual repaint is measured; a suppressed tick costs nothing.
+        let painted: bool = glass != before;
+        let took: Duration = started.elapsed();
+        if painted && took > budget {
+            warn!("plant-display: paint took {took:?}, over the {budget:?} tick budget");
+        }
+
+        // The cadence follows what is on the glass: fast while a creature moves, slow
+        // once the reading is healthy again. The paint's own cost is subtracted so the
+        // frame rate does not drift, and the sleep never reaches zero — see [`MIN_YIELD`].
+        thread::sleep(budget.saturating_sub(took).max(MIN_YIELD));
     }
 }
 
-/// One render cycle: read the freshest observation and draw it *only if it changed*.
+/// One render cycle: read the freshest observation and draw it *only if the picture
+/// changed*.
 ///
 /// The whole shell↔adapter seam, in isolation and testable without a thread. The
 /// freshness decision is the cache's ([`SharedMoisture::observe`]), so the adapter
 /// receives a verdict — a measurement, a named probe fault, staleness, or
-/// never-sampled — and renders whichever it is. Change-suppression keeps the panel
-/// steady: an observation equal to what is already on the glass is *not* redrawn, so
-/// a steady probe is painted once and then left alone — no per-tick redraw, no
-/// flicker. Any transition does redraw, including one fault giving way to another. A
-/// render error is logged, not propagated, and leaves `shown` unchanged so the next
-/// tick retries. Returns the observation now on the glass.
+/// never-sampled — and renders whichever it is.
+///
+/// ## What "changed" means, now that the glass animates
+///
+/// The picture is the pair `(observation, frame)`, where the frame comes from
+/// [`plant_display::frame_index`] — a pure function of the observation and how long it has
+/// been current. Suppression compares the *pair*, not just the observation:
+///
+/// - A **healthy** reading maps to a motionless creature, so its frame is always 0 and the
+///   pair is constant. The panel is painted once and then left alone, exactly as before —
+///   no per-tick redraw, no flicker, and nothing to keep the CPU awake between samples.
+/// - An **unhealthy** state animates, so its frame advances on its own clock and the pair
+///   changes. The panel repaints only on the ticks where a new frame is actually due, not
+///   on every tick.
+///
+/// `since` — when the current observation first appeared — is the animation's zero. It is
+/// reset on any transition, so a creature always starts at its first frame; a fault giving
+/// way to another fault therefore restarts the startle, which is what an operator watching
+/// the glass should see.
+///
+/// A render error is logged, not propagated, and leaves the glass unchanged so the next
+/// tick retries.
 fn render_once<D>(
     display: &mut D,
     shared: &SharedMoisture,
     now: Tick,
     max_age: Tick,
-    shown: Shown,
-) -> Shown
+    glass: Glass,
+) -> Glass
 where
     D: MoistureDisplay,
     D::Error: std::fmt::Display,
 {
     let observation: Observation = shared.observe(now, max_age);
-    if shown == Some(observation) {
-        return shown; // unchanged — leave the glass untouched.
+
+    // The animation's zero: the tick this observation became the current one. A changed
+    // observation restarts its creature; an unchanged one keeps counting.
+    let since: Tick = match glass {
+        Some(shown) if shown.observation == observation => shown.since,
+        _ => now,
+    };
+    let elapsed: Tick = now.saturating_sub(since);
+    let frame: usize = plant_display::frame_index(observation, elapsed);
+
+    let next: Shown = Shown {
+        observation,
+        frame,
+        since,
+    };
+    if glass == Some(next) {
+        return glass; // same picture — leave the glass untouched.
     }
-    match display.show(observation) {
-        Ok(()) => Some(observation),
+    match display.show(observation, elapsed) {
+        Ok(()) => Some(next),
         Err(err) => {
             warn!("plant-display: render failed, skipping this cycle: {err}");
-            shown // keep the prior state; retry next tick.
+            glass // keep the prior state; retry next tick.
         }
     }
 }
@@ -228,6 +331,9 @@ mod tests {
     /// so a test can await a real repaint rather than poll.
     struct FakeDisplay {
         shown: Arc<Mutex<Vec<Observation>>>,
+        /// Every `elapsed` the loop handed the adapter, in order — the animation clock as
+        /// the panel sees it.
+        elapsed: Arc<Mutex<Vec<Tick>>>,
         fail: bool,
         ping: Option<Sender<()>>,
     }
@@ -238,6 +344,7 @@ mod tests {
             let shown: Arc<Mutex<Vec<Observation>>> = Arc::new(Mutex::new(Vec::new()));
             let display: FakeDisplay = FakeDisplay {
                 shown: Arc::clone(&shown),
+                elapsed: Arc::new(Mutex::new(Vec::new())),
                 fail: false,
                 ping: None,
             };
@@ -248,6 +355,7 @@ mod tests {
         fn failing() -> Self {
             FakeDisplay {
                 shown: Arc::new(Mutex::new(Vec::new())),
+                elapsed: Arc::new(Mutex::new(Vec::new())),
                 fail: true,
                 ping: None,
             }
@@ -258,13 +366,19 @@ mod tests {
             self.ping = Some(tx);
             self
         }
+
+        /// The `elapsed` values this display was handed, in order.
+        fn elapsed_log(&self) -> Vec<Tick> {
+            self.elapsed.lock().expect("elapsed log lock").clone()
+        }
     }
 
     impl MoistureDisplay for FakeDisplay {
         type Error = TestError;
 
-        fn show(&mut self, observation: Observation) -> Result<(), TestError> {
+        fn show(&mut self, observation: Observation, elapsed: Tick) -> Result<(), TestError> {
             self.shown.lock().expect("shown log lock").push(observation);
+            self.elapsed.lock().expect("elapsed log lock").push(elapsed);
             if let Some(tx) = &self.ping {
                 // Unbounded channel: the send never blocks the display thread.
                 let _ = tx.send(());
@@ -277,6 +391,11 @@ mod tests {
         }
     }
 
+    /// The observation a glass is showing, if anything.
+    fn on_glass(glass: Glass) -> Option<Observation> {
+        glass.map(|shown: Shown| shown.observation)
+    }
+
     #[test]
     fn the_first_paint_shows_the_fresh_measurement_whole() {
         // The happy path: with nothing yet on the glass (`None`), a published
@@ -285,7 +404,7 @@ mod tests {
         shared.publish(Ok(measurement(30)), 10);
         let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
 
-        let after: Shown = render_once(&mut display, &shared, 20, 50, None);
+        let after: Glass = render_once(&mut display, &shared, 20, 50, None);
 
         let log: Vec<Observation> = shown.lock().unwrap().clone();
         assert_eq!(log, vec![Observation::Fresh(measurement(30))]);
@@ -295,7 +414,7 @@ mod tests {
             "the raw count reaches the display"
         );
         assert_eq!(
-            after,
+            on_glass(after),
             Some(Observation::Fresh(measurement(30))),
             "it is now on the glass"
         );
@@ -309,13 +428,13 @@ mod tests {
         let shared: SharedMoisture = SharedMoisture::new();
         let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
 
-        let after: Shown = render_once(&mut display, &shared, 100, 50, None);
+        let after: Glass = render_once(&mut display, &shared, 100, 50, None);
 
         assert_eq!(
             shown.lock().unwrap().clone(),
             vec![Observation::NeverSampled]
         );
-        assert_eq!(after, Some(Observation::NeverSampled));
+        assert_eq!(on_glass(after), Some(Observation::NeverSampled));
     }
 
     #[test]
@@ -356,7 +475,7 @@ mod tests {
         shared.publish(Err(ProbeFault::OverRange), 0);
         let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
 
-        let s0: Shown = render_once(&mut display, &shared, 1, 50, None);
+        let s0: Glass = render_once(&mut display, &shared, 1, 50, None);
         shared.publish(Err(ProbeFault::Unreadable), 2);
         render_once(&mut display, &shared, 3, 50, s0);
 
@@ -377,16 +496,126 @@ mod tests {
         shared.publish(Ok(measurement(30)), 10);
         let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
 
-        let s0: Shown = render_once(&mut display, &shared, 20, 50, None);
-        let s1: Shown = render_once(&mut display, &shared, 21, 50, s0);
-        let s2: Shown = render_once(&mut display, &shared, 22, 50, s1);
+        let s0: Glass = render_once(&mut display, &shared, 20, 50, None);
+        let s1: Glass = render_once(&mut display, &shared, 21, 50, s0);
+        let s2: Glass = render_once(&mut display, &shared, 22, 50, s1);
 
         assert_eq!(
             shown.lock().unwrap().len(),
             1,
             "a steady reading is painted once, not per tick"
         );
-        assert_eq!(s2, Some(Observation::Fresh(measurement(30))));
+        assert_eq!(on_glass(s2), Some(Observation::Fresh(measurement(30))));
+    }
+
+    #[test]
+    fn a_healthy_reading_never_repaints_and_keeps_the_slow_cadence() {
+        // THE POWER RULE. A healthy reading maps to a motionless creature, so however many
+        // ticks pass the panel is painted exactly once and the loop takes the slow
+        // cadence. If this regresses the device repaints forever and the deep-sleep duty
+        // cycle dies -- silently, because the picture still looks right.
+        let shared: SharedMoisture = SharedMoisture::new();
+        shared.publish(Ok(measurement(30)), 0);
+        let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
+        let config: DisplayConfig = DisplayConfig::new(60_000);
+
+        let g0: Glass = render_once(&mut display, &shared, 0, 60_000, None);
+        let g1: Glass = render_once(&mut display, &shared, 5_000, 60_000, g0);
+        let g2: Glass = render_once(&mut display, &shared, 30_000, 60_000, g1);
+
+        assert_eq!(shown.lock().unwrap().len(), 1, "a healthy glass repainted");
+        assert_eq!(config.tick_period(g2), RENDER_PERIOD);
+    }
+
+    /// The first hold of the creature shown for `observation` — the exact tick at which it
+    /// advances a frame. Anchored on the vendored art, so these tests cannot go vacuous if
+    /// its timing changes.
+    fn first_hold(observation: Observation) -> Tick {
+        Tick::from(plant_display::scene(observation).sprite.frames()[0].hold_ms())
+    }
+
+    #[test]
+    fn a_stale_reading_repaints_as_its_creature_animates() {
+        // An unhealthy state animates: the same observation, at a later tick, is a
+        // different creature frame and therefore a real repaint.
+        //
+        // A reading MUST be published for `observe` to return Stale — an empty cache is
+        // NeverSampled, a different creature with a different frame timing.
+        let shared: SharedMoisture = SharedMoisture::new();
+        shared.publish(Ok(measurement(42)), 0);
+        let hold: Tick = first_hold(Observation::Stale);
+        let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
+
+        // age = 100 > max_age 50, so every tick observes Stale.
+        let g0: Glass = render_once(&mut display, &shared, 100, 50, None);
+        let g1: Glass = render_once(&mut display, &shared, 100 + hold, 50, g0);
+
+        assert_eq!(
+            shown.lock().unwrap().clone(),
+            vec![Observation::Stale, Observation::Stale],
+            "the stale creature must repaint when its frame advances"
+        );
+        assert_eq!(display.elapsed_log(), vec![0, hold], "the animation clock");
+        assert_eq!(on_glass(g1), Some(Observation::Stale));
+    }
+
+    #[test]
+    fn an_animating_creature_is_not_repainted_between_frames() {
+        // Between frames the creature is left alone: a tick landing inside the current
+        // frame's hold repaints nothing. Waking is not repainting.
+        let shared: SharedMoisture = SharedMoisture::new();
+        shared.publish(Ok(measurement(42)), 0); // else the cache reads NeverSampled
+        let hold: Tick = first_hold(Observation::Stale);
+        let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
+
+        let g0: Glass = render_once(&mut display, &shared, 100, 50, None);
+        let g1: Glass = render_once(&mut display, &shared, 100 + hold / 2, 50, g0);
+        render_once(&mut display, &shared, 100 + hold - 1, 50, g1);
+
+        assert_eq!(
+            shown.lock().unwrap().len(),
+            1,
+            "ticks inside one frame's hold must not repaint"
+        );
+    }
+
+    #[test]
+    fn a_transition_restarts_the_animation_clock() {
+        // A fault arriving after an hour of healthy readings must startle from its first
+        // frame, not resume mid-startle.
+        let shared: SharedMoisture = SharedMoisture::new();
+        shared.publish(Ok(measurement(30)), 0);
+        let (mut display, _shown): (FakeDisplay, _) = FakeDisplay::new();
+
+        let g0: Glass = render_once(&mut display, &shared, 1_000, 60_000, None);
+        shared.publish(Err(ProbeFault::OverRange), 9_000);
+        render_once(&mut display, &shared, 9_000, 60_000, g0);
+
+        assert_eq!(
+            display.elapsed_log(),
+            vec![0, 0],
+            "each new observation starts its creature at elapsed 0"
+        );
+    }
+
+    #[test]
+    fn the_cadence_is_fast_only_while_a_creature_animates() {
+        // The first tick (nothing drawn yet) takes the slow cadence rather than spinning.
+        let config: DisplayConfig = DisplayConfig::new(60_000);
+        let animating: Glass = Some(Shown {
+            observation: Observation::Stale,
+            frame: 0,
+            since: 0,
+        });
+        let still: Glass = Some(Shown {
+            observation: Observation::Fresh(measurement(30)),
+            frame: 0,
+            since: 0,
+        });
+
+        assert_eq!(config.tick_period(animating), ANIMATION_PERIOD);
+        assert_eq!(config.tick_period(still), RENDER_PERIOD);
+        assert_eq!(config.tick_period(None), RENDER_PERIOD);
     }
 
     #[test]
@@ -397,7 +626,7 @@ mod tests {
         shared.publish(Ok(measurement(30)), 10);
         let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
 
-        let s0: Shown = render_once(&mut display, &shared, 11, 50, None);
+        let s0: Glass = render_once(&mut display, &shared, 11, 50, None);
         shared.publish(Ok(measurement(60)), 20);
         render_once(&mut display, &shared, 21, 50, s0);
 
@@ -418,7 +647,7 @@ mod tests {
         shared.publish(Ok(measurement(42)), 0);
         let (mut display, shown): (FakeDisplay, _) = FakeDisplay::new();
 
-        let s0: Shown = render_once(&mut display, &shared, 10, 50, None); // fresh
+        let s0: Glass = render_once(&mut display, &shared, 10, 50, None); // fresh
         render_once(&mut display, &shared, 60, 50, s0); // age 60 > 50 -> Stale
 
         assert_eq!(
@@ -436,10 +665,11 @@ mod tests {
         shared.publish(Ok(measurement(55)), 0);
         let mut display: FakeDisplay = FakeDisplay::failing();
 
-        let after: Shown = render_once(&mut display, &shared, 0, 50, None);
+        let after: Glass = render_once(&mut display, &shared, 0, 50, None);
 
         assert_eq!(
-            after, None,
+            on_glass(after),
+            None,
             "a failed paint does not advance the shown state"
         );
     }
@@ -457,6 +687,7 @@ mod tests {
         let display: FakeDisplay = base.pinging(tx);
         let config: DisplayConfig = DisplayConfig {
             period: Duration::from_millis(1),
+            animation_period: Duration::from_millis(1),
             max_age: 60_000,
             stack_size: 256 * 1024,
         };
