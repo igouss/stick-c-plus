@@ -23,6 +23,8 @@ members = [
     "esphome-server",
     "firmware-core",
     "plant-shell",
+    # apps/ — one bounded context per app on the shared foundation.
+    "apps/pomodoro/pomodoro-core",
 ]
 # The firmware is its own Xtensa workspace; keep it out of the host one.
 exclude = ["firmware"]

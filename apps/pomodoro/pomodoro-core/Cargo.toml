@@ -1,0 +1,34 @@
+[package]
+name = "pomodoro-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Framework-free pomodoro-timer domain for the M5StickC Plus: the phase/status/event state machine, the pause-correct countdown, the long-break cadence, and the transition jingles — pure no_std, host-tested, driven by button events and a monotonic tick."
+
+[lib]
+name = "pomodoro_core"
+path = "src/lib.rs"
+
+# The pure heart of the pomodoro app: the FSM entities and the `step` use case, no
+# framework and no I/O. context = "pomodoro" scopes it to the pomodoro bounded context;
+# it depends only on the shared kernel (platform-core, context = "shared").
+[package.metadata.hex-arch]
+role = "domain"
+context = "pomodoro"
+
+[dependencies]
+# The shared kernel: the Tick millisecond unit the countdown speaks, and the Note the
+# jingle tables are built from (which the buzzer Tone port plays). no_std, zero-dep.
+platform-core = { path = "../../../platform/platform-core" }
+
+# Host-only. These link std and never reach the Xtensa build (a dependent excludes them).
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run under the
+# default harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false
