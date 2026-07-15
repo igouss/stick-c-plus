@@ -8,7 +8,7 @@
 //!
 //! - [`spawn_input`] (pomodoro-shell) polls the buttons, folds each gesture through the pure
 //!   `pomodoro_core::step`, fires a tick, and sounds the jingles — front tap starts / pauses,
-//!   front hold resets, side tap skips.
+//!   front double-tap restarts the whole session, front hold resets the phase, side tap skips.
 //! - [`spawn_display`] (platform-runtime) is the *same* generic render loop the plant monitor
 //!   uses, fed a source that snapshots the shared [`Timer`](pomodoro_core::Timer) into a
 //!   [`PomodoroView`] each tick, and a [`PanelScreen`] that paints it with
@@ -94,7 +94,10 @@ fn main() {
     // dropping it would only detach the thread, which already runs forever.
     let _input = spawn_input(front, side, buzzer, shared.clone(), clock, CLASSIC)
         .expect("spawn pomodoro-input");
-    info!("input thread up: front tap = start/pause, front hold = reset, side tap = skip");
+    info!(
+        "input thread up: front tap = start/pause, front double-tap = restart session, \
+         front hold = reset phase, side tap = skip"
+    );
 
     // Display: render the timer view every tick, through the same generic loop the plant
     // monitor uses. The source snapshots the shared timer and turns it into a PomodoroView at

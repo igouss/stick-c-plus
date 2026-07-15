@@ -32,7 +32,7 @@ pub enum Status {
     Finished,
 }
 
-/// What drives the timer: a tick of the clock, or one of the three button gestures.
+/// What drives the timer: a tick of the clock, or one of the button gestures.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Event {
     /// The clock advanced — check whether the current phase has run out.
@@ -43,6 +43,10 @@ pub enum Event {
     Reset,
     /// The side button tap: skip immediately to the next phase.
     Skip,
+    /// The front button double-tap: restart the whole session — back to a fresh, idle first
+    /// focus with the completed-focus count zeroed. Distinct from [`Reset`](Event::Reset),
+    /// which restarts only the current phase and keeps the cadence.
+    RestartSession,
 }
 
 /// The timer state. [`Copy`], so [`step`] takes and returns it by value — the FSM is pure.
@@ -152,6 +156,15 @@ impl Timer {
         }
     }
 
+    /// Restart the whole session: discard all progress and return to a fresh, idle first focus,
+    /// the completed-focus count zeroed. Announces itself so a blind double-tap is confirmed.
+    fn restart_session(self) -> Stepped {
+        Stepped {
+            timer: Timer::new(),
+            jingle: Some(Jingle::SessionRestart),
+        }
+    }
+
     /// Reset the current phase to its full length, without changing which phase it is.
     fn reset(self) -> Stepped {
         // A never-started timer stays idle; anything else parks at the full phase, paused.
@@ -252,6 +265,7 @@ pub fn step(timer: Timer, event: Event, now: Tick, durations: Durations) -> Step
         Event::Reset => timer.reset(),
         Event::Skip => timer.skip(now, durations),
         Event::Tick => timer.tick(now, durations),
+        Event::RestartSession => timer.restart_session(),
     }
 }
 
@@ -369,6 +383,27 @@ mod tests {
         assert_eq!(reset.timer.phase(), Phase::Focus, "same phase");
         assert_eq!(reset.timer.remaining(400, D), D.focus_ms, "back to full");
         assert_eq!(reset.jingle, None);
+    }
+
+    #[test]
+    fn restarting_the_session_returns_to_a_fresh_idle_focus() {
+        // Build some progress: one focus completed, mid-second-focus and running.
+        let f1: Timer = complete_focus(Timer::new(), 0);
+        let running: Timer = step(complete_break(f1, 2_000), Event::StartPause, 4_000, D).timer;
+        assert_eq!(running.completed_focus(), 1);
+        assert_eq!(running.status(), Status::Running);
+
+        let restarted: Stepped = step(running, Event::RestartSession, 5_000, D);
+        assert_eq!(restarted.timer, Timer::new(), "everything is fresh again");
+        assert_eq!(restarted.timer.completed_focus(), 0, "the count is zeroed");
+        assert_eq!(restarted.timer.status(), Status::Idle);
+        assert_eq!(restarted.timer.phase(), Phase::Focus);
+        assert_eq!(
+            restarted.timer.remaining(9_999, D),
+            D.focus_ms,
+            "idle, not counting"
+        );
+        assert_eq!(restarted.jingle, Some(Jingle::SessionRestart));
     }
 
     #[test]

@@ -57,3 +57,12 @@ Feature: The pomodoro timer counts focus and break intervals
     Then the phase is Focus
     And the status is Paused
     And 1000 ms remain at 400 ms
+
+  Scenario: Double-tapping restarts the whole session to a fresh idle focus
+    When the front button is tapped at 0 ms
+    And the clock ticks at 1000 ms
+    And the front button is double-tapped at 2000 ms
+    Then the phase is Focus
+    And the status is Idle
+    And a SessionRestart jingle sounds
+    And 1000 ms remain at 9000 ms

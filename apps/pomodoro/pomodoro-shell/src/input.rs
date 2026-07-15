@@ -7,11 +7,16 @@
 //! [`Tone`](platform_core::Tone). The controls:
 //!
 //! - **front tap** → start / pause / resume (or begin the next phase when finished);
+//! - **front double-tap** → restart the whole session (back to a fresh, idle first focus);
 //! - **front hold** → reset the current phase;
 //! - **side tap** → skip to the next phase.
 //!
-//! It owns the timing and the shared cache; every gesture rule and the whole FSM stay pure
-//! inward, so the mapping and the wiring are exercised on the host with fake peripherals.
+//! The front button is routed through a [`TapCadence`] so a double-tap can be told from a
+//! single one — which means a lone front tap is reported a
+//! [`DOUBLE_TAP_MS`](platform_core::DOUBLE_TAP_MS) window later than the side tap, whose skip
+//! stays immediate. It owns the timing and the shared cache; every
+//! gesture rule and the whole FSM stay pure inward, so the mapping and the wiring are exercised
+//! on the host with fake peripherals.
 
 use std::fmt::Display;
 use std::io;
@@ -21,7 +26,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use log::warn;
-use platform_core::{Button, ButtonEvent, Clock, Debounce, Tone};
+use platform_core::{Button, ButtonEvent, Clock, Debounce, TapCadence, Tone};
 use pomodoro_core::{Durations, Event};
 
 use crate::shared::SharedTimer;
@@ -37,19 +42,22 @@ pub const POLL_PERIOD: Duration = Duration::from_millis(10);
 /// device); the loop polls, steps, and blocks briefly playing a jingle, well within 8 KiB.
 pub const INPUT_STACK_SIZE: usize = 8 * 1024;
 
-/// The event a front-button gesture maps to: a tap starts / pauses, a hold resets.
+/// The event a front-button gesture maps to: a tap starts / pauses, a double-tap restarts the
+/// session, a hold resets the current phase.
 fn front_event(gesture: ButtonEvent) -> Event {
     match gesture {
         ButtonEvent::Tap => Event::StartPause,
+        ButtonEvent::DoubleTap => Event::RestartSession,
         ButtonEvent::Hold => Event::Reset,
     }
 }
 
-/// The event a side-button gesture maps to: a tap skips; a hold is unused (yet).
+/// The event a side-button gesture maps to: a tap skips; a hold, and a double-tap it is never
+/// routed to produce, are unused.
 fn side_event(gesture: ButtonEvent) -> Option<Event> {
     match gesture {
         ButtonEvent::Tap => Some(Event::Skip),
-        ButtonEvent::Hold => None,
+        ButtonEvent::Hold | ButtonEvent::DoubleTap => None,
     }
 }
 
@@ -71,10 +79,23 @@ impl InputTask {
     }
 }
 
-/// The state one poll cycle carries between calls: a debounce per button.
+/// The state one poll cycle carries between calls: a debounce per button, plus the front
+/// button's tap-vs-double-tap cadence.
 struct Debouncers {
     front: Debounce,
+    front_cadence: TapCadence,
     side: Debounce,
+}
+
+impl Debouncers {
+    /// Fresh debouncers, everything released and nothing pending.
+    fn new() -> Self {
+        Debouncers {
+            front: Debounce::new(),
+            front_cadence: TapCadence::new(),
+            side: Debounce::new(),
+        }
+    }
 }
 
 /// One poll cycle: read both buttons, fold each gesture into the timer, then fire a tick — and
@@ -96,7 +117,11 @@ fn cycle<F, S, T>(
 {
     let now: u64 = clock.now();
 
-    if let Some(gesture) = debouncers.front.update(now, front.poll()) {
+    // Front: debounce the level, then fold it through the tap-vs-double-tap cadence. The cadence
+    // is ticked every cycle — even when the debounce produced nothing — so a lone tap's window
+    // can time out and release its single tap.
+    let front_raw: Option<ButtonEvent> = debouncers.front.update(now, front.poll());
+    if let Some(gesture) = debouncers.front_cadence.update(now, front_raw) {
         sound(shared.apply(front_event(gesture), now, durations), tone);
     }
     if let Some(gesture) = debouncers.side.update(now, side.poll()) {
@@ -149,10 +174,7 @@ where
         .name("pomodoro-input".to_string())
         .stack_size(INPUT_STACK_SIZE)
         .spawn(move || {
-            let mut debouncers: Debouncers = Debouncers {
-                front: Debounce::new(),
-                side: Debounce::new(),
-            };
+            let mut debouncers: Debouncers = Debouncers::new();
             while !stop_in_thread.load(Ordering::Relaxed) {
                 cycle(
                     &mut front,
@@ -173,7 +195,7 @@ where
 mod tests {
     use super::*;
     use platform_core::Note;
-    use pomodoro_core::{Jingle, Phase, Status};
+    use pomodoro_core::{Jingle, Phase, Status, Timer};
     use std::cell::Cell;
 
     const D: Durations = Durations {
@@ -250,16 +272,16 @@ mod tests {
             pressed: &side_level,
         };
         let mut tone: RecordingTone = RecordingTone::default();
-        let mut db: Debouncers = Debouncers {
-            front: Debounce::new(),
-            side: Debounce::new(),
-        };
+        let mut db: Debouncers = Debouncers::new();
 
-        // Press and hold the front button briefly, then release: a tap.
+        // Press and hold the front button briefly, then release: a tap. The release is held
+        // well past the double-tap window so the cadence releases the lone tap (no second one).
         front_level.set(true);
         settle(&mut front, &mut side, &mut tone, &mut db, &shared, &now, 40);
         front_level.set(false);
-        settle(&mut front, &mut side, &mut tone, &mut db, &shared, &now, 40);
+        settle(
+            &mut front, &mut side, &mut tone, &mut db, &shared, &now, 340,
+        );
 
         assert_eq!(shared.snapshot().status(), Status::Running);
         assert_eq!(tone.played, Jingle::FocusStart.notes());
@@ -278,10 +300,7 @@ mod tests {
             pressed: &side_level,
         };
         let mut tone: RecordingTone = RecordingTone::default();
-        let mut db: Debouncers = Debouncers {
-            front: Debounce::new(),
-            side: Debounce::new(),
-        };
+        let mut db: Debouncers = Debouncers::new();
 
         side_level.set(true);
         settle(&mut front, &mut side, &mut tone, &mut db, &shared, &now, 40);
@@ -304,16 +323,15 @@ mod tests {
             pressed: &side_level,
         };
         let mut tone: RecordingTone = RecordingTone::default();
-        let mut db: Debouncers = Debouncers {
-            front: Debounce::new(),
-            side: Debounce::new(),
-        };
+        let mut db: Debouncers = Debouncers::new();
 
-        // Start the focus.
+        // Start the focus. Hold the release past the double-tap window so the tap is released.
         front_level.set(true);
         settle(&mut front, &mut side, &mut tone, &mut db, &shared, &now, 40);
         front_level.set(false);
-        settle(&mut front, &mut side, &mut tone, &mut db, &shared, &now, 40);
+        settle(
+            &mut front, &mut side, &mut tone, &mut db, &shared, &now, 340,
+        );
         assert_eq!(shared.snapshot().status(), Status::Running);
 
         // Jump the clock a full focus length past *now* (the tap started the countdown on its
@@ -328,12 +346,60 @@ mod tests {
         );
     }
 
-    /// The pure gesture mapping, pinned: tap vs hold on each button.
+    #[test]
+    fn a_front_double_tap_restarts_the_session() {
+        let front_level: Cell<bool> = Cell::new(false);
+        let side_level: Cell<bool> = Cell::new(false);
+        let now: Cell<u64> = Cell::new(0);
+        let shared: SharedTimer = SharedTimer::new();
+        let mut front: FakeButton = FakeButton {
+            pressed: &front_level,
+        };
+        let mut side: FakeButton = FakeButton {
+            pressed: &side_level,
+        };
+        let mut tone: RecordingTone = RecordingTone::default();
+        let mut db: Debouncers = Debouncers::new();
+
+        // Start and run a focus: a single tap, released past the window so it flushes.
+        front_level.set(true);
+        settle(&mut front, &mut side, &mut tone, &mut db, &shared, &now, 40);
+        front_level.set(false);
+        settle(
+            &mut front, &mut side, &mut tone, &mut db, &shared, &now, 340,
+        );
+        assert_eq!(shared.snapshot().status(), Status::Running);
+
+        // Two quick front taps: each release is settled long enough to be accepted but not to
+        // time the double-tap window out, so the second tap closes the first into a double-tap.
+        front_level.set(true);
+        settle(&mut front, &mut side, &mut tone, &mut db, &shared, &now, 40);
+        front_level.set(false);
+        settle(&mut front, &mut side, &mut tone, &mut db, &shared, &now, 25);
+        front_level.set(true);
+        settle(&mut front, &mut side, &mut tone, &mut db, &shared, &now, 40);
+        front_level.set(false);
+        settle(&mut front, &mut side, &mut tone, &mut db, &shared, &now, 25);
+
+        // The double-tap restarted the whole session: fresh, idle, nothing completed.
+        let timer: Timer = shared.snapshot();
+        assert_eq!(timer.status(), Status::Idle);
+        assert_eq!(timer.phase(), Phase::Focus);
+        assert_eq!(timer.completed_focus(), 0);
+        assert!(
+            tone.played.ends_with(Jingle::SessionRestart.notes()),
+            "the session-restart jingle must sound"
+        );
+    }
+
+    /// The pure gesture mapping, pinned: tap, double-tap, and hold on each button.
     #[test]
     fn the_gesture_mapping_is_fixed() {
         assert_eq!(front_event(ButtonEvent::Tap), Event::StartPause);
+        assert_eq!(front_event(ButtonEvent::DoubleTap), Event::RestartSession);
         assert_eq!(front_event(ButtonEvent::Hold), Event::Reset);
         assert_eq!(side_event(ButtonEvent::Tap), Some(Event::Skip));
         assert_eq!(side_event(ButtonEvent::Hold), None);
+        assert_eq!(side_event(ButtonEvent::DoubleTap), None);
     }
 }

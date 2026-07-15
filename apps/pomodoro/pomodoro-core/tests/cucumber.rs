@@ -61,6 +61,7 @@ fn parse_jingle(name: &str) -> Jingle {
         "BreakStart" => Jingle::BreakStart,
         "LongBreakStart" => Jingle::LongBreakStart,
         "PhaseComplete" => Jingle::PhaseComplete,
+        "SessionRestart" => Jingle::SessionRestart,
         other => panic!("unknown jingle {other:?}"),
     }
 }
@@ -87,6 +88,11 @@ fn tap_front(world: &mut TimerWorld, now: u64) {
 #[when(regex = r"^the front button is held at (\d+) ms$")]
 fn hold_front(world: &mut TimerWorld, now: u64) {
     apply(world, Event::Reset, now);
+}
+
+#[when(regex = r"^the front button is double-tapped at (\d+) ms$")]
+fn double_tap_front(world: &mut TimerWorld, now: u64) {
+    apply(world, Event::RestartSession, now);
 }
 
 #[when(regex = r"^the side button is tapped at (\d+) ms$")]
