@@ -11,6 +11,14 @@ default-run = "pomodoro"
 name = "pomodoro"
 path = "src/main.rs"
 
+# A bench tool, not the timer: an acoustic loopback that plays every jingle note on the buzzer
+# and listens on the PDM mic, so "the chime is audible" is falsifiable on-device instead of by
+# ear alone. Lives in this package (not its own crate) for the same reason plant-monitor's bench
+# tools do — `.cargo/config.toml` pins ESP_IDF_SYS_ROOT_CRATE, and a sibling crate would lose it.
+[[bin]]
+name = "chime-selftest"
+path = "src/chime_selftest.rs"
+
 # The imperative shell's outermost layer: it composes adapters and owns effects, so it is the
 # one crate the effect-audit `domain` gate must never tag.
 [package.metadata.hex-arch]
@@ -34,6 +42,8 @@ platform-adapters = { path = "../../../platform/adapters" }
 # picture, and the input shell — all no_std/std and cross-compile to xtensa cleanly.
 platform-core = { path = "../../../../platform/platform-core" }
 platform-runtime = { path = "../../../../platform/platform-runtime" }
+# The pure acoustic analysis for the chime self-test: the acoustic-level (RMS) measure + verdict.
+platform-audio = { path = "../../../../platform/platform-audio" }
 pomodoro-core = { path = "../../../../apps/pomodoro/pomodoro-core" }
 pomodoro-display = { path = "../../../../apps/pomodoro/pomodoro-display" }
 pomodoro-shell = { path = "../../../../apps/pomodoro/pomodoro-shell" }
