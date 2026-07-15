@@ -37,8 +37,6 @@ mod sampler;
 mod shared;
 
 pub use clock::Monotonic;
-pub use display::{spawn_display, DisplayConfig, DisplayTask, DISPLAY_STACK_SIZE, RENDER_PERIOD};
-pub use sampler::{
-    spawn_sampler, Sampler, SamplerConfig, SAMPLER_STACK_SIZE, SAMPLE_PERIOD, STALENESS_PERIODS,
-};
+pub use display::{spawn_display, DisplayConfig, DisplayTask};
+pub use sampler::{spawn_sampler, Sampler, SamplerConfig};
 pub use shared::SharedMoisture;
