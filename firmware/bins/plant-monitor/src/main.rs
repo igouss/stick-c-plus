@@ -31,7 +31,6 @@ use std::thread;
 
 use adapters::adc::{EarthUnit, SAMPLES};
 use adapters::probe_power::AlwaysOn;
-use adapters::st7789::St7789Display;
 use board_support::{internal_i2c, Axp192};
 use embedded_hal_bus::i2c::RefCellDevice;
 use esp_idf_hal::delay::FreeRtos;
@@ -50,6 +49,7 @@ use plant_core::ports::MAX_READING;
 use plant_core::{Observation, Tick};
 use plant_display::Glass;
 use plant_shell::{spawn_sampler, SamplerConfig, SharedMoisture};
+use platform_adapters::{Panel, PanelScreen};
 use platform_runtime::{spawn_display, DisplayConfig, Monotonic};
 
 /// Provisional soil calibration — placeholder dry/wet endpoints, *not* measured.
@@ -209,7 +209,7 @@ fn main() {
     // rails were powered above, so the panel is live. Bring-up failure is fatal (a
     // mis-wired panel is worth surfacing loudly); a later render error only skips a
     // frame — the loop logs it and repaints next tick.
-    let display: St7789Display = St7789Display::new(
+    let panel: Panel = Panel::new(
         peripherals.spi2,
         peripherals.pins.gpio13, // SCLK
         peripherals.pins.gpio15, // MOSI
@@ -217,20 +217,29 @@ fn main() {
         peripherals.pins.gpio23, // DC
         peripherals.pins.gpio18, // RST
     )
-    .expect("ST7789 display bring-up");
+    .expect("ST7789 panel bring-up");
+    // Wrap the panel as a generic Screen with the plant render function: unwrap the Glass and
+    // hand the Observation to plant_display::render. The panel adapter knows nothing about the
+    // plant; the picture is injected here.
+    let screen: PanelScreen<Glass, _> = PanelScreen::new(
+        panel,
+        |target: &mut _, Glass(observation): Glass, elapsed: Tick| {
+            plant_display::render(target, observation, elapsed)
+        },
+    );
     let display_config: DisplayConfig = DisplayConfig::default();
     let display_period: core::time::Duration = display_config.period;
     // The source the generic render loop pulls each tick: the freshest Observation from the
     // SAME cache and staleness bound the native-API server reads, wrapped in the Glass view
-    // the ST7789 Screen adapter paints. `now` is the render loop's own clock — the same
-    // Monotonic the sampler stamps against — so the glass flips to *unavailable* the instant
-    // a reading ages out, never a frozen value.
+    // the panel Screen paints. `now` is the render loop's own clock — the same Monotonic the
+    // sampler stamps against — so the glass flips to *unavailable* the instant a reading ages
+    // out, never a frozen value.
     let display_source = {
         let shared: SharedMoisture = shared.clone();
         move |now: Tick| Glass(shared.observe(now, max_age))
     };
     let _display =
-        spawn_display(display, display_source, clock, display_config).expect("spawn plant-display");
+        spawn_display(screen, display_source, clock, display_config).expect("spawn plant-display");
     info!("display thread up: ST7789 rendering raw + percent every {display_period:?}");
 
     // The native-API device HA adopts: one Soil Moisture sensor whose live value is

@@ -76,6 +76,9 @@ esphome-server = { path = "../../../esphome-server" }
 # `adapters::adc::EarthUnit` to bind the SoilSensor port to real ADC1 hardware, and
 # `adapters::st7789::St7789Display` to bind the MoistureDisplay port to the TFT.
 adapters = { path = "../../adapters" }
+# The board-generic driven adapters (shared): the ST7789 Panel + generic PanelScreen the
+# composition root wraps with the plant render function. Buttons/buzzer are unused here.
+platform-adapters = { path = "../../platform/adapters" }
 # The board-support package: brings up the internal I2C bus and powers the AXP192
 # LCD/TFT rails (qhw.20) — load-bearing for the display, which is dark otherwise.
 board-support = { path = "../../board-support" }

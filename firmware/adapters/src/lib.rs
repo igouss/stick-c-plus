@@ -8,9 +8,10 @@
 //!   - `probe_power` — ESP-side [`firmware_core::ProbePower`] implementations
 //!   - `clock`       — the shared `Clock` port on ESP-IDF time (qhw.15)
 //!   - `ws2812`      — `led_core::LedOutput` over the esp-idf RMT encoder (qqh.1)
-//!   - `st7789`      — the ST7789 display, over `mipidsi`
 //!
-//! WiFi is *not* here: station bring-up has no inward domain port, so it lives in
+//! The board-generic adapters (the ST7789 panel, the buttons, the buzzer) are shared by
+//! every app and live in `platform-adapters`; this crate holds only the plant-specific ones.
+//! WiFi is *not* here either: station bring-up has no inward domain port, so it lives in
 //! `firmware-infra` as infrastructure (qhw.7), not among these driven adapters.
 //!
 //! The pure, host-testable pieces (the oversampling reduction, the ProbePower
@@ -20,4 +21,3 @@
 
 pub mod adc;
 pub mod probe_power;
-pub mod st7789;

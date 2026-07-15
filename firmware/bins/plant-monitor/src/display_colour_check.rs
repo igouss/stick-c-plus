@@ -6,7 +6,7 @@
 //! firmware has ever drawn, comes out bluish instead of red. Neither white nor black
 //! can reveal a red/blue swap — both channels are symmetric in `0xFFFF` and `0x0000`
 //! — so a wrong [`ColorOrder`](mipidsi::options::ColorOrder) could sit in
-//! `St7789Display::new` since the display landed and never once be observed.
+//! `Panel::new` since the display landed and never once be observed.
 //!
 //! Source archaeology is inconclusive and must not be trusted here. The pinned
 //! factory library resolves `TFT_MAD_COLOR_ORDER` to `TFT_MAD_BGR` (its
@@ -18,14 +18,14 @@
 //! ## Reading the result
 //!
 //! Three full-width bands are painted through the **production** init path — the same
-//! `St7789Display::new` the monitor calls, not a replica — labelled in white with the
+//! `Panel::new` the monitor calls, not a replica — labelled in white with the
 //! colour each is meant to be:
 //!
 //! - **RED / GREEN / BLUE, top to bottom** — colour order is correct, and the bluish
 //!   `FAULT` line has some other cause.
 //! - **the top band blue and the bottom band red**, green unchanged — red and blue are
 //!   swapped. Green is invariant under that swap, which is exactly what makes the
-//!   diagnosis unambiguous. Fix: `ColorOrder::Rgb` in `St7789Display::new`.
+//!   diagnosis unambiguous. Fix: `ColorOrder::Rgb` in `Panel::new`.
 //! - **green renders magenta** — the inversion is wrong, not the order. This should be
 //!   impossible while the white labels stay white, which is why they are white.
 //!
@@ -36,13 +36,13 @@
 
 use std::cell::RefCell;
 
-use adapters::st7789::St7789Display;
 use board_support::{internal_i2c, Axp192};
 use embedded_hal_bus::i2c::RefCellDevice;
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::EspLogger;
 use log::{info, warn};
+use platform_adapters::Panel;
 
 fn main() {
     esp_idf_svc::sys::link_patches();
@@ -71,7 +71,7 @@ fn main() {
         }
     }
 
-    let mut display: St7789Display = St7789Display::new(
+    let mut display: Panel = Panel::new(
         peripherals.spi2,
         peripherals.pins.gpio13, // SCLK
         peripherals.pins.gpio15, // MOSI
@@ -85,7 +85,7 @@ fn main() {
 
     info!("painted. Top band should be RED, middle GREEN, bottom BLUE.");
     info!("If the top reads blue and the bottom red (green unchanged), red and blue");
-    info!("are swapped: ColorOrder::Bgr in St7789Display::new is wrong for this panel.");
+    info!("are swapped: ColorOrder::Bgr in Panel::new is wrong for this panel.");
 
     loop {
         FreeRtos::delay_ms(10_000);

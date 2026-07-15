@@ -18,7 +18,13 @@
 # toolchain (rust-toolchain.toml) never touch the host `cargo test`.
 [workspace]
 resolver = "2"
-members = ["board-support", "firmware-infra", "adapters", "bins/plant-monitor"]
+members = [
+    "platform/adapters",
+    "board-support",
+    "firmware-infra",
+    "adapters",
+    "bins/plant-monitor",
+]
 
 # Profiles live at the (virtual) workspace root; members may not set their own.
 # opt-level "s" everywhere — `-O0` overflows IRAM on the esp32.

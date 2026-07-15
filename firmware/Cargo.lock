@@ -6,16 +6,10 @@ version = 4
 name = "adapters"
 version = "0.1.0"
 dependencies = [
- "embedded-graphics",
- "embedded-hal 1.0.0",
  "esp-idf-hal",
  "esp-idf-sys",
  "firmware-core",
- "mipidsi",
  "plant-core",
- "plant-display",
- "platform-core",
- "static_cell",
 ]
 
 [[package]]
@@ -1165,6 +1159,7 @@ dependencies = [
  "plant-core",
  "plant-display",
  "plant-shell",
+ "platform-adapters",
  "platform-runtime",
 ]
 
@@ -1175,6 +1170,20 @@ dependencies = [
  "log",
  "plant-core",
  "platform-core",
+]
+
+[[package]]
+name = "platform-adapters"
+version = "0.1.0"
+dependencies = [
+ "embedded-graphics",
+ "embedded-hal 1.0.0",
+ "esp-idf-hal",
+ "esp-idf-sys",
+ "mipidsi",
+ "platform-core",
+ "platform-display",
+ "static_cell",
 ]
 
 [[package]]

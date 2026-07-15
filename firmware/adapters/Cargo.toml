@@ -3,7 +3,7 @@ name = "adapters"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "M5StickC Plus domain-port adapters: adc, st7789, clock, ws2812 — the driven side of the hexagon (WiFi is infra, in firmware-infra)."
+description = "M5StickC Plus plant-specific driven adapters: adc, probe-power (clock and ws2812 to come). The board-generic panel/button/buzzer adapters live in platform-adapters."
 
 [lib]
 name = "adapters"
@@ -18,30 +18,13 @@ role = "driven-adapter"
 # The Clock re-home (qhw.15) and the WS2812 RMT encoder (qqh.1) arrive in their own
 # beads, pulling their peripherals then.
 [dependencies]
-# The ST7789 display adapter (qhw.6): mipidsi drives the panel over SPI. mipidsi 0.10
-# bundles its own SPI interface (mipidsi::interface), so no separate
-# display-interface-spi dep is needed. embedded-hal names the SPI mode (MODE_0) and
-# the traits mipidsi builds on; embedded-graphics supplies the Rgb565 the panel is
-# cleared to and the DrawTarget trait plant-display paints through.
-mipidsi = "0.10"
-embedded-graphics = "0.8"
-embedded-hal = "1.0"
-# static-cell gives mipidsi's pixel-batch buffer a truly `static` home instead of a
-# leaked `Box`. (`heapless` left with the text rendering, which now lives in
-# plant-display — the render path is still allocation-free, just not from here.)
-static_cell = "2"
-# Host crates, referenced by path across the host/firmware workspace seam; all
+# Host crates, referenced by path across the host/firmware workspace seam; both
 # are no_std and cross-compile to xtensa cleanly. plant-core owns the SoilSensor
 # port the `adc` adapter implements; firmware-core owns the pure oversampling
-# reduction and the ProbePower gating port the adapter composes; plant-display owns
-# the picture this adapter's panel shows — each host-tested there, so this crate
-# stays a thin on-target shell.
+# reduction and the ProbePower gating port the adapter composes — each host-tested
+# there, so this crate stays a thin on-target shell.
 plant-core = { path = "../../plant-core" }
 firmware-core = { path = "../../firmware-core" }
-plant-display = { path = "../../plant-display" }
-# The board-generic Screen port the st7789 adapter now implements (over a plant Glass),
-# and the Tick it renders against. Shared kernel; no_std, cross-compiles to xtensa.
-platform-core = { path = "../../platform/platform-core" }
 # The ESP-IDF HAL supplies the oneshot ADC driver the `adc` adapter wraps;
 # esp-idf-sys is named alongside it for `EspError` (the adapters' port error
 # type), so its version floor stays visible next to the -hal it re-exports.

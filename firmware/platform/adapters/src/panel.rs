@@ -1,17 +1,15 @@
-//! `st7789` — the M5StickC Plus onboard TFT as a [`Screen`] of a plant [`Glass`].
+//! `panel` — the M5StickC Plus onboard ST7789 TFT, as a generic [`Screen`].
 //!
-//! The driven adapter for [`platform_core::Screen`]: it drives the 1.14″ ST7789V2 panel
-//! over SPI with `mipidsi`, and hands the panel to `plant-display`, which paints the
-//! current soil [`plant_core::Observation`] (wrapped in a [`Glass`]) onto it. All freshness
-//! and cadence live inward (the pure [`observe`](plant_core::observe) policy and the generic
-//! `spawn_display` loop in `platform-runtime`); the *picture* lives in `plant-display`.
-//! What is left here — and all that should be — is the hardware: the SPI bus, the
-//! pins, and the panel's own quirks.
+//! [`Panel`] is the bring-up: it drives the 1.14″ ST7789V2 over SPI with `mipidsi`, applying
+//! the panel's offsets, inversion and RGB colour order — and nothing else. [`PanelScreen`]
+//! wraps a `Panel` as a [`platform_core::Screen`] of any app state `S`, with the app injecting
+//! a render function that paints an `S` onto the panel's [`DrawTarget`]. So one panel adapter
+//! serves the plant monitor's `Glass` and the pomodoro timer's view through the same port,
+//! and neither this crate nor the panel knows which app it is drawing.
 //!
-//! That split is what makes the screen reviewable. `plant_display::render` draws into
-//! any `DrawTarget`, so the very same code that paints this panel paints a host
-//! framebuffer: `just screens` writes a PNG of every state the glass can show. The
-//! images are made by the production renderer, not a replica of it.
+//! What is left here — and all that should be — is the hardware: the SPI bus, the pins, and
+//! the panel's own quirks. The picture lives in each app's display crate, drawn into any
+//! `DrawTarget`, so `just screens` renders it on the host from the same code.
 //!
 //! ## Panel quirks (M5StickC Plus)
 //!
@@ -52,9 +50,11 @@ use esp_idf_hal::units::FromValueType;
 use mipidsi::models::ST7789;
 use mipidsi::options::{ColorInversion, ColorOrder, Orientation, Rotation};
 use mipidsi::{interface::SpiInterface, Builder, Display};
-use plant_display::{Glass, RenderError, SCREEN_SIZE};
 use platform_core::{Screen, Tick};
+use platform_display::{RenderError, SCREEN_SIZE};
 use static_cell::StaticCell;
+
+use core::marker::PhantomData;
 
 /// Native (unrotated) panel width — the short axis, in portrait.
 ///
@@ -79,20 +79,22 @@ const BUFFER_LEN: usize = 512;
 /// initialised exactly once when the single display is built.
 static SPI_BUFFER: StaticCell<[u8; BUFFER_LEN]> = StaticCell::new();
 
-// The one concrete panel type this adapter drives. Named here so the on-target
-// composition root never has to spell the full mipidsi/esp-idf-hal type out; it
-// builds a `St7789Display` by inference and hands it to `spawn_display`.
 type BusDevice = SpiDeviceDriver<'static, SpiDriver<'static>>;
 type Dc = PinDriver<'static, Output>;
 type Rst = PinDriver<'static, Output>;
 type Interface = SpiInterface<'static, BusDevice, Dc>;
-type Panel = Display<Interface, ST7789, Rst>;
+
+/// The M5StickC Plus panel as an embedded-graphics [`DrawTarget`] — what an app's render
+/// function draws into. Named `pub` so [`PanelScreen`] can bound that function over it
+/// (`FnMut(&mut PanelTarget, S, Tick) -> ...`) without any caller spelling the full
+/// mipidsi/esp-idf-hal type out.
+pub type PanelTarget = Display<Interface, ST7789, Rst>;
 
 /// A failure driving the ST7789, carrying its underlying cause for the log.
 ///
 /// The panel's SPI and pin errors are `esp-idf-hal`'s own opaque newtypes, and
 /// `mipidsi` composes them into an init/interface error that is only `Debug`; rather
-/// than leak those types across the [`MoistureDisplay`] port, this captures the
+/// than leak those types across the [`Screen`] port, this captures the
 /// formatted cause behind a `Display` face the render loop can log.
 #[derive(Debug)]
 pub struct St7789Error(String);
@@ -110,9 +112,9 @@ fn fault<E: core::fmt::Debug>(op: &str, err: E) -> St7789Error {
     St7789Error(format!("ST7789 {op}: {err:?}"))
 }
 
-/// Flatten a `plant-display` render failure into this adapter's error.
+/// Flatten a render function's failure into this adapter's error.
 ///
-/// The renderer is generic in the target's error, so a panel bus failure arrives
+/// A render function is generic in the target's error, so a panel bus failure arrives
 /// wrapped; a line that would not fit its buffer is the renderer's own complaint. The
 /// port carries neither type outward — only [`St7789Error`].
 fn render_fault<E: core::fmt::Debug>(op: &str, err: RenderError<E>) -> St7789Error {
@@ -122,12 +124,12 @@ fn render_fault<E: core::fmt::Debug>(op: &str, err: RenderError<E>) -> St7789Err
     }
 }
 
-/// The M5StickC Plus onboard ST7789 TFT.
-pub struct St7789Display {
-    panel: Panel,
+/// The M5StickC Plus onboard ST7789 TFT, brought up and ready to draw into.
+pub struct Panel {
+    target: PanelTarget,
 }
 
-impl St7789Display {
+impl Panel {
     /// Bring up the panel: build the SPI device, drive DC/RST, and run the ST7789
     /// init with the M5StickC Plus offsets, colour inversion and **RGB** colour order
     /// (see the module docs — `Bgr` renders red as blue here, whatever the factory
@@ -163,12 +165,12 @@ impl St7789Display {
 
         // The SPI interface borrows a pixel-batch buffer for its whole life. A
         // StaticCell hands it a 'static buffer with no allocator and no leaked Box —
-        // initialised once here (a second St7789Display::new would panic).
+        // initialised once here (a second Panel::new would panic).
         let buffer: &'static mut [u8] = SPI_BUFFER.init([0u8; BUFFER_LEN]);
         let interface: Interface = SpiInterface::new(bus, dc, buffer);
 
         let mut delay: Ets = Ets;
-        let mut panel: Panel = Builder::new(ST7789, interface)
+        let mut target: PanelTarget = Builder::new(ST7789, interface)
             .display_size(PANEL_W, PANEL_H)
             .display_offset(OFFSET_X, OFFSET_Y)
             .orientation(Orientation::new().rotate(Rotation::Deg90))
@@ -184,14 +186,14 @@ impl St7789Display {
         // opaque background (see `line`), overwriting its own row in place — so the
         // per-update full-screen clear that caused a visible flash is gone, and only
         // a changed value repaints (the render loop suppresses steady ticks).
-        panel.clear(Rgb565::BLACK).map_err(|e| fault("clear", e))?;
+        target.clear(Rgb565::BLACK).map_err(|e| fault("clear", e))?;
 
-        Ok(Self { panel })
+        Ok(Self { target })
     }
 
     /// Bring-up self-test: paint the three primary bands on the real glass.
     ///
-    /// The picture is [`plant_display::colour_bands`]; what this method contributes is
+    /// The picture is [`platform_display::colour_bands`]; what this method contributes is
     /// the thing that makes it evidence — the *production* init path in [`Self::new`],
     /// with this panel's real [`ColorOrder`], inversion and offsets beneath it. The
     /// same bands drawn into a host framebuffer prove nothing about colour order,
@@ -207,22 +209,58 @@ impl St7789Display {
     ///   wrong, not the order. This should be impossible while white renders white,
     ///   which is why the labels are drawn in white.
     pub fn colour_check(&mut self) -> Result<(), St7789Error> {
-        plant_display::colour_bands(&mut self.panel)
+        platform_display::colour_bands(&mut self.target)
             .map_err(|err| render_fault("colour bands", err))
     }
 }
 
-impl Screen<Glass> for St7789Display {
+/// The panel as a generic [`Screen`] of app state `S`.
+///
+/// It owns a [`Panel`] and a `render` function — `plant_display::render` for the plant
+/// monitor, `pomodoro_display::render` for the timer — that the app supplies. On each
+/// [`show`](Screen::show) it hands the panel's [`DrawTarget`] to that function, so *this* crate
+/// stays app-agnostic: it knows how to bring the panel up and how to log a failure, and
+/// nothing about what is drawn. The composition root builds the panel, injects the render
+/// function, and hands the result to `platform_runtime::spawn_display`.
+pub struct PanelScreen<S, F>
+where
+    F: FnMut(&mut PanelTarget, S, Tick) -> Result<(), RenderError<PanelDrawError>>,
+{
+    panel: Panel,
+    render: F,
+    _state: PhantomData<S>,
+}
+
+/// The panel [`DrawTarget`]'s own error — an SPI/interface failure — that a render function
+/// returns wrapped in a [`RenderError`].
+type PanelDrawError = <PanelTarget as DrawTarget>::Error;
+
+impl<S, F> PanelScreen<S, F>
+where
+    F: FnMut(&mut PanelTarget, S, Tick) -> Result<(), RenderError<PanelDrawError>>,
+{
+    /// Wrap `panel` with the app's `render` function.
+    pub fn new(panel: Panel, render: F) -> Self {
+        Self {
+            panel,
+            render,
+            _state: PhantomData,
+        }
+    }
+}
+
+impl<S, F> Screen<S> for PanelScreen<S, F>
+where
+    F: FnMut(&mut PanelTarget, S, Tick) -> Result<(), RenderError<PanelDrawError>>,
+{
     type Error = St7789Error;
 
-    /// Hand the panel to the renderer. What appears — the wording, the colours, the two
-    /// rows, the creature and its frame, the in-place erase — is `plant-display`'s
-    /// decision, made once and reviewable on the host. This adapter's contribution is the
-    /// panel it draws on. It serves the plant's [`Glass`] view of the generic
-    /// [`Screen`] port; the pomodoro timer serves its own view through the same port.
-    fn show(&mut self, state: Glass, elapsed: Tick) -> Result<(), St7789Error> {
-        let Glass(observation) = state;
-        plant_display::render(&mut self.panel, observation, elapsed)
+    /// Hand the panel's draw target to the app's render function. What appears — the wording,
+    /// the colours, the creature and its frame, the in-place erase — is the app display
+    /// crate's decision, made once and reviewable on the host; this adapter's contribution is
+    /// the panel it draws on.
+    fn show(&mut self, state: S, elapsed: Tick) -> Result<(), St7789Error> {
+        (self.render)(&mut self.panel.target, state, elapsed)
             .map_err(|err| render_fault("render", err))
     }
 }
