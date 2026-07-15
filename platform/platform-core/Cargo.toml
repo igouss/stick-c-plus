@@ -1,0 +1,23 @@
+[package]
+name = "platform-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The board-generic pure kernel for the M5StickC Plus: the millisecond clock port, the animated-state and Screen render ports, the button-input port with a pure debounce, and the buzzer tone port — framework-free value types and traits every app builds on."
+
+[lib]
+name = "platform_core"
+path = "src/lib.rs"
+
+# The pure heart shared by every app: value types and the driven-side ports (Clock,
+# Screen, Button, Tone) they speak in, plus the pure input debounce. No I/O, no
+# framework — so it may be verified on the host and named by any context.
+# context = "shared": the one context any crate may depend on.
+[package.metadata.hex-arch]
+role = "domain"
+context = "shared"
+
+# Zero dependencies, like every domain core here — pure logic, host-testable, and it
+# cross-compiles to xtensa unchanged.
+[dev-dependencies]
+proptest = "1"
