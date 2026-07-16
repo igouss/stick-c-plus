@@ -243,25 +243,50 @@ fn stretch(series: &Series) -> [Option<u8>; GRAPH_WIDTH] {
     bars
 }
 
-/// Paint the endpoint-status token (top-right) and, when there is no frame yet, a hint in the
-/// top row's name field.
+/// Paint the top-right corner, and, when there is no frame yet, a hint in the top row's
+/// name field.
+///
+/// The corner escalates: a health token (`DOWN` / `BAD` / `OLD`) whenever the endpoint is
+/// not fresh, otherwise the frame's window span (e.g. `15m`) so the sparklines' time reach
+/// is legible from the payload's own grid — not an assumption. Every arm repaints the whole
+/// field, so a token erases a span and vice versa as the status changes.
 fn frame_status<D>(target: &mut D, state: HostState) -> Result<(), RenderError<D::Error>>
 where
     D: DrawTarget<Color = Rgb565>,
 {
-    let (token, token_ink): (&str, Rgb565) = match state.status {
-        Status::Fresh | Status::NeverSampled => ("", Rgb565::WHITE),
-        Status::Faulted(HostFault::Unreachable) => ("DOWN", Rgb565::RED),
-        Status::Faulted(HostFault::Malformed) => ("BAD", Rgb565::RED),
-        Status::Stale => ("OLD", DIM),
-    };
-    label(
-        target,
-        Point::new(STATUS_X, row_top(0)),
-        token_ink,
-        STATUS_CHARS,
-        format_args!("{token}"),
-    )?;
+    let corner: Point = Point::new(STATUS_X, row_top(0));
+    match state.status {
+        Status::Faulted(HostFault::Unreachable) => label(
+            target,
+            corner,
+            Rgb565::RED,
+            STATUS_CHARS,
+            format_args!("DOWN"),
+        )?,
+        Status::Faulted(HostFault::Malformed) => label(
+            target,
+            corner,
+            Rgb565::RED,
+            STATUS_CHARS,
+            format_args!("BAD"),
+        )?,
+        Status::Stale => label(target, corner, DIM, STATUS_CHARS, format_args!("OLD"))?,
+        // Fresh (or, defensively, a never-sampled slot that somehow holds a frame): show the
+        // window span the payload declared. No frame yet → blank the corner.
+        Status::Fresh | Status::NeverSampled => match state.frame {
+            Some(frame) => {
+                let (span, unit): (u32, char) = window_span(frame.window_s());
+                label(
+                    target,
+                    corner,
+                    DIM,
+                    STATUS_CHARS,
+                    format_args!("{span}{unit}"),
+                )?
+            }
+            None => label(target, corner, DIM, STATUS_CHARS, format_args!(""))?,
+        },
+    }
 
     if state.frame.is_none() {
         // No good frame ever fetched: the rows are blank, so say why in the top name field.
@@ -278,6 +303,20 @@ where
         )?;
     }
     Ok(())
+}
+
+/// A window's width, as a compact `(value, unit)` for the corner label: whole minutes when
+/// the seconds divide evenly (the endpoint's `900` → `15m`), else raw seconds.
+///
+/// Exact, never lossy — a span that is not a whole number of minutes stays in seconds rather
+/// than rounding — and read from the payload's `window_s`, so the label reflects the grid the
+/// endpoint actually sent instead of a hard-coded assumption.
+fn window_span(window_s: u32) -> (u32, char) {
+    if window_s >= 60 && window_s.is_multiple_of(60) {
+        (window_s / 60, 'm')
+    } else {
+        (window_s, 's')
+    }
 }
 
 /// Draw one baseline-top text field: the platform [`text_line`] primitive with an opaque
@@ -305,9 +344,14 @@ mod tests {
     /// One host's raw wire series for a test frame: `(name, cpu, mem)`.
     type HostSpec<'a> = (&'a str, &'a [Option<i32>], &'a [Option<i32>]);
 
-    /// A frame with the given hosts.
+    /// A frame with the given hosts, on the contract's `30 s / 900 s` grid.
     fn frame(hosts: &[HostSpec<'_>]) -> Pulse {
-        let mut b: PulseBuilder = PulseBuilder::new(30, 900);
+        frame_win(900, hosts)
+    }
+
+    /// A frame with the given hosts on a `window_s`-wide window, for the corner span label.
+    fn frame_win(window_s: u32, hosts: &[HostSpec<'_>]) -> Pulse {
+        let mut b: PulseBuilder = PulseBuilder::new(30, window_s);
         for (name, cpu, mem) in hosts {
             b.push(name, cpu, mem);
         }
@@ -521,6 +565,41 @@ mod tests {
         assert!(
             short < tall,
             "the taller bars were not erased — the graph would smear"
+        );
+    }
+
+    /// The window span is read from the payload's `window_s`, exact and unit-picking.
+    #[test]
+    fn the_window_span_reads_whole_minutes_or_falls_back_to_seconds() {
+        assert_eq!(window_span(900), (15, 'm'), "the contract's 900 s is 15m");
+        assert_eq!(window_span(600), (10, 'm'));
+        assert_eq!(window_span(120), (2, 'm'));
+        assert_eq!(
+            window_span(45),
+            (45, 's'),
+            "a sub-minute span stays in seconds"
+        );
+        assert_eq!(
+            window_span(90),
+            (90, 's'),
+            "1.5 min is not rounded — exact seconds"
+        );
+        assert_eq!(window_span(0), (0, 's'));
+    }
+
+    /// The grid is not cosmetic: a frame's `window_s` reaches the glass. Two frames that
+    /// differ *only* in their window span paint different pixels (the corner label), so the
+    /// display genuinely consumes the payload's grid rather than merely storing it.
+    #[test]
+    fn a_different_window_span_paints_a_different_corner() {
+        let host: &[HostSpec<'_>] = &[("h", &[Some(10)], &[Some(20)])];
+        let fifteen: Framebuffer =
+            painted(HostState::new(Some(frame_win(900, host)), Status::Fresh));
+        let ten: Framebuffer = painted(HostState::new(Some(frame_win(600, host)), Status::Fresh));
+        assert_ne!(
+            fifteen.pixels(),
+            ten.pixels(),
+            "a different window_s must change the picture — the span label reads it"
         );
     }
 }
