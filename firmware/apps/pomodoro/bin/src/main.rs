@@ -18,17 +18,16 @@
 //! `mm:ss` the display shows agree. Durations are the classic 25 / 5 / 15 ([`CLASSIC`]); change
 //! that one constant (or build a `Durations`) to retune — or to shrink them for a bench test.
 
-use std::cell::RefCell;
-
 use board_support::{internal_i2c, Axp192};
-use embedded_hal_bus::i2c::RefCellDevice;
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::EspLogger;
 use log::info;
-use platform_adapters::{GpioButton, LedcBuzzer, Panel, PanelScreen};
+use platform_adapters::{Axp192PowerSource, GpioButton, LedcBuzzer, Panel, PanelScreen};
 use platform_core::Tick;
-use platform_runtime::{spawn_display, DisplayConfig, Monotonic};
+use platform_runtime::{
+    spawn_buzzer, spawn_display, spawn_power_watch, DisplayConfig, Monotonic, PowerWatchConfig,
+};
 use pomodoro_core::CLASSIC;
 use pomodoro_display::PomodoroView;
 use pomodoro_shell::{spawn_input, SharedTimer};
@@ -44,19 +43,20 @@ fn main() {
     let peripherals: Peripherals = Peripherals::take().expect("peripherals already taken");
 
     // Power the LCD/TFT rails before building the panel — an unpowered panel takes a correct
-    // init and still shows nothing. The AXP192 latches its LDO enables, so this is scoped: once
-    // the rails are up the PMIC and its bus can be dropped.
-    {
-        let i2c = internal_i2c(
-            peripherals.i2c0,
-            peripherals.pins.gpio21,
-            peripherals.pins.gpio22,
-        )
-        .expect("internal I2C bring-up");
-        let i2c_bus: RefCell<_> = RefCell::new(i2c);
-        let mut axp: Axp192<_> = Axp192::new(RefCellDevice::new(&i2c_bus));
-        axp.power_on().expect("AXP192 LCD/TFT rail power-on");
-    }
+    // init and still shows nothing. The AXP192 latches its LDO enables, but this root now
+    // *retains* the PMIC past power-on rather than dropping it: the power-watch thread reads
+    // VBUS from this same device for the life of the app. The internal bus has no other live
+    // runtime consumer, so the watcher owns the `Axp192<I2cDriver>` outright (`I2cDriver` is
+    // `Send`) — no `RefCellDevice`, which could not cross into the thread.
+    let i2c = internal_i2c(
+        peripherals.i2c0,
+        peripherals.pins.gpio21,
+        peripherals.pins.gpio22,
+    )
+    .expect("internal I2C bring-up");
+    let mut axp: Axp192<_> = Axp192::new(i2c);
+    axp.power_on().expect("AXP192 LCD/TFT rail power-on");
+    let power_source: Axp192PowerSource<_> = Axp192PowerSource::new(axp);
 
     // The panel, wrapped as a generic Screen with the pomodoro render function.
     let panel: Panel = Panel::new(
@@ -85,14 +85,21 @@ fn main() {
     )
     .expect("buzzer G2 (LEDC)");
 
+    // One buzzer, one owner: the LEDC buzzer moves into a single owner thread, and every caller
+    // — the input thread's jingles, the power-watch thread's chimes — plays through a Clone +
+    // Send handle, so a chime and a jingle can never interleave or truncate one another. Held
+    // for the life of main; the owner runs until every handle is dropped.
+    let (_buzzer_owner, tone) = spawn_buzzer(buzzer).expect("spawn buzzer owner");
+
     // One monotonic clock, shared by the input thread (writer) and the render loop (reader), so
     // the countdown and the displayed mm:ss are measured on one time base.
     let clock: Monotonic = Monotonic::start();
     let shared: SharedTimer = SharedTimer::new();
 
-    // Input: poll the buttons, step the FSM, sound the jingles. Held for the life of main —
-    // dropping it would only detach the thread, which already runs forever.
-    let _input = spawn_input(front, side, buzzer, shared.clone(), clock, CLASSIC)
+    // Input: poll the buttons, step the FSM, sound the jingles on a clone of the one buzzer
+    // handle. Held for the life of main — dropping it would only detach the thread, which
+    // already runs forever.
+    let _input = spawn_input(front, side, tone.clone(), shared.clone(), clock, CLASSIC)
         .expect("spawn pomodoro-input");
     info!(
         "input thread up: front tap = start/pause, front double-tap = restart session, \
@@ -110,7 +117,16 @@ fn main() {
         .expect("spawn pomodoro-display");
     info!("display thread up: ST7789 rendering mm:ss + the Claude creature");
 
-    // Supervisory loop: a heartbeat only — the input and display threads own the app.
+    // Power-watch: poll VBUS on the retained AXP192, debounce it, and sound the spool-up /
+    // spool-down chime a settled USB plug or unplug decides — through the same one buzzer
+    // owner, on the same clock. Silent at boot: the first sample only seeds the baseline. Held
+    // for the life of main.
+    let _power_watch = spawn_power_watch(power_source, tone, clock, PowerWatchConfig::default())
+        .expect("spawn pomodoro power-watch");
+    info!("power-watch thread up: USB plug = spool-up, unplug = spool-down");
+
+    // Supervisory loop: a heartbeat only — the input, display, and power-watch threads own the
+    // app.
     loop {
         FreeRtos::delay_ms(5_000);
         let timer = shared.snapshot();

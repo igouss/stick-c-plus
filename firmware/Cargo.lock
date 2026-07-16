@@ -903,7 +903,6 @@ name = "host-monitor"
 version = "0.1.0"
 dependencies = [
  "board-support",
- "embedded-hal-bus",
  "embuild",
  "esp-idf-hal",
  "esp-idf-svc",
@@ -1256,6 +1255,7 @@ dependencies = [
 name = "platform-adapters"
 version = "0.1.0"
 dependencies = [
+ "board-support",
  "embedded-graphics",
  "embedded-hal 1.0.0",
  "esp-idf-hal",
@@ -1298,7 +1298,6 @@ name = "pomodoro"
 version = "0.1.0"
 dependencies = [
  "board-support",
- "embedded-hal-bus",
  "embuild",
  "esp-idf-hal",
  "esp-idf-svc",

@@ -25,14 +25,12 @@
 //! moisture *percent* is not yet trustworthy: it rides a provisional calibration
 //! ([`PROVISIONAL_CAL`]) until qhw.29 captures the probe's real dry/wet endpoints.
 
-use std::cell::RefCell;
 use std::sync::Arc;
 use std::thread;
 
 use adapters::adc::{EarthUnit, SAMPLES};
 use adapters::probe_power::AlwaysOn;
 use board_support::{internal_i2c, Axp192};
-use embedded_hal_bus::i2c::RefCellDevice;
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
@@ -49,8 +47,10 @@ use plant_core::ports::MAX_READING;
 use plant_core::{Observation, Tick};
 use plant_display::Glass;
 use plant_shell::{spawn_sampler, SamplerConfig, SharedMoisture};
-use platform_adapters::{Panel, PanelScreen};
-use platform_runtime::{spawn_display, DisplayConfig, Monotonic};
+use platform_adapters::{Axp192PowerSource, LedcBuzzer, Panel, PanelScreen};
+use platform_runtime::{
+    spawn_buzzer, spawn_display, spawn_power_watch, DisplayConfig, Monotonic, PowerWatchConfig,
+};
 
 /// Provisional soil calibration — placeholder dry/wet endpoints, *not* measured.
 ///
@@ -149,27 +149,26 @@ fn main() {
 
     // Power the LCD/TFT rails before building the display — an unpowered panel takes
     // a correct ST7789 init and still shows nothing (qhw.20). The AXP192 latches its
-    // LDO enables, so this bring-up is scoped: once the rails are up the PMIC and its
-    // bus can be dropped (the rails stay on). The internal I2C is wrapped in a
-    // RefCellDevice so the MPU6886/RTC on the same bus can join later without
-    // rewiring; qhw.31 (probe-power gating) reopens this to hold the AXP192 for
-    // runtime LDO toggling. Fatal on failure: a dark screen is a broken monitor.
-    {
-        let i2c = internal_i2c(
-            peripherals.i2c0,
-            peripherals.pins.gpio21,
-            peripherals.pins.gpio22,
-        )
-        .expect("internal I2C bring-up");
-        let i2c_bus: RefCell<_> = RefCell::new(i2c);
-        let mut axp: Axp192<_> = Axp192::new(RefCellDevice::new(&i2c_bus));
-        axp.power_on().expect("AXP192 LCD/TFT rail power-on");
-        match axp.display_rails_enabled() {
-            Ok(true) => info!("axp192: LCD/TFT rails enabled (reg 0x12 read back)"),
-            Ok(false) => warn!("axp192: rails did not read back as enabled"),
-            Err(err) => warn!("axp192: rail read-back failed: {err}"),
-        }
+    // LDO enables, but this root now *retains* the PMIC past power-on rather than
+    // dropping it: the power-watch thread reads VBUS from this same device for the life
+    // of the app. The internal bus has no other live runtime consumer (the MPU6886/RTC
+    // are unused), so the watcher owns the `Axp192<I2cDriver>` outright — `I2cDriver`
+    // is `Send`, unlike the `RefCellDevice` a shared bus would need. Fatal on failure:
+    // a dark screen is a broken monitor.
+    let i2c = internal_i2c(
+        peripherals.i2c0,
+        peripherals.pins.gpio21,
+        peripherals.pins.gpio22,
+    )
+    .expect("internal I2C bring-up");
+    let mut axp: Axp192<_> = Axp192::new(i2c);
+    axp.power_on().expect("AXP192 LCD/TFT rail power-on");
+    match axp.display_rails_enabled() {
+        Ok(true) => info!("axp192: LCD/TFT rails enabled (reg 0x12 read back)"),
+        Ok(false) => warn!("axp192: rails did not read back as enabled"),
+        Err(err) => warn!("axp192: rail read-back failed: {err}"),
     }
+    let power_source: Axp192PowerSource<_> = Axp192PowerSource::new(axp);
 
     // AlwaysOn: the probe stays powered for now. qhw.31 swaps this for a real
     // ProbePower (AXP192 rail / GPIO switch) — the only wiring change — and the
@@ -241,6 +240,25 @@ fn main() {
     let _display =
         spawn_display(screen, display_source, clock, display_config).expect("spawn plant-display");
     info!("display thread up: ST7789 rendering raw + percent every {display_period:?}");
+
+    // The on-board passive buzzer (LEDC on G2), behind one owner thread so the power-watch chime
+    // and any future sound share the single hardware buzzer without interleaving. plant-monitor
+    // sounds only the shared USB power chime today.
+    let buzzer = LedcBuzzer::new(
+        peripherals.ledc.timer0,
+        peripherals.ledc.channel0,
+        peripherals.pins.gpio2,
+    )
+    .expect("buzzer G2 (LEDC)");
+    let (_buzzer_owner, tone) = spawn_buzzer(buzzer).expect("spawn buzzer owner");
+
+    // Power-watch: poll VBUS on the retained AXP192, debounce it, and sound the spool-up /
+    // spool-down chime a settled USB plug or unplug decides — the shared platform capability,
+    // on the same clock. Silent at boot: the first sample only seeds the baseline. Held for the
+    // life of main.
+    let _power_watch = spawn_power_watch(power_source, tone, clock, PowerWatchConfig::default())
+        .expect("spawn plant power-watch");
+    info!("power-watch thread up: USB plug = spool-up, unplug = spool-down");
 
     // The native-API device HA adopts: one Soil Moisture sensor whose live value is
     // PULLED from the shared cache on every server poll. The freshness check lives

@@ -77,7 +77,8 @@ esphome-server = { path = "../../../../platform/esphome-server" }
 # `adapters::st7789::St7789Display` to bind the MoistureDisplay port to the TFT.
 adapters = { path = "../adapters" }
 # The board-generic driven adapters (shared): the ST7789 Panel + generic PanelScreen the
-# composition root wraps with the plant render function. Buttons/buzzer are unused here.
+# composition root wraps with the plant render function, the G2 LedcBuzzer the shared USB
+# power chime sounds through, and the Axp192PowerSource the power-watch reads VBUS from.
 platform-adapters = { path = "../../../platform/adapters" }
 # The board-support package: brings up the internal I2C bus and powers the AXP192
 # LCD/TFT rails (qhw.20) — load-bearing for the display, which is dark otherwise.

@@ -47,9 +47,6 @@ board-support = { path = "../../../platform/board-support" }
 # takes the modem + system event loop + NVS and hands them to `net::wifi::WifiStation` so
 # the board joins the network before the poller fetches the endpoint.
 net = { path = "../../../platform/net" }
-# Shares the one internal I2C bus across bus devices; here it hands the AXP192 a
-# RefCellDevice so the panel rails can be powered on before the display starts.
-embedded-hal-bus = "0.3"
 
 [build-dependencies]
 # Emits the ESP-IDF sysenv link/search flags for the final link (via ldproxy).

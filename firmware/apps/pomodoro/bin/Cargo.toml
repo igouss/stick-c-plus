@@ -31,8 +31,6 @@ esp-idf-svc = "0.52"
 esp-idf-hal = "0.46"
 esp-idf-sys = "0.37"
 log = "0.4"
-# Shares the one internal I2C bus so the AXP192 can be powered up over a RefCellDevice.
-embedded-hal-bus = "0.3"
 # Firmware crates (same workspace): the BSP that powers the LCD rails, and the board-generic
 # panel/button/buzzer adapters.
 board-support = { path = "../../../platform/board-support" }
