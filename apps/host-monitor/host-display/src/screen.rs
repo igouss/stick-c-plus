@@ -190,6 +190,10 @@ where
 }
 
 /// Plot a series into `rect` as a bar sparkline, stretched to fill the plot's width.
+///
+/// A present sample draws a bar in `ink`; a gap draws a [`DIM`] baseline tick (the
+/// sparkline primitive keeps them apart). An empty series (no samples at all) draws
+/// nothing — passing zero columns, not a plot full of gap ticks.
 fn graph<D>(
     target: &mut D,
     rect: Rectangle,
@@ -199,8 +203,15 @@ fn graph<D>(
 where
     D: DrawTarget<Color = Rgb565>,
 {
-    let bars: [u8; GRAPH_WIDTH] = stretch(series);
-    sparkline(target, rect, &bars, ink, Rgb565::BLACK)
+    let bars: [Option<u8>; GRAPH_WIDTH] = stretch(series);
+    // An empty series carries neither values nor gaps, so it draws as a blank plot — not
+    // `GRAPH_WIDTH` gap ticks. A non-empty series fills every column (nearest-neighbour).
+    let columns: usize = if series.samples().is_empty() {
+        0
+    } else {
+        GRAPH_WIDTH
+    };
+    sparkline(target, rect, &bars[..columns], ink, Rgb565::BLACK, DIM)
 }
 
 /// Fill `rect` with background — an empty sparkline — erasing whatever a live host drew there.
@@ -208,24 +219,25 @@ fn clear_graph<D>(target: &mut D, rect: Rectangle) -> Result<(), RenderError<D::
 where
     D: DrawTarget<Color = Rgb565>,
 {
-    sparkline(target, rect, &[], CPU_INK, Rgb565::BLACK)
+    sparkline(target, rect, &[], CPU_INK, Rgb565::BLACK, DIM)
 }
 
 /// Map a series onto the plot's [`GRAPH_WIDTH`] columns by nearest-neighbour, so the whole
 /// plot is filled whatever the window length: oldest at the left, newest at the right.
 ///
-/// A gap ([`None`]) becomes a zero-height (empty) column, so a missing scrape reads as a
-/// break in the graph rather than a floor at `0%`. An empty series leaves every column
-/// empty.
-fn stretch(series: &Series) -> [u8; GRAPH_WIDTH] {
+/// A gap ([`None`]) stays a `None` column, which the sparkline draws as a baseline tick —
+/// so a missing scrape reads as "no data here", distinct from a `0%` floor. A present
+/// sample becomes `Some(value)`. An empty series maps to all-`None`; its caller draws it as
+/// a blank plot rather than a row of gap ticks (see [`graph`]).
+fn stretch(series: &Series) -> [Option<u8>; GRAPH_WIDTH] {
     let samples: &[Option<Percent>] = series.samples();
     let n: usize = samples.len();
-    let mut bars: [u8; GRAPH_WIDTH] = [0; GRAPH_WIDTH];
+    let mut bars: [Option<u8>; GRAPH_WIDTH] = [None; GRAPH_WIDTH];
     if n > 0 {
         for (column, bar) in bars.iter_mut().enumerate() {
             // column < GRAPH_WIDTH, so index = column*n/GRAPH_WIDTH is in 0..n — never n.
             let index: usize = column * n / GRAPH_WIDTH;
-            *bar = samples[index].map(Percent::value).unwrap_or(0);
+            *bar = samples[index].map(Percent::value);
         }
     }
     bars
@@ -414,29 +426,24 @@ mod tests {
         assert!(lit_inside(&fb, mem_graph(2)) > 0);
     }
 
-    /// A gap in the middle of a series is a break in the graph, not a floor at zero.
+    /// A gap is not a zero. The middle sample is a gap in one frame and a `0%` reading in
+    /// the other; everything else is identical. The gap draws a dim baseline tick where the
+    /// `0%` draws nothing, so the gap lights pixels the `0%` column does not — "no data" is
+    /// visibly distinct from "zero", which is the whole reason a gap is carried through as
+    /// `None` instead of being flattened to `0`.
     #[test]
-    fn a_gap_is_an_empty_column_not_a_zero_bar() {
-        // All-full except one gap: fewer lit pixels than an all-full series of the same length.
-        let full: Framebuffer = painted(HostState::new(
-            Some(frame(&[(
-                "h",
-                &[Some(100), Some(100), Some(100), Some(100)],
-                &[Some(0)],
-            )])),
+    fn a_gap_renders_differently_from_a_zero() {
+        let zeroed: Framebuffer = painted(HostState::new(
+            Some(frame(&[("h", &[Some(50), Some(0), Some(50)], &[Some(0)])])),
             Status::Fresh,
         ));
         let gapped: Framebuffer = painted(HostState::new(
-            Some(frame(&[(
-                "h",
-                &[Some(100), None, Some(100), Some(100)],
-                &[Some(0)],
-            )])),
+            Some(frame(&[("h", &[Some(50), None, Some(50)], &[Some(0)])])),
             Status::Fresh,
         ));
         assert!(
-            lit_inside(&gapped, cpu_graph(0)) < lit_inside(&full, cpu_graph(0)),
-            "the gap must leave a break, so fewer pixels are lit than the all-full series"
+            lit_inside(&gapped, cpu_graph(0)) > lit_inside(&zeroed, cpu_graph(0)),
+            "the gap's baseline ticks light pixels the bare 0% column leaves dark"
         );
     }
 
