@@ -142,7 +142,16 @@ fn main() {
             host_display::render(target, state, elapsed)
         },
     );
-    let display_config: DisplayConfig = DisplayConfig::default();
+    // host_display draws three host rows — three names, six percentages, six sparklines —
+    // heavier than the plant/pomodoro glass, and the HTTP poller's preemption pushes
+    // context-switch frames onto this stack mid-SPI. The shared 8 KiB default overflowed on
+    // the metal (a context switch deep in the mipidsi SPI path corrupted the SPI bus-lock
+    // semaphore → a spi_bus_lock_acquire_start assert, and a reboot loop), so host-monitor
+    // gives the display thread a larger stack. Validate the high-water mark if the layout grows.
+    let display_config: DisplayConfig = DisplayConfig {
+        stack_size: 16 * 1024,
+        ..DisplayConfig::default()
+    };
     let display_period: core::time::Duration = display_config.period;
     // The source the generic render loop pulls each tick: the freshest snapshot (last good
     // frame + current status) from the SAME cache and staleness bound the heartbeat reads,
