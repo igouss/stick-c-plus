@@ -37,6 +37,7 @@ mod poller;
 mod shared;
 
 pub use poller::{
-    spawn_poller, Poller, PollerConfig, POLLER_STACK_SIZE, POLL_PERIOD, STALENESS_PERIODS,
+    spawn_poller, Poller, PollerConfig, MAX_POLL_PERIOD, MIN_POLL_PERIOD, POLLER_STACK_SIZE,
+    STALENESS_PERIODS,
 };
 pub use shared::SharedMetrics;

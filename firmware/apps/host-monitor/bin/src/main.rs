@@ -105,7 +105,9 @@ fn main() {
     let shared: SharedMetrics = SharedMetrics::new();
     let config: PollerConfig = PollerConfig::new();
     let max_age: Tick = config.max_age();
-    let period: core::time::Duration = config.period;
+    // The cadence adapts to each frame's step_s; before the first frame it polls at this
+    // ceiling. Logged only to show the bound the operator can expect.
+    let max_period: core::time::Duration = config.max_period;
 
     // The driven adapter: fetch the bearer-gated /pulse endpoint over HTTP and hand the body
     // to the pure host-wire codec. Handed to the poller thread, which owns the timing and
@@ -114,7 +116,7 @@ fn main() {
     info!("host-monitor: GET {}", source.url());
     let _poller =
         spawn_poller(source, shared.clone(), clock, config).expect("spawn host-poller thread");
-    info!("poller thread up: {period:?} period, unavailable after {max_age} ms stale");
+    info!("poller thread up: cadence adapts to step_s (≤ {max_period:?}), unavailable after {max_age} ms stale");
 
     // The onboard TFT: the ST7789 adapter renders one row per host (name + two live
     // percentages + two sparklines) from the SAME shared cache, on the SAME clock and
