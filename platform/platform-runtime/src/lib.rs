@@ -16,12 +16,25 @@
 //!   [`Animated`](platform_core::Animated) app state and [`Screen`](platform_core::Screen)
 //!   adapter: it pulls the freshest state from an injected `source`, repaints only when the
 //!   `(state, frame)` picture changed, and takes its cadence from whether the creature moves.
+//! - [`spawn_power_watch`] — the VBUS-watch thread: poll a
+//!   [`PowerSource`](platform_core::PowerSource), debounce it, and sound the
+//!   [`PowerChime`](platform_core::PowerChime) a settled transition decides, on an injected
+//!   [`Tone`](platform_core::Tone).
+//! - [`spawn_buzzer`] — the buzzer's one owner thread: serialises every melody submitted
+//!   through its [`BuzzerHandle`] so a chime and a jingle never interleave or truncate one
+//!   another.
 
+mod buzzer;
 mod clock;
 mod display;
+mod power_watch;
 
+pub use buzzer::{spawn_buzzer, BuzzerHandle, BuzzerTask, OwnerGone, BUZZER_STACK_SIZE};
 pub use clock::Monotonic;
 pub use display::{
     spawn_display, DisplayConfig, DisplayTask, ANIMATION_PERIOD, DISPLAY_STACK_SIZE, MIN_YIELD,
     RENDER_PERIOD,
+};
+pub use power_watch::{
+    spawn_power_watch, PowerWatchConfig, PowerWatchTask, POWER_WATCH_PERIOD, POWER_WATCH_STACK_SIZE,
 };
