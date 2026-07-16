@@ -1,35 +1,25 @@
 #!/usr/bin/env bash
-# stick-c-plus quality bar — the automated, reproducible, per-arm mechanical gate that the
-# directory-algorithm dispatcher runs (kbe ADR-0007). Committed to the repo so every run
-# worktree inherits the SAME bar; the champion stays generic and dispatches to this.
+# stick-c-plus quality bar — the automated, reproducible, per-arm mechanical gate the
+# directory-algorithm dispatcher runs (kbe ADR-0007). Committed so every run worktree
+# inherits the SAME bar; the champion stays generic and dispatches to this.
 #
-# In scope (reproducible, secret-free, both arms identical):
-#   - host domain + display: cargo test / clippy / hex-lint / effect-audit (via justfile)
-#   - firmware cross-compile: the host-monitor bin links on Xtensa
+# SCOPE: the host chain only — the change's heart (the pure Pulse transform + the display)
+# and the architecture edges. Fast, reproducible, isolation-/container-safe; writes only a
+# small host target/ (no multi-GB esp toolchain in the run).
 #
-# OUT of scope — the operator WITNESS step, run out-of-band, NEVER here:
-#   - live `curl -H "Bearer $TOK" .../pulse`  (would leak the token into the trace)
-#   - `just flash` + eyeballing the panel
-# See kbe/designs/directory-algorithm-trial ADR-0007 for the boundary.
+# Firmware, flash, and the live /pulse smoke are the operator WITNESS step — run OUT of band
+# so we REUSE the prepared toolchain and WASTE NO SPACE. A fresh run worktree has no
+# firmware/.embuild, so building there can only REBUILD ESP-IDF (~6GB) per run — the opposite
+# of reuse (kbe ADR-0008; each project will package its stage tooling in a container later).
+# Verify an arm's firmware on the WARM main checkout, which already has .embuild + target:
+#     git -C <main-checkout> checkout <arm-branch> && just build-host-monitor  # reuses 6GB, fast
+#     curl -H "Authorization: Bearer $HOSTPULSE_TOKEN" http://10.0.0.10:9099/pulse | jq
+#     just flash    # eyeball the three host rows
 #
 # Run from the project worktree root (the dispatcher's cwd). Fail-closed.
 set -euo pipefail
 
-echo "── host domain + display ─────────────────────────────────────────"
-just test        # cargo test --workspace (host-core transform, host-display layout, ...)
+just test        # cargo test --workspace (host-core Pulse transform, host-display layout, ...)
 just lint        # cargo clippy --workspace -- -D warnings
 just hex-lint    # hexagonal role + bounded-context edges, BOTH workspaces
 just audit       # effect-audit --strict --require-domain (functional-core purity)
-
-echo "── firmware cross-compile (host-monitor bin, Xtensa) ─────────────"
-# The bin's build.rs bakes [host_monitor] from firmware/secrets.toml, which is git-ignored
-# and therefore ABSENT from a fresh worktree. Provision it from the committed template — the
-# template carries only placeholders (never the real token); the build only needs to
-# type-check + link, not reach the endpoint. Git-ignored, so it never enters the diff.
-if [[ ! -f firmware/secrets.toml ]]; then
-  cp firmware/secrets.toml.example firmware/secrets.toml
-  echo "  (provisioned firmware/secrets.toml from .example — placeholders only)"
-fi
-just build-host-monitor   # ESP_IDF_SYS_ROOT_CRATE=host-monitor cargo build --release -p host-monitor
-
-echo "── mechanical bar clear ──────────────────────────────────────────"
