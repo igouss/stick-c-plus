@@ -18,6 +18,9 @@
 //!   adapter only sounds it.
 //! - [`AudioIn`] — a microphone yielding mono PCM samples. The adapter only transfers samples;
 //!   the pure `platform-audio` crate decides what they mean (e.g. whether a tone is present).
+//! - [`PowerSource`] — whether the board is on USB or battery, debounced by the pure
+//!   [`PowerDebounce`] into a settled level; [`edge`] then decides the [`PowerChime`] (if
+//!   any) a transition plays.
 //!
 //! ## The animation contract
 //! - [`Animated`] — an app state that knows its own animation policy: a coarse
@@ -28,16 +31,22 @@
 
 mod animated;
 mod audio;
+mod chime;
 mod clock;
 mod input;
+mod power;
+mod power_debounce;
 mod screen;
 mod sound;
 mod tick;
 
 pub use animated::Animated;
 pub use audio::AudioIn;
+pub use chime::{edge, PowerChime};
 pub use clock::Clock;
 pub use input::{Button, ButtonEvent, Debounce, TapCadence, DEBOUNCE_MS, DOUBLE_TAP_MS, HOLD_MS};
+pub use power::PowerSource;
+pub use power_debounce::{PowerDebounce, POWER_DEBOUNCE_MS};
 pub use screen::Screen;
 pub use sound::{Note, Tone};
 pub use tick::Tick;
