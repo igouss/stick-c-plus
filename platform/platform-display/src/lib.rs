@@ -12,6 +12,8 @@
 //!   `kb/sources/claudepix.md` for provenance and its unresolved licence.
 //! - [`text_line`]/[`text_overlay`] — the two fixed-width text primitives, placed by an
 //!   explicit `origin` so every app's layout is the same primitive positioned differently.
+//! - [`sparkline`] — a bar-graph of `0..=100` values into an explicit `area`, drawn as one
+//!   contiguous erase-in-place fill so a scrolling usage graph never flashes.
 //! - [`colour_bands`] — the RGB bring-up self-test that makes a channel swap falsifiable.
 //! - [`RenderError`] — the render failure, generic in the target's own error, so this
 //!   crate names no concrete panel.
@@ -31,6 +33,7 @@ extern crate alloc;
 
 mod colour_check;
 mod error;
+mod sparkline;
 mod text;
 
 pub mod sprite;
@@ -39,4 +42,5 @@ pub mod testing;
 
 pub use colour_check::colour_bands;
 pub use error::RenderError;
+pub use sparkline::sparkline;
 pub use text::{text_line, text_overlay, FONT, LINE_CAP, SCREEN_SIZE};
