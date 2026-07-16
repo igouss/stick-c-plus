@@ -20,6 +20,9 @@ role = "driven-adapter"
 platform-core = { path = "../../../platform/platform-core" }
 # The panel maps the render function's RenderError into its own; SCREEN_SIZE fixes geometry.
 platform-display = { path = "../../../platform/platform-display" }
+# The BSP (infra): Axp192PowerSource wraps the board-support AXP192 driver to read the VBUS
+# status bit, so the driven power-source adapter builds on the board bring-up beneath it.
+board-support = { path = "../board-support" }
 # mipidsi drives the ST7789 over SPI; embedded-graphics supplies Rgb565 + DrawTarget;
 # embedded-hal names the SPI mode; static-cell gives the pixel buffer a 'static home.
 mipidsi = "0.10"

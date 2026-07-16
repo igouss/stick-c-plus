@@ -14,6 +14,9 @@
 //!   as an LEDC PWM square wave.
 //! - [`PdmMic`] — the SPM1423 PDM microphone (G0 / G34) as the [`AudioIn`](platform_core::AudioIn)
 //!   port, decimated to PCM by the I2S peripheral. Used by the chime self-test to hear the buzzer.
+//! - [`Axp192PowerSource`] — the AXP192 PMIC (internal I2C bus) as the
+//!   [`PowerSource`](platform_core::PowerSource) port: is USB (VBUS) present? Reads one status
+//!   bit; the debounce and the plug/unplug chime decision live inward in `platform-core`.
 //!
 //! The composition root builds these from the board's peripherals and injects them; the
 //! picture, the gesture policy, and the melodies all live in the pure crates inward.
@@ -22,8 +25,10 @@ mod button;
 mod buzzer;
 mod panel;
 mod pdm_mic;
+mod power_source;
 
 pub use button::GpioButton;
 pub use buzzer::LedcBuzzer;
 pub use panel::{Panel, PanelScreen, PanelTarget, St7789Error};
 pub use pdm_mic::PdmMic;
+pub use power_source::Axp192PowerSource;

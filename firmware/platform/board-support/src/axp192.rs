@@ -44,6 +44,14 @@ const EXTEN: u8 = 0x40;
 /// preserved — this is the write that actually turns the LCD on.
 const RAILS_ON: u8 = DISPLAY_RAILS | EXTEN;
 
+/// Register 0x00 — the input-power status byte (which sources are present/usable).
+const REG_POWER_STATUS: u8 = 0x00;
+
+/// The [`REG_POWER_STATUS`] VBUS-present bit (bit 5) — set while USB 5 V (VBUS) is
+/// present at the PMIC, so it tracks the USB cable being plugged in or pulled out,
+/// independent of whether the board draws charge from it.
+const VBUS_PRESENT: u8 = 0x20;
+
 /// The M5StickC Plus AXP192 PMIC, over a shared or owned I2C bus.
 pub struct Axp192<I2C> {
     i2c: I2C,
@@ -130,6 +138,16 @@ impl<I2C: I2c> Axp192<I2C> {
     /// Whether the external 5 V boost ([`EXTEN`]) reads back as enabled.
     pub fn exten_enabled(&mut self) -> Result<bool, I2C::Error> {
         Ok(self.power_output()? & EXTEN == EXTEN)
+    }
+
+    /// Whether USB power (VBUS) is present, from [`REG_POWER_STATUS`] bit 5.
+    ///
+    /// The board primitive behind the platform power-source port: a plain status-bit read,
+    /// no interpretation. All debounce and the plug/unplug edge decision live inward in the
+    /// pure `platform-core`; this only reports the raw level the PMIC sees, so a USB
+    /// plug or pull shows up here as this bit going high or low.
+    pub fn vbus_present(&mut self) -> Result<bool, I2C::Error> {
+        Ok(self.read(REG_POWER_STATUS)? & VBUS_PRESENT == VBUS_PRESENT)
     }
 
     /// Read one register: write its address, read one byte back.
