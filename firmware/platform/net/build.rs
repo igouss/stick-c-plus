@@ -1,11 +1,11 @@
 //! Bake the WiFi credentials into the image as compile-time env.
 //!
-//! The credentials MUST NOT be committed (qhw.7): they live only in the
-//! git-ignored `firmware/secrets.toml`, mirrored in Bitwarden. This script reads
-//! that file at build time and emits `WIFI_SSID` / `WIFI_PASSWORD` as rustc env,
-//! which `wifi.rs` picks up via `env!` — so the secrets reach the firmware
-//! without ever touching a tracked source file. Change the secrets file and cargo
-//! rebuilds (the `rerun-if-changed` below); nothing else depends on it.
+//! The credentials MUST NOT be committed: they live only in the git-ignored
+//! `firmware/secrets.toml`, mirrored in Bitwarden. This script reads that file at
+//! build time and emits `WIFI_SSID` / `WIFI_PASSWORD` as rustc env, which
+//! `wifi.rs` picks up via `env!` — so the secrets reach the firmware without ever
+//! touching a tracked source file. Change the secrets file and cargo rebuilds (the
+//! `rerun-if-changed` below); nothing else depends on it.
 //!
 //! Missing or malformed secrets fail the build loudly rather than silently
 //! producing an image that can never join the network.
@@ -30,8 +30,7 @@ struct Wifi {
 fn main() {
     // `secrets.toml` sits at the firmware workspace root, alongside the committed
     // `secrets.toml.example`. Walk up from this crate to find that root, so the crate can sit
-    // at any depth under firmware/ (it moved to apps/plant-monitor/ in the reorg) without
-    // hardcoding the number of `..`.
+    // at any depth under firmware/ without hardcoding the number of `..`.
     let manifest_dir: String =
         std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is always set by cargo");
     let firmware_root: &Path = Path::new(&manifest_dir)

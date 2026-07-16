@@ -18,6 +18,9 @@ members = [
     "platform/esphome-api",
     "platform/esphome-server",
     # apps/ — one bounded context per app on the shared foundation.
+    "apps/host-monitor/host-core",
+    "apps/host-monitor/host-display",
+    "apps/host-monitor/host-shell",
     "apps/led-driver/led-core",
     "apps/plant-monitor/plant-core",
     "apps/plant-monitor/plant-display",

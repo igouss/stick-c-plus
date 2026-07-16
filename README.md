@@ -13,9 +13,15 @@ so a new experiment is a new directory under `apps/`, not a new firmware:
 2. **plant-monitor** — an M5 **Earth Unit** soil probe → moisture dashboard, surfaced to
    **Home Assistant** through a home-grown **ESPHome native-API** crate so HA does the
    storing, graphing, and alerting.
-3. **led-driver** — a NightDriverStrip-style **WS2812** animation driver (the repo's
+3. **host-monitor** — a desk display of a **Linux host's CPU and memory** as two live
+   scrolling **sparklines**: the board scrapes the host's [node_exporter] over WiFi and a
+   Claude creature is calm at low load and frantic when the host is pegged. *Screen +
+   WiFi, a pure metrics client.*
+4. **led-driver** — a NightDriverStrip-style **WS2812** animation driver (the repo's
    original purpose; the `led-core` effects domain lives on). *Future.*
-4. **rover** — a controllable robot. *Future; diverges in hardware.*
+5. **rover** — a controllable robot. *Future; diverges in hardware.*
+
+[node_exporter]: https://github.com/prometheus/node_exporter
 
 ## Architecture — hexagonal / ECB, on a shared platform
 
@@ -39,7 +45,7 @@ stick-c-plus/
 │  ├─ platform-audio/      #   domain           — the acoustic level (DC-removed RMS) + sound-present
 │  │                       #                      verdict (the chime self-test's ears, host-tested)
 │  ├─ platform-display/    #   port-and-adapter — the ClaudePix sprite library, the fixed-width
-│  │                       #                      text primitives, the RGB colour self-test
+│  │                       #                      text primitives, the sparkline, the colour self-test
 │  ├─ platform-runtime/    #   driving-adapter  — the Monotonic clock + the generic, change-
 │  │                       #                      suppressing render loop (over any Animated state)
 │  ├─ firmware-core/       #   domain           — pure shared kernel (ADC oversampling, gating)
@@ -48,12 +54,14 @@ stick-c-plus/
 ├─ apps/              # one bounded context per app, built on the platform
 │  ├─ pomodoro/            #   pomodoro-core (FSM) · pomodoro-display (screen) · pomodoro-shell
 │  ├─ plant-monitor/       #   plant-core (moisture) · plant-display · plant-shell
+│  ├─ host-monitor/        #   host-core (scrape parser + rate + history) · host-display · host-shell
 │  └─ led-driver/          #   led-core (WS2812 effects)
 ├─ firmware/          # the Xtensa boundary — a detached std/ESP-IDF workspace
 │  ├─ platform/            #   board-support (BSP: AXP192, I2C) · adapters (ST7789 panel +
-│  │                       #     generic PanelScreen, G37/G39 buttons, G2 LEDC buzzer, G0/G34 PDM mic)
-│  └─ apps/                #   plant-monitor/{adapters, firmware-infra, bin} · pomodoro/bin
-│                          #     (pomodoro + the chime-selftest bench tool)
+│  │                       #     generic PanelScreen, G37/G39 buttons, G2 LEDC buzzer, G0/G34 PDM mic) ·
+│  │                       #     net (shared WiFi STA + DNS resolve)
+│  └─ apps/                #   plant-monitor/{adapters, firmware-infra, bin} · host-monitor/{adapters, bin}
+│                          #     · pomodoro/bin (+ the chime-selftest bench tool)
 └─ kb/                # Knowledge base — board facts, sources, findings (kbe-style)
 ```
 
@@ -130,8 +138,17 @@ Connect the board (appears as `/dev/ttyUSB0`), then flash the app you want:
 just run-pomodoro       # the standalone pomodoro timer (screen + buttons + buzzer, offline)
 just run-chime-selftest # play every jingle through the buzzer, hear it back on the PDM mic
 just run                # the plant monitor  (a.k.a. `just flash`)
+just run-host-monitor   # the Fedora host CPU/memory monitor (WiFi → node_exporter → sparklines)
 just monitor            # serial monitor only — pty-free (espflash --non-interactive)
 ```
+
+The **host-monitor** needs a `node_exporter` running on the target host (`:9100` by default)
+and its `host:port` set in `firmware/secrets.toml`'s `[host_monitor]` table (git-ignored,
+alongside the WiFi credentials — see `firmware/secrets.toml.example`). It scrapes `/metrics`
+every couple of seconds, derives CPU busy% from the `node_cpu_seconds_total` counter delta and
+memory used% from `MemAvailable`/`MemTotal`, and draws the last ~4 minutes as two sparklines.
+On-host setup and the exact scrape shape are in
+[`kb/guides/host-monitor-node-exporter.md`](kb/guides/host-monitor-node-exporter.md).
 
 The pomodoro controls: **front button (G37) tap** = start / pause / resume, **front
 double-tap** = restart the whole session, **front hold** = reset the current phase, **side
@@ -160,8 +177,11 @@ Tracked in beads — `just ready` for unblocked work, `just triage` for graph-ra
 recommendations. Done: the platform carve-out and the standalone pomodoro timer (host-tested
 FSM + on-device screen / buttons / buzzer); the plant monitor's WiFi, mDNS, ADC sampler, and
 the Sensor entity served over the native-API host (verified host-first against the real HA
-client; the on-device adoption pass awaits the board). Next up: the plant monitor's on-device
-display + Noise encryption + OTA, then the WS2812 driver and the rover on the same platform.
+client; the on-device adoption pass awaits the board); the **host monitor** — WiFi promoted to
+a shared `net` crate, the node_exporter scrape parser + CPU-rate fold + rolling history + a
+board-generic sparkline, all host-tested, cross-compiled to a linked Xtensa image (the
+on-device run awaits a live node_exporter). Next up: the plant monitor's Noise encryption + OTA,
+then the WS2812 driver and the rover on the same platform.
 
 ## License
 

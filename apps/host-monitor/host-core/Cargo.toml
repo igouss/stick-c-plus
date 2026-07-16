@@ -1,0 +1,33 @@
+[package]
+name = "host-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Framework-free host-metrics core for the M5StickC Plus host monitor: the CPU/memory value types, the streaming node_exporter (Prometheus) scrape parser, the stateful CPU-rate fold, the bounded sample history, and the staleness policy — pure no_std, host-tested, driven by an injected MetricsSource port."
+
+[lib]
+name = "host_core"
+path = "src/lib.rs"
+
+# Functional-core domain (host system metrics). hex-lint enforces the role +
+# bounded-context boundary; effect-audit reads role=domain as the FC purity marker.
+[package.metadata.hex-arch]
+role = "domain"
+context = "host-monitor"
+
+# Pure no_std: the domain pulls in nothing. The network transport (the HTTP scrape)
+# lives behind the `MetricsSource` port the firmware implements.
+[dependencies]
+
+# Host-only. These link std and never reach the Xtensa build (dev-deps are excluded
+# from a dependent's compilation).
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run under
+# the default harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false

@@ -1,0 +1,36 @@
+[package]
+name = "host-display"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Device-independent pixel layout of a host monitor: two scrolling CPU/memory sparklines with live percentages and a Claude creature that is calm at low load and frantic when the host is pegged — rendered into any embedded-graphics DrawTarget, so the same code drives the ST7789 panel and a host framebuffer."
+
+[lib]
+name = "host_display"
+path = "src/lib.rs"
+
+# The seam between the host-monitor domain and the graphics port: it turns a HostState
+# (history + status) into pixels through the board-generic platform-display primitives.
+# port-and-adapter may depend on domain (host-core, platform-core) and other
+# port-and-adapter crates (platform-display). context = "host-monitor".
+[package.metadata.hex-arch]
+role = "port-and-adapter"
+context = "host-monitor"
+
+[dependencies]
+# The host-metrics domain: the History/Status/Sample the view is built from.
+host-core = { path = "../host-core" }
+# The board-generic kernel: the Animated contract the view implements, and Tick.
+platform-core = { path = "../../../platform/platform-core" }
+# The board-generic picture: the sparkline + text primitives, the sprite library, and
+# RenderError. This crate holds only the host-monitor-specific layout on top.
+platform-display = { path = "../../../platform/platform-display" }
+# The graphics port (DrawTarget) plus the Point/Rgb565/Rectangle the layout speaks in.
+embedded-graphics = "0.8"
+
+# Host-only; never reaches the Xtensa build (a dependent excludes dev-deps).
+[dev-dependencies]
+# The shared host framebuffer the render tests draw into.
+platform-display = { path = "../../../platform/platform-display", features = ["testing"] }
+# A host framebuffer that saves a PNG — the screenshots example rasterizes to a file.
+embedded-graphics-simulator = { version = "0.8", default-features = false }

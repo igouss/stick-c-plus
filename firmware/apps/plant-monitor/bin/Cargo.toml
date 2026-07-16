@@ -89,10 +89,14 @@ firmware-core = { path = "../../../../platform/firmware-core" }
 # Shares the one internal I2C bus across bus devices; here it hands the AXP192 a
 # RefCellDevice so the MPU6886/RTC can join the same bus later without rewiring.
 embedded-hal-bus = "0.3"
-# Firmware infrastructure (same workspace): WiFi STA bring-up (qhw.7). The
+# Shared firmware networking (firmware/platform): WiFi STA bring-up (qhw.7). The
 # composition root takes the modem + system event loop + NVS and hands them to
-# `firmware_infra::wifi::WifiStation` so the board joins the network before the
-# native-API server (qhw.27) needs the link.
+# `net::wifi::WifiStation` so the board joins the network before the native-API
+# server (qhw.27) needs the link. Reused by every networked app.
+net = { path = "../../../platform/net" }
+# Plant-only firmware infrastructure (same workspace): the ESPHome mDNS advertiser
+# (qhw.8) that makes the device discoverable to Home Assistant. WiFi moved out to the
+# shared `net` crate; this keeps only the ESPHome-specific mDNS.
 firmware-infra = { path = "../firmware-infra" }
 
 [build-dependencies]

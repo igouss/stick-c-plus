@@ -7,9 +7,12 @@
 #   platform/adapters/        driven-adapter — board-generic adapters (ST7789 panel +
 #                                              PanelScreen, buttons, buzzer); every app.
 #   platform/board-support/   infra          — M5StickC Plus BSP (AXP192, I2C); every app.
+#   platform/net/             infra          — shared WiFi STA + DNS resolve; every networked app.
 #   apps/plant-monitor/adapters/     driven-adapter — the plant adc + probe-power adapters.
-#   apps/plant-monitor/firmware-infra/ infra        — WiFi STA, mDNS, OTA (plant only).
+#   apps/plant-monitor/firmware-infra/ infra        — ESPHome mDNS advertiser (plant only).
 #   apps/plant-monitor/bin/   composition-root — the plant-monitor (crate name "plant-monitor").
+#   apps/host-monitor/adapters/ driven-adapter — the HTTP node_exporter MetricsSource.
+#   apps/host-monitor/bin/    composition-root — the host monitor (crate name "host-monitor").
 #   apps/pomodoro/bin/        composition-root — the standalone pomodoro timer.
 #
 # Detached (own `[workspace]`, `exclude`d up top) so its Xtensa target and `esp`
@@ -19,9 +22,12 @@ resolver = "2"
 members = [
     "platform/adapters",
     "platform/board-support",
+    "platform/net",
     "apps/plant-monitor/adapters",
     "apps/plant-monitor/firmware-infra",
     "apps/plant-monitor/bin",
+    "apps/host-monitor/adapters",
+    "apps/host-monitor/bin",
     "apps/pomodoro/bin",
 ]
 

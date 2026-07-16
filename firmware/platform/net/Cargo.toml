@@ -1,0 +1,32 @@
+[package]
+name = "net"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Shared M5StickC Plus firmware networking: 2.4 GHz WiFi STA bring-up + keep-alive and a DNS resolve helper, on ESP-IDF. Reusable by every networked app (plant-monitor, host-monitor); credentials are baked in from the git-ignored firmware/secrets.toml at build time."
+
+[lib]
+name = "net"
+path = "src/lib.rs"
+
+# WiFi STA is infrastructure, not a domain-port adapter: the apps' TCP consumers
+# (the native-API server, the HTTP metrics scraper) sit on top of the working stack
+# this brings up. role=infra; firmware crates carry no bounded-context.
+[package.metadata.hex-arch]
+role = "infra"
+
+[dependencies]
+# The std/ESP-IDF stack. esp-idf-svc supplies the WiFi service (EspWifi/BlockingWifi),
+# the system event loop and NVS; -hal supplies the modem peripheral the station is
+# built over; -sys supplies EspError. All three named so the version floor stays
+# visible next to the -svc that re-exports them, matching the composition roots.
+esp-idf-svc = "0.52"
+esp-idf-hal = "0.46"
+esp-idf-sys = "0.37"
+log = "0.4"
+
+# The WiFi credentials are baked in at build time from the git-ignored
+# firmware/secrets.toml; build.rs parses it with these host-side deps.
+[build-dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

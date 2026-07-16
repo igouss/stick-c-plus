@@ -3,7 +3,7 @@ name = "firmware-infra"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "M5StickC Plus firmware infrastructure: WiFi STA, mDNS, and OTA — the ESP-IDF-backed services shared by all three projects (the native-API server host is the portable host crate esphome-server)."
+description = "Plant-monitor firmware infrastructure: the ESPHome _esphomelib._tcp mDNS advertiser for Home Assistant discovery. Board-generic WiFi lives in the shared firmware/platform/net crate; this keeps only the ESPHome-specific mDNS (which pulls the espressif/mdns managed component)."
 
 [lib]
 name = "firmware_infra"
@@ -24,23 +24,14 @@ role = "infra"
 [[package.metadata.esp-idf-sys.extra_components]]
 remote_component = { name = "espressif/mdns", version = "1.8.2" }
 
-# WiFi STA (qhw.7) and the mDNS advertiser (qhw.8) are live. The native-API server
-# host (qhw.27) landed as the portable host crate `esphome-server`, not here (it
-# needs only std, no esp-idf-svc). OTA (qhw.12) is the remaining service and
-# arrives in its own bead.
+# The mDNS advertiser (qhw.8) is live. The native-API server host (qhw.27) landed as
+# the portable host crate `esphome-server`, not here (it needs only std, no
+# esp-idf-svc). OTA (qhw.12) is the remaining service and arrives in its own bead.
 [dependencies]
-# The std/ESP-IDF stack (see kb/sources/rust-on-esp-idf.md). esp-idf-svc supplies
-# the WiFi service (EspWifi/BlockingWifi), the system event loop and NVS; -hal
-# supplies the modem peripheral the station is built over; -sys supplies EspError.
-# All three are named so the version floor stays visible next to the -svc that
-# re-exports them, matching the composition root.
+# The std/ESP-IDF stack (see kb/sources/rust-on-esp-idf.md). esp-idf-svc supplies the
+# mDNS service (EspMdns); -sys supplies EspError. Named so the version floor stays
+# visible next to the -svc that re-exports it, matching the composition root. (The
+# WiFi modem peripheral and its -hal moved out with wifi.rs to the shared `net` crate.)
 esp-idf-svc = "0.52"
-esp-idf-hal = "0.46"
 esp-idf-sys = "0.37"
 log = "0.4"
-
-# The WiFi credentials are baked in at build time from the git-ignored
-# firmware/secrets.toml (qhw.7); build.rs parses it with these host-side deps.
-[build-dependencies]
-serde = { version = "1", features = ["derive"] }
-toml = "0.8"

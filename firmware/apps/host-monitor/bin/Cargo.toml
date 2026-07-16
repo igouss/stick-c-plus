@@ -1,0 +1,60 @@
+[package]
+name = "host-monitor"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "M5StickC Plus Fedora-host CPU/memory monitor: scrapes a host's node_exporter over WiFi and draws two live sparklines with a load-reactive Claude creature."
+default-run = "host-monitor"
+
+[[bin]]
+name = "host-monitor"
+path = "src/main.rs"
+
+# The imperative shell's outermost layer: it composes adapters and owns effects, so it is
+# the one crate the effect-audit `domain` gate must never tag.
+[package.metadata.hex-arch]
+role = "composition-root"
+
+[dependencies]
+# The std/ESP-IDF stack (see kb/sources/rust-on-esp-idf.md). esp-idf-svc re-exports
+# -hal and -sys, but all three are named so the version floor shows.
+esp-idf-svc = "0.52"
+esp-idf-hal = "0.46"
+esp-idf-sys = "0.37"
+log = "0.4"
+# The host-metrics domain (host workspace, by path): the `HostState`/`Status` the display
+# source reads, and `Tick`. no_std + zero-dep, cross-compiles to xtensa cleanly.
+host-core = { path = "../../../../apps/host-monitor/host-core" }
+# The imperative shell: the shared metrics cache + the poller thread. The composition root
+# builds the real HTTP adapter and hands it to `spawn_poller`; the shell's staleness +
+# panic-isolation rules are host-tested there, so this bin stays pure wiring.
+host-shell = { path = "../../../../apps/host-monitor/host-shell" }
+# The host picture: the `Glass` view the render loop's source wraps each snapshot in, so
+# the ST7789 `Screen<Glass>` adapter can paint it.
+host-display = { path = "../../../../apps/host-monitor/host-display" }
+# The driven adapter (firmware workspace): the HTTP `MetricsSource` the poller drives.
+host-adapters = { path = "../adapters" }
+# The board-generic runtime (context=shared): the Monotonic clock this root makes and
+# shares, and the generic spawn_display render loop it wires the ST7789 Screen into.
+platform-runtime = { path = "../../../../platform/platform-runtime" }
+# The board-generic driven adapters (shared): the ST7789 Panel + generic PanelScreen the
+# composition root wraps with the host render function.
+platform-adapters = { path = "../../../platform/adapters" }
+# The board-support package: brings up the internal I2C bus and powers the AXP192 LCD/TFT
+# rails (qhw.20) — load-bearing for the display, which is dark otherwise.
+board-support = { path = "../../../platform/board-support" }
+# Shared firmware networking (firmware/platform): WiFi STA bring-up. The composition root
+# takes the modem + system event loop + NVS and hands them to `net::wifi::WifiStation` so
+# the board joins the network before the poller scrapes the host.
+net = { path = "../../../platform/net" }
+# Shares the one internal I2C bus across bus devices; here it hands the AXP192 a
+# RefCellDevice so the panel rails can be powered on before the display starts.
+embedded-hal-bus = "0.3"
+
+[build-dependencies]
+# Emits the ESP-IDF sysenv link/search flags for the final link (via ldproxy).
+embuild = "0.33"
+# The host address is baked in at build time from the git-ignored firmware/secrets.toml;
+# build.rs parses its [host_monitor] table with these host-side deps.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

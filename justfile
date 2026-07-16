@@ -48,6 +48,7 @@ test:
 screens:
     cargo run --quiet -p plant-display --example screenshots
     cargo run --quiet -p pomodoro-display --example screenshots
+    cargo run --quiet -p host-display --example screenshots
 
 # Regenerate platform-display/src/sprite/generated.rs from the vendored ClaudePix frames
 # (babashka; no JS, no network). The generator re-hashes every preset and refuses to emit
@@ -144,6 +145,13 @@ build:
 build-pomodoro:
     cd firmware && PATH="{{pyshim}}:$PATH" cargo build --release -p pomodoro
 
+# Build just the host monitor (Xtensa release), with a lean mdns-free ESP-IDF. Unlike
+# `just build` (root crate = plant-monitor, which pulls the espressif/mdns managed
+# component), setting ESP_IDF_SYS_ROOT_CRATE=host-monitor builds an IDF from host-monitor's
+# own deps — no mdns, which this app never uses. A separate (slower first) IDF build.
+build-host-monitor:
+    cd firmware && PATH="{{pyshim}}:$PATH" ESP_IDF_SYS_ROOT_CRATE=host-monitor cargo build --release -p host-monitor
+
 # Type-check the firmware without linking (fast).
 check:
     cd firmware && PATH="{{pyshim}}:$PATH" cargo check --release
@@ -182,6 +190,13 @@ run-bin bin:
 # tap = skip.
 run-pomodoro:
     cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p pomodoro'
+
+# Build, flash, and monitor the Fedora host monitor. Scrapes the node_exporter at the
+# [host_monitor] address in firmware/secrets.toml and draws two live CPU/memory sparklines.
+# ESP_IDF_SYS_ROOT_CRATE=host-monitor builds the lean mdns-free IDF (see build-host-monitor).
+# `just run` puts the plant monitor back.
+run-host-monitor:
+    cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}" ESP_IDF_SYS_ROOT_CRATE=host-monitor; cargo run --release -p host-monitor'
 
 # Flash and monitor the chime self-test: it plays every jingle note on the buzzer while
 # listening on the PDM mic, and logs each note's acoustic level vs. the silent floor + PASS/FAIL

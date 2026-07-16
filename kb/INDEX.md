@@ -95,6 +95,11 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
   many viewers (or the web) watch the UART at once: tmux-mirror (recommended) or
   `ser2net`, fronted by the host's `ttyd`/`oauth2-proxy` stack.
   Package availability + configs verified on-host; setups not yet run on the board.
+- `guide` [host-monitor-node-exporter](guides/host-monitor-node-exporter.md) — the
+  **host monitor**: install node_exporter on the Fedora box, the four metrics the device
+  reads (CPU as a counter-delta rate, memory as a level), the scientific-notation /
+  large-body / counter-reset gotchas the parser handles, and the reminder to pin the
+  golden fixture to a real capture.
 
 ## ESPHome native API & the std/ESP-IDF pivot
 

@@ -707,12 +707,9 @@ version = "0.1.0"
 name = "firmware-infra"
 version = "0.1.0"
 dependencies = [
- "esp-idf-hal",
  "esp-idf-svc",
  "esp-idf-sys",
  "log",
- "serde",
- "toml",
 ]
 
 [[package]]
@@ -875,6 +872,60 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc627f471c528ff0c4a49e1d5e60450c8f6461dd6d10ba9dcd3a61d3dff7728d"
 dependencies = [
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "host-adapters"
+version = "0.1.0"
+dependencies = [
+ "esp-idf-svc",
+ "esp-idf-sys",
+ "host-core",
+]
+
+[[package]]
+name = "host-core"
+version = "0.1.0"
+
+[[package]]
+name = "host-display"
+version = "0.1.0"
+dependencies = [
+ "embedded-graphics",
+ "host-core",
+ "platform-core",
+ "platform-display",
+]
+
+[[package]]
+name = "host-monitor"
+version = "0.1.0"
+dependencies = [
+ "board-support",
+ "embedded-hal-bus",
+ "embuild",
+ "esp-idf-hal",
+ "esp-idf-svc",
+ "esp-idf-sys",
+ "host-adapters",
+ "host-core",
+ "host-display",
+ "host-shell",
+ "log",
+ "net",
+ "platform-adapters",
+ "platform-runtime",
+ "serde",
+ "toml",
+]
+
+[[package]]
+name = "host-shell"
+version = "0.1.0"
+dependencies = [
+ "host-core",
+ "log",
+ "platform-core",
 ]
 
 [[package]]
@@ -1059,6 +1110,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d5439c4ad607c3c23abf66de8c8bf57ba8adcd1f129e699851a6e43935d339d"
 
 [[package]]
+name = "net"
+version = "0.1.0"
+dependencies = [
+ "esp-idf-hal",
+ "esp-idf-svc",
+ "esp-idf-sys",
+ "log",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "nix"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1162,6 +1225,7 @@ dependencies = [
  "firmware-core",
  "firmware-infra",
  "log",
+ "net",
  "plant-core",
  "plant-display",
  "plant-shell",

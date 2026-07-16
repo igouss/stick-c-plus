@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 //! plant-monitor — the composition root (bin #1) on std/ESP-IDF.
 //!
-//! Brings the board onto the network via [`firmware_infra::wifi`] (qhw.7) and
+//! Brings the board onto the network via [`net::wifi`] (qhw.7) and
 //! advertises it for Home Assistant discovery via [`firmware_infra::mdns`]
 //! (qhw.8), then wires the driven [`adapters::adc::EarthUnit`] into the host
 //! [`plant_shell`]
@@ -42,8 +42,8 @@ use esphome_api::proto::{DeviceInfoResponse, SensorStateClass};
 use esphome_api::{SensorConfig, SensorDevice};
 use esphome_server::{Server, ServerConfig};
 use firmware_infra::mdns::{self, EsphomeService};
-use firmware_infra::wifi::{self, WifiStation};
 use log::{error, info, warn};
+use net::wifi::{self, WifiStation};
 use plant_core::moisture::Calibration;
 use plant_core::ports::MAX_READING;
 use plant_core::{Observation, Tick};
