@@ -1,0 +1,41 @@
+[package]
+name = "host-wire"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The hostpulse wire codec for the host monitor: serde DTOs plus the pure `parse_pulse` that deserializes a /pulse JSON body and folds it through the host-core PulseBuilder into a validated Pulse frame. std but device-independent — the firmware HTTP adapter calls it, and it is host-tested (unit + Gherkin) against the wire contract."
+
+[lib]
+name = "host_wire"
+path = "src/lib.rs"
+
+# The JSON boundary of the host-monitor domain: it turns a /pulse body into the domain's
+# Pulse frame. Like host-display (also port-and-adapter), it holds an adapter that speaks
+# domain types and stays host-testable; the firmware driven-adapter depends on it for the
+# one parse function, so the wire contract has a single, tested source of truth.
+# port-and-adapter may depend on domain (host-core) and other port-and-adapter crates.
+[package.metadata.hex-arch]
+role = "port-and-adapter"
+context = "host-monitor"
+
+[dependencies]
+# The host-metrics domain: the Pulse frame this codec builds, via the PulseBuilder that
+# owns clamping and gap handling. no_std + zero-dep, cross-compiles to xtensa cleanly.
+host-core = { path = "../host-core" }
+# The wire format. serde derives the DTOs; serde_json deserializes the small fixed body.
+# Both are std/alloc, which esp-idf std provides, so the firmware adapter can call
+# `parse_pulse` unchanged on the device.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Host-only; never reaches the Xtensa build (a dependent excludes dev-deps).
+[dev-dependencies]
+# The Gherkin plumbing test drives `parse_pulse` against the wire contract.
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; the unit tests run under the default
+# harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false

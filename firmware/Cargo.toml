@@ -11,7 +11,7 @@
 #   apps/plant-monitor/adapters/     driven-adapter — the plant adc + probe-power adapters.
 #   apps/plant-monitor/firmware-infra/ infra        — ESPHome mDNS advertiser (plant only).
 #   apps/plant-monitor/bin/   composition-root — the plant-monitor (crate name "plant-monitor").
-#   apps/host-monitor/adapters/ driven-adapter — the HTTP node_exporter MetricsSource.
+#   apps/host-monitor/adapters/ driven-adapter — the HTTP hostpulse PulseSource.
 #   apps/host-monitor/bin/    composition-root — the host monitor (crate name "host-monitor").
 #   apps/pomodoro/bin/        composition-root — the standalone pomodoro timer.
 #

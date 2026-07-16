@@ -3,7 +3,7 @@ name = "host-core"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "Framework-free host-metrics core for the M5StickC Plus host monitor: the CPU/memory value types, the streaming node_exporter (Prometheus) scrape parser, the stateful CPU-rate fold, the bounded sample history, and the staleness policy — pure no_std, host-tested, driven by an injected MetricsSource port."
+description = "Framework-free host-metrics core for the M5StickC Plus host monitor: the CPU/memory value type, the bounded per-host percent series, the whole-frame Pulse a single hostpulse fetch yields, the pure clamping/gap transform that builds one, and the staleness policy — pure no_std, host-tested, driven by an injected PulseSource port."
 
 [lib]
 name = "host_core"
@@ -15,19 +15,13 @@ path = "src/lib.rs"
 role = "domain"
 context = "host-monitor"
 
-# Pure no_std: the domain pulls in nothing. The network transport (the HTTP scrape)
-# lives behind the `MetricsSource` port the firmware implements.
+# Pure no_std: the domain pulls in nothing. The network fetch (and the JSON codec)
+# live behind the `PulseSource` port the firmware implements.
 [dependencies]
 
 # Host-only. These link std and never reach the Xtensa build (dev-deps are excluded
-# from a dependent's compilation).
+# from a dependent's compilation). The Gherkin plumbing test for the JSON→model
+# transform lives in `host-wire` (it owns the wire deserialization); here the builder
+# and the pure policies are proven with unit + property tests.
 [dev-dependencies]
 proptest = "1"
-cucumber = "0.21"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-
-# The Gherkin plumbing test needs its own harness; unit + property tests run under
-# the default harness alongside it.
-[[test]]
-name = "cucumber"
-harness = false

@@ -13,15 +13,14 @@ so a new experiment is a new directory under `apps/`, not a new firmware:
 2. **plant-monitor** — an M5 **Earth Unit** soil probe → moisture dashboard, surfaced to
    **Home Assistant** through a home-grown **ESPHome native-API** crate so HA does the
    storing, graphing, and alerting.
-3. **host-monitor** — a desk display of a **Linux host's CPU and memory** as two live
-   scrolling **sparklines**: the board scrapes the host's [node_exporter] over WiFi and a
-   Claude creature is calm at low load and frantic when the host is pegged. *Screen +
-   WiFi, a pure metrics client.*
+3. **host-monitor** — a desk display of every **homelab host's CPU and memory** as live
+   scrolling **sparklines**, one row per host: the board fetches a single bearer-gated
+   **hostpulse** endpoint over WiFi, which returns a ready-to-plot per-host series for all
+   hosts at once (the PromQL `rate()` is done server-side). *Screen + WiFi, a pure metrics
+   client.*
 4. **led-driver** — a NightDriverStrip-style **WS2812** animation driver (the repo's
    original purpose; the `led-core` effects domain lives on). *Future.*
 5. **rover** — a controllable robot. *Future; diverges in hardware.*
-
-[node_exporter]: https://github.com/prometheus/node_exporter
 
 ## Architecture — hexagonal / ECB, on a shared platform
 
@@ -54,7 +53,7 @@ stick-c-plus/
 ├─ apps/              # one bounded context per app, built on the platform
 │  ├─ pomodoro/            #   pomodoro-core (FSM) · pomodoro-display (screen) · pomodoro-shell
 │  ├─ plant-monitor/       #   plant-core (moisture) · plant-display · plant-shell
-│  ├─ host-monitor/        #   host-core (scrape parser + rate + history) · host-display · host-shell
+│  ├─ host-monitor/        #   host-core (Pulse frame + clamp/gap transform) · host-wire (JSON codec) · host-display · host-shell
 │  └─ led-driver/          #   led-core (WS2812 effects)
 ├─ firmware/          # the Xtensa boundary — a detached std/ESP-IDF workspace
 │  ├─ platform/            #   board-support (BSP: AXP192, I2C) · adapters (ST7789 panel +
@@ -138,17 +137,19 @@ Connect the board (appears as `/dev/ttyUSB0`), then flash the app you want:
 just run-pomodoro       # the standalone pomodoro timer (screen + buttons + buzzer, offline)
 just run-chime-selftest # play every jingle through the buzzer, hear it back on the PDM mic
 just run                # the plant monitor  (a.k.a. `just flash`)
-just run-host-monitor   # the Fedora host CPU/memory monitor (WiFi → node_exporter → sparklines)
+just run-host-monitor   # the homelab CPU/memory monitor (WiFi → hostpulse → per-host sparklines)
 just monitor            # serial monitor only — pty-free (espflash --non-interactive)
 ```
 
-The **host-monitor** needs a `node_exporter` running on the target host (`:9100` by default)
-and its `host:port` set in `firmware/secrets.toml`'s `[host_monitor]` table (git-ignored,
-alongside the WiFi credentials — see `firmware/secrets.toml.example`). It scrapes `/metrics`
-every couple of seconds, derives CPU busy% from the `node_cpu_seconds_total` counter delta and
-memory used% from `MemAvailable`/`MemTotal`, and draws the last ~4 minutes as two sparklines.
-On-host setup and the exact scrape shape are in
-[`kb/guides/host-monitor-node-exporter.md`](kb/guides/host-monitor-node-exporter.md).
+The **host-monitor** needs the **hostpulse** endpoint reachable on the LAN (the control node,
+`:9099` by default): a single read-only, bearer-gated `GET /pulse` that returns a ready-to-plot
+per-host CPU/memory series for every host, having already done the PromQL `rate()` server-side.
+Its `endpoint` (`host:port`) and `token` (a 64-hex bearer) go in `firmware/secrets.toml`'s
+`[host_monitor]` table (git-ignored, alongside the WiFi credentials — see
+`firmware/secrets.toml.example`; the token is never committed or logged). The board fetches the
+frame every ~20 s and simply replaces its buffers — no on-device parsing or rate math — and
+draws one row of CPU/memory sparklines per host, keeping the last good frame if the endpoint
+faults or goes stale.
 
 The pomodoro controls: **front button (G37) tap** = start / pause / resume, **front
 double-tap** = restart the whole session, **front hold** = reset the current phase, **side
@@ -178,10 +179,10 @@ recommendations. Done: the platform carve-out and the standalone pomodoro timer 
 FSM + on-device screen / buttons / buzzer); the plant monitor's WiFi, mDNS, ADC sampler, and
 the Sensor entity served over the native-API host (verified host-first against the real HA
 client; the on-device adoption pass awaits the board); the **host monitor** — WiFi promoted to
-a shared `net` crate, the node_exporter scrape parser + CPU-rate fold + rolling history + a
-board-generic sparkline, all host-tested, cross-compiled to a linked Xtensa image (the
-on-device run awaits a live node_exporter). Next up: the plant monitor's Noise encryption + OTA,
-then the WS2812 driver and the rover on the same platform.
+a shared `net` crate, the hostpulse `Pulse` frame + clamp/gap transform + JSON codec + a
+board-generic sparkline, one row per host, all host-tested, cross-compiled to a linked Xtensa
+image (the on-device run awaits a reachable hostpulse endpoint). Next up: the plant monitor's
+Noise encryption + OTA, then the WS2812 driver and the rover on the same platform.
 
 ## License
 

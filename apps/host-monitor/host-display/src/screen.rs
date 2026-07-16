@@ -1,203 +1,329 @@
-//! The monitor screen: a [`HostState`] as two labelled graphs and a creature.
+//! The monitor screen: a [`HostState`] as three host rows, each a header and two sparklines.
 //!
-//! The whole of what the host monitor's glass ever says, and the only place that
-//! decides it. Device-independent by construction — it draws into any [`DrawTarget`],
-//! which is what lets the on-target panel and a host framebuffer render *the same code*
-//! rather than two copies that drift.
+//! The whole of what the host monitor's glass ever says, and the only place that decides it.
+//! Device-independent by construction — it draws into any [`DrawTarget`], which is what lets
+//! the on-target panel and a host framebuffer render *the same code* rather than two copies
+//! that drift.
+//!
+//! ## One row per host, the frame outlives the reading
+//!
+//! Each of the endpoint's hosts gets a row: its name, its two current percentages, and two
+//! side-by-side sparklines (CPU cyan on the left, memory yellow on the right) drawn from the
+//! ready-to-plot series the frame carries. A host the endpoint reports as down (all-`null`
+//! arrays) keeps its row and shows "no data" rather than vanishing.
+//!
+//! When the *endpoint* goes stale or faults, the last good frame is still drawn — a window
+//! of what the hosts were doing is useful, not a lie — but the host names are tinted and a
+//! status token (`DOWN` / `BAD` / `OLD`) appears top-right, so a glance says the numbers are
+//! no longer live. Before the first fetch there is no frame, so the glass shows a short
+//! "waiting" hint instead of empty rows.
+//!
+//! ## What a host render can and cannot prove
+//!
+//! It **can** prove the layout, the wording, the alignment, the colour each state is drawn
+//! in, that a receding graph erases the taller bars it replaces, and that nothing is
+//! clipped. It **cannot** prove anything below [`DrawTarget`]: the panel's colour order,
+//! offset, inversion, or backlight — see [`platform_display`].
 
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
-use host_core::{History, HostState, Status};
-use platform_display::{sparkline, sprite, text_line, RenderError};
+use embedded_graphics::primitives::Rectangle;
+use host_core::{HostFault, HostSeries, HostState, Percent, Pulse, Series, Status};
+use platform_display::{sparkline, text_line, RenderError};
 
 use crate::layout::{
-    CPU_GRAPH, CPU_LABEL_Y, LABEL_WIDTH, MEM_GRAPH, MEM_LABEL_Y, SPRITE_ORIGIN, SPRITE_SCALE,
-    TEXT_X,
+    cpu_graph, header_origin, mem_graph, row_top, CPU_NUM_X, GRAPH_WIDTH, MEM_NUM_X, NAME_CHARS,
+    NODATA_CHARS, NUM_CHARS, ROWS, STATUS_CHARS, STATUS_X,
 };
-use crate::scene::{self, Scene, PEGGED_AT};
 
-/// The retention depth, and thus the width of each plot — see [`host_core::history`].
-const CAPACITY: usize = host_core::history::CAPACITY;
+/// The load at or above which a percentage is drawn in red — the host is pegged.
+pub const PEGGED_AT: u8 = 85;
 
-/// The CPU graph's bars.
+/// The CPU sparkline's bars, and its percentage.
 const CPU_INK: Rgb565 = Rgb565::CYAN;
-/// The memory graph's bars.
+/// The memory sparkline's bars, and its percentage.
 const MEM_INK: Rgb565 = Rgb565::YELLOW;
+/// A dimmed grey — a stale host's name, and a down host's "no data".
+const DIM: Rgb565 = Rgb565::new(12, 24, 12);
 
-/// Render the host monitor: two scrolling graphs, their live percentages, and the
-/// creature that stands for the host's load.
+/// Render the host monitor: one row per host, plus the endpoint's status.
 ///
-/// `elapsed_ms` is how long the current load band has been on the glass — the creature's
-/// animation clock. A calm or busy host ignores it and shows a motionless creature, so a
-/// healthy monitor repaints only as its graph scrolls; see [`crate::scene`].
+/// `_elapsed_ms` is the render loop's animation clock. This screen has no animated creature
+/// — three hosts fill the glass, leaving no room for one — so a healthy monitor is *still*
+/// and the loop repaints only when the frame or the status changes; the parameter is kept
+/// for the board-generic render signature.
 ///
-/// No full-screen clear — each graph fills its own plot, each label paints its own row
-/// over an opaque background, and the creature overwrites its own box, so a redraw
-/// touches only those regions and there is no flash. Percentages are right-aligned in a
-/// fixed field, so a shrinking value erases the wider one it replaced.
-///
-/// The two graphs keep drawing the retained history **even when the host is unavailable**
-/// — a stale or faulted status blanks the label to `--` and puts the creature to sleep,
-/// but the trailing bars stay, because a window of what the host was doing is useful and
-/// a frozen scalar would be the only lie.
+/// No full-screen clear — each field paints its own row over an opaque background, each
+/// sparkline fills its own plot, so a redraw touches only those regions and there is no
+/// flash. Percentages are right-aligned in a fixed field, so a shrinking value erases the
+/// wider one it replaced.
 pub fn render<D>(
     target: &mut D,
     state: HostState,
-    elapsed_ms: u64,
+    _elapsed_ms: u64,
 ) -> Result<(), RenderError<D::Error>>
 where
     D: DrawTarget<Color = Rgb565>,
 {
-    graphs(target, &state.history)?;
-    labels(target, state.status)?;
-    creature(target, state.status, elapsed_ms)
+    let frame: Option<&Pulse> = state.frame.as_ref();
+    let hosts: &[HostSeries] = frame.map(|pulse: &Pulse| pulse.hosts()).unwrap_or(&[]);
+    let name_ink: Rgb565 = name_ink(state.status);
+
+    for row in 0..ROWS {
+        match hosts.get(row) {
+            Some(host) => host_row(target, row, host, name_ink)?,
+            None => empty_row(target, row)?,
+        }
+    }
+
+    frame_status(target, state)
 }
 
-/// Plot the CPU and memory series from the history into their two graphs.
-///
-/// The samples are unpacked into two fixed `[u8; CAPACITY]` scratch arrays — one bar per
-/// sample, oldest first — and handed to the board-generic [`sparkline`]. Only the first
-/// `history.len()` columns carry a bar; the rest of each plot is the black the graph
-/// scrolls into.
-fn graphs<D>(target: &mut D, history: &History) -> Result<(), RenderError<D::Error>>
+/// The colour a host name is drawn in, given the endpoint's status: white when fresh, red on
+/// a fault, dimmed when stale — so the whole board reads "these numbers are old" at a glance.
+fn name_ink(status: Status) -> Rgb565 {
+    match status {
+        Status::Fresh | Status::NeverSampled => Rgb565::WHITE,
+        Status::Faulted(_) => Rgb565::RED,
+        Status::Stale => DIM,
+    }
+}
+
+/// Draw one host's row: its name, its two percentages (or "no data"), and its two sparklines.
+fn host_row<D>(
+    target: &mut D,
+    row: usize,
+    host: &HostSeries,
+    name_ink: Rgb565,
+) -> Result<(), RenderError<D::Error>>
 where
     D: DrawTarget<Color = Rgb565>,
 {
-    let mut cpu: [u8; CAPACITY] = [0; CAPACITY];
-    let mut mem: [u8; CAPACITY] = [0; CAPACITY];
-    let samples: &[host_core::Sample] = history.samples();
-    for (column, sample) in samples.iter().enumerate() {
-        cpu[column] = sample.cpu().value();
-        mem[column] = sample.mem().value();
-    }
-    let filled: usize = samples.len();
+    label(
+        target,
+        header_origin(row),
+        name_ink,
+        NAME_CHARS,
+        format_args!("{}", host.name()),
+    )?;
 
-    sparkline(target, CPU_GRAPH, &cpu[..filled], CPU_INK, Rgb565::BLACK)?;
-    sparkline(target, MEM_GRAPH, &mem[..filled], MEM_INK, Rgb565::BLACK)
-}
-
-/// The colour a percentage is drawn in: red once it reaches [`PEGGED_AT`], white below.
-fn ink_for(percent: u8) -> Rgb565 {
-    if percent >= PEGGED_AT {
-        Rgb565::RED
+    if host.is_down() {
+        // The endpoint sent this host as all-null: keep the row, say so, draw no bars.
+        label(
+            target,
+            Point::new(CPU_NUM_X, row_top(row)),
+            DIM,
+            NODATA_CHARS,
+            format_args!("no data"),
+        )?;
+        clear_graph(target, cpu_graph(row))?;
+        clear_graph(target, mem_graph(row))?;
     } else {
-        Rgb565::WHITE
+        percent(
+            target,
+            Point::new(CPU_NUM_X, row_top(row)),
+            host.cpu().latest(),
+            CPU_INK,
+        )?;
+        percent(
+            target,
+            Point::new(MEM_NUM_X, row_top(row)),
+            host.mem().latest(),
+            MEM_INK,
+        )?;
+        graph(target, cpu_graph(row), host.cpu(), CPU_INK)?;
+        graph(target, mem_graph(row), host.mem(), MEM_INK)?;
+    }
+    Ok(())
+}
+
+/// Blank a row that has no host — every field to spaces, both plots to background — so it
+/// erases whatever a taller frame drew there before.
+fn empty_row<D>(target: &mut D, row: usize) -> Result<(), RenderError<D::Error>>
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    label(
+        target,
+        header_origin(row),
+        DIM,
+        NAME_CHARS,
+        format_args!(""),
+    )?;
+    label(
+        target,
+        Point::new(CPU_NUM_X, row_top(row)),
+        DIM,
+        NUM_CHARS,
+        format_args!(""),
+    )?;
+    label(
+        target,
+        Point::new(MEM_NUM_X, row_top(row)),
+        DIM,
+        NUM_CHARS,
+        format_args!(""),
+    )?;
+    clear_graph(target, cpu_graph(row))?;
+    clear_graph(target, mem_graph(row))
+}
+
+/// Paint one percentage field, right-aligned: the value in `ink` (red once pegged), or `--`
+/// in `ink` when the series has no present reading.
+fn percent<D>(
+    target: &mut D,
+    at: Point,
+    latest: Option<Percent>,
+    ink: Rgb565,
+) -> Result<(), RenderError<D::Error>>
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    match latest {
+        Some(value) => {
+            let v: u8 = value.value();
+            let colour: Rgb565 = if v >= PEGGED_AT { Rgb565::RED } else { ink };
+            label(target, at, colour, NUM_CHARS, format_args!("{v:>3}%"))
+        }
+        None => label(target, at, ink, NUM_CHARS, format_args!("  --")),
     }
 }
 
-/// Draw one label row: the platform [`text_line`] primitive bound to this app's left
-/// column ([`TEXT_X`]) and field width ([`LABEL_WIDTH`]).
+/// Plot a series into `rect` as a bar sparkline, stretched to fill the plot's width.
+fn graph<D>(
+    target: &mut D,
+    rect: Rectangle,
+    series: &Series,
+    ink: Rgb565,
+) -> Result<(), RenderError<D::Error>>
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    let bars: [u8; GRAPH_WIDTH] = stretch(series);
+    sparkline(target, rect, &bars, ink, Rgb565::BLACK)
+}
+
+/// Fill `rect` with background — an empty sparkline — erasing whatever a live host drew there.
+fn clear_graph<D>(target: &mut D, rect: Rectangle) -> Result<(), RenderError<D::Error>>
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    sparkline(target, rect, &[], CPU_INK, Rgb565::BLACK)
+}
+
+/// Map a series onto the plot's [`GRAPH_WIDTH`] columns by nearest-neighbour, so the whole
+/// plot is filled whatever the window length: oldest at the left, newest at the right.
+///
+/// A gap ([`None`]) becomes a zero-height (empty) column, so a missing scrape reads as a
+/// break in the graph rather than a floor at `0%`. An empty series leaves every column
+/// empty.
+fn stretch(series: &Series) -> [u8; GRAPH_WIDTH] {
+    let samples: &[Option<Percent>] = series.samples();
+    let n: usize = samples.len();
+    let mut bars: [u8; GRAPH_WIDTH] = [0; GRAPH_WIDTH];
+    if n > 0 {
+        for (column, bar) in bars.iter_mut().enumerate() {
+            // column < GRAPH_WIDTH, so index = column*n/GRAPH_WIDTH is in 0..n — never n.
+            let index: usize = column * n / GRAPH_WIDTH;
+            *bar = samples[index].map(Percent::value).unwrap_or(0);
+        }
+    }
+    bars
+}
+
+/// Paint the endpoint-status token (top-right) and, when there is no frame yet, a hint in the
+/// top row's name field.
+fn frame_status<D>(target: &mut D, state: HostState) -> Result<(), RenderError<D::Error>>
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    let (token, token_ink): (&str, Rgb565) = match state.status {
+        Status::Fresh | Status::NeverSampled => ("", Rgb565::WHITE),
+        Status::Faulted(HostFault::Unreachable) => ("DOWN", Rgb565::RED),
+        Status::Faulted(HostFault::Malformed) => ("BAD", Rgb565::RED),
+        Status::Stale => ("OLD", DIM),
+    };
+    label(
+        target,
+        Point::new(STATUS_X, row_top(0)),
+        token_ink,
+        STATUS_CHARS,
+        format_args!("{token}"),
+    )?;
+
+    if state.frame.is_none() {
+        // No good frame ever fetched: the rows are blank, so say why in the top name field.
+        let (message, ink): (&str, Rgb565) = match state.status {
+            Status::NeverSampled => ("waiting", Rgb565::WHITE),
+            _ => ("no pulse", Rgb565::RED),
+        };
+        label(
+            target,
+            header_origin(0),
+            ink,
+            NAME_CHARS,
+            format_args!("{message}"),
+        )?;
+    }
+    Ok(())
+}
+
+/// Draw one baseline-top text field: the platform [`text_line`] primitive with an opaque
+/// background, so it erases its whole field in place.
 fn label<D>(
     target: &mut D,
-    y: i32,
+    at: Point,
     color: Rgb565,
+    width: usize,
     content: core::fmt::Arguments<'_>,
 ) -> Result<(), RenderError<D::Error>>
 where
     D: DrawTarget<Color = Rgb565>,
 {
-    text_line(target, Point::new(TEXT_X, y), color, LABEL_WIDTH, content)
-}
-
-/// Paint the two label rows for `status`.
-///
-/// A fresh status shows each live percentage, red once it is pegged. Every unavailable
-/// status shows `--` instead of a number — the graph below still carries the retained
-/// history, but there is no *current* value to state, and a frozen one would be a lie.
-/// A fault is red (attention); a device that simply has not finished its first interval
-/// is white (not a problem). The creature beside the rows says which of the unavailable
-/// states this is.
-fn labels<D>(target: &mut D, status: Status) -> Result<(), RenderError<D::Error>>
-where
-    D: DrawTarget<Color = Rgb565>,
-{
-    match status {
-        Status::Fresh(sample) => {
-            let cpu: u8 = sample.cpu().value();
-            let mem: u8 = sample.mem().value();
-            label(
-                target,
-                CPU_LABEL_Y,
-                ink_for(cpu),
-                format_args!("CPU {cpu:>3}%"),
-            )?;
-            label(
-                target,
-                MEM_LABEL_Y,
-                ink_for(mem),
-                format_args!("MEM {mem:>3}%"),
-            )?;
-        }
-        Status::Faulted(_) | Status::Stale => {
-            label(target, CPU_LABEL_Y, Rgb565::RED, format_args!("CPU  --"))?;
-            label(target, MEM_LABEL_Y, Rgb565::RED, format_args!("MEM  --"))?;
-        }
-        Status::NeverSampled => {
-            label(target, CPU_LABEL_Y, Rgb565::WHITE, format_args!("CPU  --"))?;
-            label(target, MEM_LABEL_Y, Rgb565::WHITE, format_args!("MEM  --"))?;
-        }
-    }
-    Ok(())
-}
-
-/// Paint the creature for `status` in the panel's right-hand region.
-///
-/// Drawn **opaque** (see [`sprite::draw_onto`]): each frame overwrites its own 100×100
-/// box against the black background, so an animating creature never smears the previous
-/// frame and never needs a clear that would flash.
-fn creature<D>(target: &mut D, status: Status, elapsed_ms: u64) -> Result<(), RenderError<D::Error>>
-where
-    D: DrawTarget<Color = Rgb565>,
-{
-    let band: scene::LoadBand = scene::band(status);
-    let scene: Scene = scene::scene(band);
-    let index: usize = scene::frame_index(band, elapsed_ms);
-    sprite::draw_onto(
-        target,
-        scene.sprite,
-        &scene.sprite.frames()[index],
-        SPRITE_ORIGIN,
-        SPRITE_SCALE,
-        Rgb565::BLACK,
-    )
+    text_line(target, at, color, width, content)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use host_core::{HostFault, Percent, Sample};
+    use host_core::PulseBuilder;
     use platform_display::testing::Framebuffer;
     use platform_display::SCREEN_SIZE;
 
-    /// A history whose CPU series is `loads` (memory fixed at 0), oldest first.
-    fn history_of(loads: &[u8]) -> History {
-        let mut history: History = History::new();
-        for &load in loads {
-            history.push(Sample::new(
-                Percent::new(load).expect("0..=100"),
-                Percent::ZERO,
-            ));
+    /// One host's raw wire series for a test frame: `(name, cpu, mem)`.
+    type HostSpec<'a> = (&'a str, &'a [Option<i32>], &'a [Option<i32>]);
+
+    /// A frame with the given hosts.
+    fn frame(hosts: &[HostSpec<'_>]) -> Pulse {
+        let mut b: PulseBuilder = PulseBuilder::new(30, 900);
+        for (name, cpu, mem) in hosts {
+            b.push(name, cpu, mem);
         }
-        history
+        b.build()
     }
 
-    /// Paint `status` with `loads` of history, at the instant the band appeared.
-    fn painted(status: Status, loads: &[u8]) -> Framebuffer {
+    /// The three-host homelab frame, all lightly loaded.
+    fn homelab() -> Pulse {
+        frame(&[
+            (
+                "fedora",
+                &[Some(11), Some(13), Some(10)],
+                &[Some(41), Some(44)],
+            ),
+            ("oracle-arm", &[Some(3), Some(4)], &[Some(58), Some(60)]),
+            ("oracle-amd", &[Some(1), Some(2)], &[Some(22), Some(24)]),
+        ])
+    }
+
+    /// Paint `state` into a fresh framebuffer.
+    fn painted(state: HostState) -> Framebuffer {
         let mut fb: Framebuffer = Framebuffer::new();
-        render(&mut fb, HostState::new(history_of(loads), status), 0)
-            .expect("a framebuffer render cannot fail");
+        render(&mut fb, state, 0).expect("a framebuffer render cannot fail");
         fb
     }
 
-    fn fresh(cpu: u8, mem: u8) -> Status {
-        Status::Fresh(Sample::new(
-            Percent::new(cpu).expect("0..=100"),
-            Percent::new(mem).expect("0..=100"),
-        ))
-    }
-
-    /// How many lit pixels fall inside `rect` — so a test can look at just one graph.
-    fn lit_inside(fb: &Framebuffer, rect: embedded_graphics::primitives::Rectangle) -> usize {
+    /// Lit pixels inside `rect` — so a test can look at just one graph.
+    fn lit_inside(fb: &Framebuffer, rect: Rectangle) -> usize {
         let width: i32 = SCREEN_SIZE.width as i32;
         fb.pixels()
             .iter()
@@ -214,117 +340,175 @@ mod tests {
             .count()
     }
 
-    /// A fresh state paints its labels and creature, all on the canvas.
+    /// A fresh three-host frame paints, and nothing is clipped off the canvas. Each row is
+    /// checked via its memory graph — memory sits at 40–60%, always visible, whereas a host
+    /// idling at a few percent of CPU renders (correctly) as a near-empty graph on a plot
+    /// whose resolution is 5%/px.
     #[test]
-    fn a_fresh_state_paints_and_stays_on_the_canvas() {
-        let fb: Framebuffer = painted(fresh(42, 71), &[10, 42]);
+    fn a_fresh_frame_paints_all_three_rows_on_the_canvas() {
+        let fb: Framebuffer = painted(HostState::new(Some(homelab()), Status::Fresh));
         assert!(fb.lit_pixels() > 0);
         assert_eq!(fb.escaped(), 0, "nothing may be clipped off the canvas");
+        for row in 0..ROWS {
+            assert!(
+                lit_inside(&fb, mem_graph(row)) > 0,
+                "row {row} memory graph is empty"
+            );
+        }
     }
 
-    /// The CPU graph lights up with samples, and taller samples light more of it — the
-    /// bars are wired to the CPU series, not decoration.
+    /// A busier CPU history fills more of its graph — the bars are wired to the series.
     #[test]
     fn taller_cpu_samples_fill_more_of_the_cpu_graph() {
-        let low: Framebuffer = painted(fresh(10, 0), &[10, 10, 10]);
-        let high: Framebuffer = painted(fresh(90, 0), &[90, 90, 90]);
+        let low: Framebuffer = painted(HostState::new(
+            Some(frame(&[("h", &[Some(10), Some(10)], &[Some(0)])])),
+            Status::Fresh,
+        ));
+        let high: Framebuffer = painted(HostState::new(
+            Some(frame(&[("h", &[Some(90), Some(90)], &[Some(0)])])),
+            Status::Fresh,
+        ));
         assert!(
-            lit_inside(&high, CPU_GRAPH) > lit_inside(&low, CPU_GRAPH),
-            "a busier CPU history must fill more of the CPU graph"
+            lit_inside(&high, cpu_graph(0)) > lit_inside(&low, cpu_graph(0)),
+            "a busier CPU series must fill more of the CPU graph"
         );
     }
 
     /// The two graphs are independent: memory bars land only in the memory plot.
     #[test]
     fn the_memory_series_drives_the_memory_graph() {
-        // CPU flat at 0, memory high: the CPU plot stays empty, the memory plot fills.
-        let fb: Framebuffer = painted(fresh(0, 90), &[]);
-        let with_mem: Framebuffer = {
-            let mut history: History = History::new();
-            history.push(Sample::new(Percent::ZERO, Percent::new(90).unwrap()));
-            let mut fb: Framebuffer = Framebuffer::new();
-            render(&mut fb, HostState::new(history, fresh(0, 90)), 0).expect("render");
-            fb
-        };
-        assert_eq!(
-            lit_inside(&fb, MEM_GRAPH),
-            0,
-            "no samples, empty memory plot"
-        );
+        let fb: Framebuffer = painted(HostState::new(
+            Some(frame(&[("h", &[Some(0), Some(0)], &[Some(90), Some(90)])])),
+            Status::Fresh,
+        ));
         assert!(
-            lit_inside(&with_mem, MEM_GRAPH) > 0,
+            lit_inside(&fb, mem_graph(0)) > 0,
             "a memory sample fills its plot"
         );
         assert_eq!(
-            lit_inside(&with_mem, CPU_GRAPH),
+            lit_inside(&fb, cpu_graph(0)),
             0,
             "cpu 0 leaves the cpu plot empty"
         );
     }
 
-    /// A fresh state and a fault render differently — the label and the creature both
-    /// change — so a glance tells a live host from a dark one.
+    /// A down host keeps its row but draws no bars — the "no data" case.
+    #[test]
+    fn a_down_host_keeps_its_row_with_no_bars() {
+        let fb: Framebuffer = painted(HostState::new(
+            Some(frame(&[
+                ("fedora", &[Some(50)], &[Some(50)]),
+                ("oracle-arm", &[None, None], &[None, None]),
+                ("oracle-amd", &[Some(1)], &[Some(22)]),
+            ])),
+            Status::Fresh,
+        ));
+        assert_eq!(
+            lit_inside(&fb, cpu_graph(1)),
+            0,
+            "a down host must draw no CPU bars"
+        );
+        assert_eq!(lit_inside(&fb, mem_graph(1)), 0, "no memory bars either");
+        // Its neighbours still draw — checked via memory, which is always visible.
+        assert!(lit_inside(&fb, mem_graph(0)) > 0);
+        assert!(lit_inside(&fb, mem_graph(2)) > 0);
+    }
+
+    /// A gap in the middle of a series is a break in the graph, not a floor at zero.
+    #[test]
+    fn a_gap_is_an_empty_column_not_a_zero_bar() {
+        // All-full except one gap: fewer lit pixels than an all-full series of the same length.
+        let full: Framebuffer = painted(HostState::new(
+            Some(frame(&[(
+                "h",
+                &[Some(100), Some(100), Some(100), Some(100)],
+                &[Some(0)],
+            )])),
+            Status::Fresh,
+        ));
+        let gapped: Framebuffer = painted(HostState::new(
+            Some(frame(&[(
+                "h",
+                &[Some(100), None, Some(100), Some(100)],
+                &[Some(0)],
+            )])),
+            Status::Fresh,
+        ));
+        assert!(
+            lit_inside(&gapped, cpu_graph(0)) < lit_inside(&full, cpu_graph(0)),
+            "the gap must leave a break, so fewer pixels are lit than the all-full series"
+        );
+    }
+
+    /// A fresh frame and a faulted one render differently — the names tint and a token
+    /// appears — so a glance tells a live endpoint from a dark one.
     #[test]
     fn fresh_and_faulted_render_differently() {
-        let fresh_fb: Framebuffer = painted(fresh(30, 40), &[30]);
-        let fault_fb: Framebuffer = painted(Status::Faulted(HostFault::Unreachable), &[30]);
-        assert_ne!(fresh_fb.pixels(), fault_fb.pixels());
+        let fresh: Framebuffer = painted(HostState::new(Some(homelab()), Status::Fresh));
+        let faulted: Framebuffer = painted(HostState::new(
+            Some(homelab()),
+            Status::Faulted(HostFault::Unreachable),
+        ));
+        assert_ne!(fresh.pixels(), faulted.pixels());
     }
 
-    /// A faulted and a stale host differ only by their creature (startled vs asleep) —
-    /// the labels are the same `--` — but they must still be distinguishable on the glass.
+    /// A stale endpoint still shows its last good frame — the frame outlives the reading.
     #[test]
-    fn faulted_and_stale_differ_by_their_creature() {
-        let fault_fb: Framebuffer = painted(Status::Faulted(HostFault::Unreachable), &[50]);
-        let stale_fb: Framebuffer = painted(Status::Stale, &[50]);
-        assert_ne!(
-            fault_fb.pixels(),
-            stale_fb.pixels(),
-            "an unreachable host and a dead poller must look different"
-        );
-    }
-
-    /// The graph survives an unavailable status: a faulted host still shows its trailing
-    /// history, unlike a scalar that must blank when stale.
-    #[test]
-    fn a_faulted_host_still_shows_its_history() {
-        let fb: Framebuffer = painted(Status::Faulted(HostFault::Unreachable), &[80, 80, 80]);
+    fn a_stale_endpoint_still_shows_its_last_frame() {
+        let fb: Framebuffer = painted(HostState::new(Some(homelab()), Status::Stale));
         assert!(
-            lit_inside(&fb, CPU_GRAPH) > 0,
-            "the retained window must stay on the glass when the host goes dark"
+            lit_inside(&fb, cpu_graph(0)) > 0,
+            "the retained frame must stay on the glass when the endpoint goes dark"
         );
+    }
+
+    /// Before the first fetch there is no frame, and the glass says so rather than lying with
+    /// empty graphs read as zero.
+    #[test]
+    fn never_sampled_shows_a_waiting_hint_and_no_bars() {
+        let fb: Framebuffer = painted(HostState::new(None, Status::NeverSampled));
+        assert!(fb.lit_pixels() > 0, "the waiting hint must be drawn");
+        for row in 0..ROWS {
+            assert_eq!(lit_inside(&fb, cpu_graph(row)), 0, "no frame, no bars");
+        }
     }
 
     /// Rendering is deterministic — the same state paints the same pixels — which is what
     /// lets the render loop suppress a redundant repaint on an unchanged picture.
     #[test]
     fn the_same_state_paints_the_same_pixels() {
-        let a: Framebuffer = painted(fresh(55, 60), &[20, 55]);
-        let b: Framebuffer = painted(fresh(55, 60), &[20, 55]);
+        let a: Framebuffer = painted(HostState::new(Some(homelab()), Status::Fresh));
+        let b: Framebuffer = painted(HostState::new(Some(homelab()), Status::Fresh));
         assert_eq!(a.pixels(), b.pixels());
     }
 
-    /// A receding CPU spike erases the taller bars it replaces — the graph does not smear
-    /// as it scrolls. Drawn over one framebuffer, the second render must leave fewer lit
+    /// A receding spike erases the taller bars it replaces — the graph does not smear as the
+    /// window is replaced. Drawn over one framebuffer, the second render must leave fewer lit
     /// pixels in the CPU plot than the first.
     #[test]
     fn a_receding_graph_erases_the_taller_bars() {
         let mut fb: Framebuffer = Framebuffer::new();
         render(
             &mut fb,
-            HostState::new(history_of(&[100, 100, 100]), fresh(100, 0)),
+            HostState::new(
+                Some(frame(&[("h", &[Some(100), Some(100)], &[Some(0)])])),
+                Status::Fresh,
+            ),
             0,
         )
         .expect("tall render");
-        let tall: usize = lit_inside(&fb, CPU_GRAPH);
+        let tall: usize = lit_inside(&fb, cpu_graph(0));
 
         render(
             &mut fb,
-            HostState::new(history_of(&[5, 5, 5]), fresh(5, 0)),
+            HostState::new(
+                Some(frame(&[("h", &[Some(5), Some(5)], &[Some(0)])])),
+                Status::Fresh,
+            ),
             0,
         )
         .expect("short render");
-        let short: usize = lit_inside(&fb, CPU_GRAPH);
+        let short: usize = lit_inside(&fb, cpu_graph(0));
 
         assert!(tall > 0);
         assert!(

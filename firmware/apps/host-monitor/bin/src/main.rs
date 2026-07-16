@@ -2,24 +2,23 @@
 //! host-monitor — the composition root on std/ESP-IDF.
 //!
 //! Brings the board onto the network via [`net::wifi`], then wires the driven
-//! [`host_adapters::HttpMetricsSource`] into the host [`host_shell`] poller thread: every
-//! poll period the thread scrapes the configured Fedora host's `node_exporter`, folds each
-//! scrape through the pure stateful [`host_core::step`] (CPU busy-fraction between two
-//! counter reads, memory level from one), and publishes the rolling
-//! [`History`](host_core::History) + latest [`Status`](host_core::Status) into a
-//! [`SharedMetrics`] cache. The onboard TFT then draws two live sparklines (CPU over
-//! memory) with a Claude creature that is calm at low load and frantic when the host is
-//! pegged — the same `host_display::render` proven on the host, wired here to the real
-//! ST7789 panel through [`platform_runtime::spawn_display`].
+//! [`host_adapters::HttpPulseSource`] into the host [`host_shell`] poller thread: every poll
+//! period the thread fetches the bearer-gated hostpulse endpoint (`GET /pulse`), which
+//! returns a ready-to-plot per-host CPU/memory series for every homelab host in one call, and
+//! publishes the whole [`Pulse`](host_core::Pulse) frame into a [`SharedMetrics`] cache. The
+//! onboard TFT then draws one row per host — a name, two live percentages, and two sparklines
+//! (CPU cyan, memory yellow) — the same `host_display::render` proven on the host, wired here
+//! to the real ST7789 panel through [`platform_runtime::spawn_display`].
 //!
-//! Unlike the plant monitor this is a pure *client*: it consumes a host's metrics rather
-//! than exposing its own, so there is no mDNS advert and no native-API server — just WiFi,
-//! the HTTP poller, and the display. The supervisory loop keeps the WiFi link up and logs a
-//! heartbeat.
+//! Unlike the plant monitor this is a pure *client*: it consumes the endpoint's frame rather
+//! than exposing its own metrics, so there is no mDNS advert and no native-API server — just
+//! WiFi, the HTTP poller, and the display. The endpoint has already done the PromQL `rate()`,
+//! so there is no on-device parsing or rate arithmetic; a fetch simply replaces the frame. The
+//! supervisory loop keeps the WiFi link up and logs a heartbeat.
 //!
-//! The exporter address is baked in at build time from the git-ignored
-//! `firmware/secrets.toml` `[host_monitor]` table (see `build.rs`); the WiFi credentials
-//! come the same way through the shared `net` crate.
+//! The endpoint and its bearer token are baked in at build time from the git-ignored
+//! `firmware/secrets.toml` `[host_monitor]` table (see `build.rs`); the WiFi credentials come
+//! the same way through the shared `net` crate. The token is never logged.
 
 use std::cell::RefCell;
 
@@ -30,7 +29,7 @@ use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::log::EspLogger;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
-use host_adapters::HttpMetricsSource;
+use host_adapters::HttpPulseSource;
 use host_core::{Status, Tick};
 use host_display::Glass;
 use host_shell::{spawn_poller, PollerConfig, SharedMetrics};
@@ -39,16 +38,22 @@ use net::wifi::WifiStation;
 use platform_adapters::{Panel, PanelScreen};
 use platform_runtime::{spawn_display, DisplayConfig, Monotonic};
 
-/// The node_exporter endpoint (`host:port`), baked in at build time from
-/// `firmware/secrets.toml`'s `[host_monitor]` table.
+/// The hostpulse endpoint (`host:port`), baked in at build time from `firmware/secrets.toml`'s
+/// `[host_monitor]` table.
 ///
-/// A compile-time constant, not tracked source: `build.rs` fails the build if the secrets
-/// file or its `[host_monitor]` table is missing, so an image is never produced that
-/// scrapes nowhere (the second `env!` argument is the message shown if that guarantee ever
-/// breaks).
-const HOST_ADDRESS: &str = env!(
-    "HOST_MONITOR_ADDRESS",
-    "HOST_MONITOR_ADDRESS not set — host-monitor/build.rs must emit it"
+/// A compile-time constant, not tracked source: `build.rs` fails the build if the secrets file
+/// or its `[host_monitor]` table is missing, so an image is never produced that fetches
+/// nowhere (the second `env!` argument is the message shown if that guarantee ever breaks).
+const HOST_ENDPOINT: &str = env!(
+    "HOST_MONITOR_ENDPOINT",
+    "HOST_MONITOR_ENDPOINT not set — host-monitor/build.rs must emit it"
+);
+
+/// The bearer token the endpoint requires, baked in the same way. A secret: it is sent only
+/// in the `Authorization` header and is never logged.
+const HOST_TOKEN: &str = env!(
+    "HOST_MONITOR_TOKEN",
+    "HOST_MONITOR_TOKEN not set — host-monitor/build.rs must emit it"
 );
 
 fn main() {
@@ -57,7 +62,7 @@ fn main() {
     esp_idf_svc::sys::link_patches();
     EspLogger::initialize_default();
 
-    info!("host-monitor: std/ESP-IDF up — scraping {HOST_ADDRESS} for CPU/memory");
+    info!("host-monitor: std/ESP-IDF up — fetching {HOST_ENDPOINT}/pulse for all hosts");
 
     // A boot-time bring-up failure is unrecoverable, so panic with context rather than
     // limp on: the composition root owns the one place peripherals are taken.
@@ -102,19 +107,21 @@ fn main() {
     let max_age: Tick = config.max_age();
     let period: core::time::Duration = config.period;
 
-    // The driven adapter: scrape node_exporter over HTTP, streaming the body through the
-    // pure host-core parser. Handed to the poller thread, which owns the timing and cache.
-    let source: HttpMetricsSource = HttpMetricsSource::new(HOST_ADDRESS);
+    // The driven adapter: fetch the bearer-gated /pulse endpoint over HTTP and hand the body
+    // to the pure host-wire codec. Handed to the poller thread, which owns the timing and
+    // cache. The token goes only into the adapter's Authorization header — never a log line.
+    let source: HttpPulseSource = HttpPulseSource::new(HOST_ENDPOINT, HOST_TOKEN);
     info!("host-monitor: GET {}", source.url());
     let _poller =
         spawn_poller(source, shared.clone(), clock, config).expect("spawn host-poller thread");
     info!("poller thread up: {period:?} period, unavailable after {max_age} ms stale");
 
-    // The onboard TFT: the ST7789 adapter renders two sparklines + the creature from the
-    // SAME shared cache, on the SAME clock and staleness bound, so the glass flips to
-    // *unavailable* the instant scrapes age out — never a frozen graph. The render loop +
-    // freshness are host-tested in host-shell/host-display; this root only binds the real
-    // panel. The rails were powered above, so the panel is live.
+    // The onboard TFT: the ST7789 adapter renders one row per host (name + two live
+    // percentages + two sparklines) from the SAME shared cache, on the SAME clock and
+    // staleness bound, so the glass tints and flips to *unavailable* the instant fetches age
+    // out — while keeping the last good frame. The render loop + freshness are host-tested in
+    // host-shell/host-display; this root only binds the real panel. The rails were powered
+    // above, so the panel is live.
     let panel: Panel = Panel::new(
         peripherals.spi2,
         peripherals.pins.gpio13, // SCLK
@@ -135,44 +142,45 @@ fn main() {
     );
     let display_config: DisplayConfig = DisplayConfig::default();
     let display_period: core::time::Duration = display_config.period;
-    // The source the generic render loop pulls each tick: the freshest snapshot (retained
-    // history + current status) from the SAME cache and staleness bound the heartbeat reads,
+    // The source the generic render loop pulls each tick: the freshest snapshot (last good
+    // frame + current status) from the SAME cache and staleness bound the heartbeat reads,
     // wrapped in the Glass view the panel Screen paints. `now` is the render loop's own
-    // clock — the same Monotonic the poller stamps against — so the glass flips to
-    // *unavailable* the instant a scrape ages out, while the graph keeps its trailing window.
+    // clock — the same Monotonic the poller stamps against — so the glass tints and flips to
+    // *unavailable* the instant a fetch ages out, while keeping the last good frame.
     let display_source = {
         let shared: SharedMetrics = shared.clone();
         move |now: Tick| Glass(shared.snapshot(now, max_age))
     };
     let _display = spawn_display(screen, display_source, clock, display_config)
         .expect("spawn host-monitor display");
-    info!("display thread up: ST7789 rendering two sparklines every {display_period:?}");
+    info!("display thread up: ST7789 rendering three host rows every {display_period:?}");
 
     // Supervisory loop: keep the WiFi link up (a no-op while connected, a re-join once the
     // router returns) and log a heartbeat so the serial console shows liveness. The display
     // thread is the real consumer of the shared cache.
     //
-    // The heartbeat prints the whole status, not just "available / not". An unreachable host
-    // and a dead poller thread are different lines, because they are different problems: one
-    // wants the exporter restarted, the other wants a stack trace.
+    // The heartbeat prints the whole status, not just "available / not". An unreachable
+    // endpoint and a dead poller thread are different lines, because they are different
+    // problems: one wants the control node checked, the other wants a stack trace. The
+    // per-host detail is on the glass; the console only needs the endpoint's health.
     loop {
         FreeRtos::delay_ms(1000);
         if let Err(err) = wifi.ensure_connected() {
             error!("wifi reconnect failed: {err}");
         }
-        match shared.snapshot(clock.now(), max_age).status {
-            Status::Fresh(sample) => info!(
-                "host: cpu {}% / mem {}%",
-                sample.cpu().value(),
-                sample.mem().value()
-            ),
-            Status::Faulted(fault) => {
-                warn!("poller alive, host not answering — serving unavailable: {fault}")
+        let snapshot = shared.snapshot(clock.now(), max_age);
+        match snapshot.status {
+            Status::Fresh => {
+                let hosts: usize = snapshot.frame.map(|frame| frame.len()).unwrap_or(0);
+                info!("pulse: fresh frame — {hosts} host(s)");
             }
-            Status::Stale => error!(
-                "no fresh scrape within {max_age} ms — the poller thread may be dead or hung"
-            ),
-            Status::NeverSampled => info!("waiting for the first CPU interval (needs two scrapes)"),
+            Status::Faulted(fault) => {
+                warn!("poller alive, endpoint not answering — keeping last frame: {fault}")
+            }
+            Status::Stale => {
+                error!("no fresh fetch within {max_age} ms — the poller thread may be dead or hung")
+            }
+            Status::NeverSampled => info!("waiting for the first /pulse fetch"),
         }
     }
 }

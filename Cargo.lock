@@ -639,9 +639,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 name = "host-core"
 version = "0.1.0"
 dependencies = [
- "cucumber",
  "proptest",
- "tokio",
 ]
 
 [[package]]
@@ -662,6 +660,17 @@ dependencies = [
  "host-core",
  "log",
  "platform-core",
+]
+
+[[package]]
+name = "host-wire"
+version = "0.1.0"
+dependencies = [
+ "cucumber",
+ "host-core",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
