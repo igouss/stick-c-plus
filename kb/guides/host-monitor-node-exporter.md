@@ -4,7 +4,18 @@ title: "host-monitor: enabling node_exporter and the scrape it reads"
 kind: guide
 scope: project:stick-c-plus
 reviewed: 2026-07-15
+superseded_by: host-monitor-hostpulse
+status: superseded
 ---
+
+> **⚠️ SUPERSEDED (2026-07-16).** host-monitor no longer scrapes per-host
+> node_exporter. In this homelab node_exporter is not exposed — metrics go to a
+> sealed Prometheus the M5 can't reach — so the board now fetches one bearer-gated
+> **hostpulse** endpoint that returns a ready-to-plot CPU/memory series for *every*
+> host at once, with the PromQL `rate()` already done server-side. The on-device
+> Prometheus-text parser and counter/rate arithmetic below are **gone**. See
+> **[host-monitor-hostpulse](host-monitor-hostpulse.md)** for the current path. This
+> page is kept as deliberate history of the approach it replaced.
 
 The **host-monitor** app turns the M5StickC Plus into a desk display of a Linux
 host's CPU and memory, drawn as two scrolling sparklines. The board is a pure

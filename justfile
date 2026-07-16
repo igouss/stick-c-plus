@@ -199,8 +199,9 @@ run-bin bin:
 run-pomodoro:
     cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p pomodoro'
 
-# Build, flash, and monitor the Fedora host monitor. Scrapes the node_exporter at the
-# [host_monitor] address in firmware/secrets.toml and draws two live CPU/memory sparklines.
+# Build, flash, and monitor the homelab host monitor. Fetches the bearer-gated hostpulse
+# endpoint ([host_monitor] endpoint+token in firmware/secrets.toml) and draws one row per
+# host — name, live CPU/memory %, and two scrolling sparklines — for all three hosts.
 # ESP_IDF_SYS_ROOT_CRATE=host-monitor builds the lean mdns-free IDF (see build-host-monitor).
 # `just run` puts the plant monitor back.
 run-host-monitor:
