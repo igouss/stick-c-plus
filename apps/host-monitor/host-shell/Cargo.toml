@@ -10,9 +10,9 @@ name = "host_shell"
 path = "src/lib.rs"
 
 # A driving (primary) adapter: the poller is a timer-driven loop that turns the passage
-# of time into repeated calls on the domain's `step`, reading the `MetricsSource` port
-# (the concrete HTTP adapter is injected by the composition-root, never named here) and
-# publishing into the shared cache. It owns effects (a std::thread, an Arc<Mutex> cache)
+# of time into repeated fetches through the `PulseSource` port (the concrete HTTP adapter
+# is injected by the composition-root, never named here) and publishes each frame into the
+# shared cache. It owns effects (a std::thread, an Arc<Mutex> cache)
 # but names no hardware and takes its clock as an injected port, so every rule is
 # exercised on the host. It may depend only on domain / usecase / port-and-adapter; here
 # that is host-core and platform-core (both domain). context=host-monitor scopes it.
@@ -21,10 +21,10 @@ role = "driving-adapter"
 context = "host-monitor"
 
 [dependencies]
-# The pure host-metrics domain: the MetricsSource port the poller drives, the `step`
-# use case it folds scrapes through, the `History` it accumulates, and the `observe`
-# staleness policy the cache enforces. no_std + zero-dep, so it cross-compiles to xtensa
-# cleanly — this crate adds only std (threads, Arc/Mutex) on top.
+# The pure host-metrics domain: the PulseSource port the poller drives, the `Pulse` frame
+# it publishes, and the `observe` staleness policy the cache enforces. no_std + zero-dep,
+# so it cross-compiles to xtensa cleanly — this crate adds only std (threads, Arc/Mutex) on
+# top.
 host-core = { path = "../host-core" }
 # The board-generic kernel (context = "shared"): the injected Clock port the poller
 # stamps readings against. The concrete Monotonic is wired by the composition root.

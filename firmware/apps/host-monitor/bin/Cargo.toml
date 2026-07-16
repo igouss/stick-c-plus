@@ -3,7 +3,7 @@ name = "host-monitor"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "M5StickC Plus Fedora-host CPU/memory monitor: scrapes a host's node_exporter over WiFi and draws two live sparklines with a load-reactive Claude creature."
+description = "M5StickC Plus homelab CPU/memory monitor: fetches the bearer-gated hostpulse endpoint over WiFi and draws one row of live CPU/memory sparklines per host."
 default-run = "host-monitor"
 
 [[bin]]
@@ -32,7 +32,7 @@ host-shell = { path = "../../../../apps/host-monitor/host-shell" }
 # The host picture: the `Glass` view the render loop's source wraps each snapshot in, so
 # the ST7789 `Screen<Glass>` adapter can paint it.
 host-display = { path = "../../../../apps/host-monitor/host-display" }
-# The driven adapter (firmware workspace): the HTTP `MetricsSource` the poller drives.
+# The driven adapter (firmware workspace): the HTTP `PulseSource` the poller drives.
 host-adapters = { path = "../adapters" }
 # The board-generic runtime (context=shared): the Monotonic clock this root makes and
 # shares, and the generic spawn_display render loop it wires the ST7789 Screen into.
@@ -45,7 +45,7 @@ platform-adapters = { path = "../../../platform/adapters" }
 board-support = { path = "../../../platform/board-support" }
 # Shared firmware networking (firmware/platform): WiFi STA bring-up. The composition root
 # takes the modem + system event loop + NVS and hands them to `net::wifi::WifiStation` so
-# the board joins the network before the poller scrapes the host.
+# the board joins the network before the poller fetches the endpoint.
 net = { path = "../../../platform/net" }
 # Shares the one internal I2C bus across bus devices; here it hands the AXP192 a
 # RefCellDevice so the panel rails can be powered on before the display starts.
@@ -54,7 +54,7 @@ embedded-hal-bus = "0.3"
 [build-dependencies]
 # Emits the ESP-IDF sysenv link/search flags for the final link (via ldproxy).
 embuild = "0.33"
-# The host address is baked in at build time from the git-ignored firmware/secrets.toml;
-# build.rs parses its [host_monitor] table with these host-side deps.
+# The hostpulse endpoint and token are baked in at build time from the git-ignored
+# firmware/secrets.toml; build.rs parses its [host_monitor] table with these host-side deps.
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"

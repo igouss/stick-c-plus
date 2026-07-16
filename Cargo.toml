@@ -21,6 +21,7 @@ members = [
     "apps/host-monitor/host-core",
     "apps/host-monitor/host-display",
     "apps/host-monitor/host-shell",
+    "apps/host-monitor/host-wire",
     "apps/led-driver/led-core",
     "apps/plant-monitor/plant-core",
     "apps/plant-monitor/plant-display",

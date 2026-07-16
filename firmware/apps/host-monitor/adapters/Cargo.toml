@@ -3,23 +3,26 @@ name = "host-adapters"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "M5StickC Plus host-monitor driven adapter: the HTTP MetricsSource that scrapes a Fedora host's node_exporter over ESP-IDF's HTTP client and streams the body through the pure host-core Prometheus parser."
+description = "M5StickC Plus host-monitor driven adapter: the HTTP PulseSource that fetches the bearer-gated hostpulse endpoint over ESP-IDF's HTTP client and hands the JSON body to the pure host-wire codec."
 
 [lib]
 name = "host_adapters"
 path = "src/lib.rs"
 
-# A driven adapter: it implements the host-crate `MetricsSource` port against the
+# A driven adapter: it implements the host-crate `PulseSource` port against the
 # real esp-idf-svc HTTP client. Role only (firmware crates carry no bounded-context).
 [package.metadata.hex-arch]
 role = "driven-adapter"
 
 [dependencies]
 # The host-metrics domain (host workspace, by path across the boundary): the
-# `MetricsSource`/`MetricsFault` ports this adapter implements, the streaming
-# `ScrapeAccumulator` it folds the response through, and the `RawScrape`/`ParseError`
-# it returns. no_std + zero-dep, cross-compiles to xtensa cleanly.
+# `PulseSource`/`PulseFault` ports this adapter implements, and the `Pulse`/`HostFault`
+# it speaks in. no_std + zero-dep, cross-compiles to xtensa cleanly.
 host-core = { path = "../../../../apps/host-monitor/host-core" }
+# The wire codec (host workspace, port-and-adapter): the pure `parse_pulse` that folds a
+# /pulse body into a `Pulse`, and the `WireError` it returns. One tested source of truth
+# for the JSON contract, shared with the host tests; std/alloc, which esp-idf std provides.
+host-wire = { path = "../../../../apps/host-monitor/host-wire" }
 # The ESP-IDF stack: esp-idf-svc supplies the HTTP client (EspHttpConnection);
 # esp-idf-sys supplies EspError (the adapter's transport error). Named together so the
 # version floor stays visible.

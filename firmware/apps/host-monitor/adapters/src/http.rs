@@ -1,179 +1,181 @@
-//! `http` — scrape node_exporter over ESP-IDF's HTTP client.
+//! `http` — fetch the hostpulse endpoint over ESP-IDF's HTTP client.
 //!
-//! The driven adapter for the [`MetricsSource`] port: one `poll` performs `GET
-//! http://<host>:9100/metrics`, streams the response **a chunk at a time** through the
-//! pure [`ScrapeAccumulator`] (so the multi-kilobyte body is never resident), and returns
-//! the [`RawScrape`] the domain's rate arithmetic turns into a percentage. All the
-//! parsing lives inward in `host-core`; this crate only moves bytes.
+//! The driven adapter for the [`PulseSource`] port: one `poll` performs
+//! `GET http://<endpoint>/pulse` with an `Authorization: Bearer <token>` header, reads the
+//! small fixed JSON body, and hands the bytes to the pure [`parse_pulse`] codec, which folds
+//! them into the [`Pulse`] frame the display draws. Deciding *what the bytes mean* lives in
+//! `host-wire` (host-tested); this crate only moves bytes and classifies failures.
 //!
 //! ## Bounded memory
 //!
-//! The body is read into a small fixed chunk buffer and split into lines on the fly. A
-//! line is accumulated in a fixed buffer and handed to [`observe_line`] at each newline;
-//! a line longer than [`LINE_MAX`] (never one of the short metrics the parser cares
-//! about — those are well under 100 bytes) is skipped rather than truncated, so a
-//! truncated value can never corrupt a sum. Nothing scales with the response size.
+//! The endpoint returns one small frame — three hosts × two short `%`-series — so the whole
+//! body is read into a heap buffer capped at [`BODY_MAX`] and parsed at once (the old
+//! node_exporter path had to stream a multi-kilobyte scrape; this one does not). A body that
+//! would exceed the cap is refused as [`FetchError::TooLarge`] rather than grown without
+//! bound.
 //!
-//! [`MetricsSource`]: host_core::MetricsSource
-//! [`ScrapeAccumulator`]: host_core::ScrapeAccumulator
-//! [`observe_line`]: host_core::ScrapeAccumulator::observe_line
+//! ## The token never leaks
+//!
+//! The bearer token is held only inside the source (in the `Authorization` header value) and
+//! never appears in [`FetchError`], its [`Display`], or [`url`](HttpPulseSource::url) — so a
+//! logged fetch failure or a boot line can never print it. [`HttpPulseSource`] deliberately
+//! does **not** derive `Debug` for the same reason.
+//!
+//! [`PulseSource`]: host_core::PulseSource
+//! [`parse_pulse`]: host_wire::parse_pulse
+//! [`Display`]: core::fmt::Display
 
 use core::time::Duration;
 
 use esp_idf_svc::http::client::{Configuration, EspHttpConnection};
 use esp_idf_svc::http::Method;
 use esp_idf_sys::EspError;
-use host_core::{HostFault, MetricsFault, MetricsSource, ParseError, RawScrape, ScrapeAccumulator};
+use host_core::{HostFault, Pulse, PulseFault, PulseSource};
+use host_wire::{parse_pulse, WireError};
 
-/// How long a scrape may take before it is treated as a failure.
+/// How long a fetch may take before it is treated as a failure.
 ///
-/// A powered-off host must surface as [`HostFault::Unreachable`] promptly rather than
-/// hanging the poller thread, so the request is bounded. Generous enough for a busy
-/// host's exporter to answer, short enough that the display flips to "unreachable" within
-/// a couple of poll periods.
-const SCRAPE_TIMEOUT: Duration = Duration::from_secs(5);
+/// An endpoint that is off the LAN must surface as [`HostFault::Unreachable`] promptly rather
+/// than hanging the poller thread, so the request is bounded. Generous enough for the control
+/// node to answer, short enough that the display flips to "unreachable" within a couple of
+/// poll periods.
+const FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The response read-chunk buffer, in bytes. The body is drained through this.
 const CHUNK: usize = 512;
 
-/// The longest single metric line the parser is fed. node_exporter's lines are short
-/// (the CPU and memory metrics are well under 100 bytes); a longer line — a filesystem or
-/// GC metric with a long label set — is one this parser ignores anyway, so overflowing it
-/// is skipped, not truncated.
-const LINE_MAX: usize = 256;
+/// The largest `/pulse` body accepted, in bytes. One frame of three hosts is ~1–2 KB; this
+/// cap keeps a wrong or hostile endpoint from growing the buffer without bound.
+const BODY_MAX: usize = 8 * 1024;
 
-/// Why a scrape failed.
+/// Why a fetch failed.
 ///
-/// Classifies into a domain [`HostFault`] via [`MetricsFault`]: a transport failure is
-/// [`Unreachable`](HostFault::Unreachable) (the host did not answer), while a non-200
-/// status or an unparseable body is [`Malformed`](HostFault::Malformed) (the host answered
-/// but not with a usable scrape).
+/// Classifies into a domain [`HostFault`] via [`PulseFault`]: a transport failure or a `502`
+/// (the endpoint's own `prometheus_unavailable`) is [`Unreachable`](HostFault::Unreachable)
+/// — no frame could be had, so the last good one is kept — while any other non-200, an
+/// over-large body, or a body that is not a frame is [`Malformed`](HostFault::Malformed) (the
+/// endpoint answered, but not usefully). Holds no token, so it is safe to log.
 #[derive(Debug)]
-pub enum ScrapeError {
-    /// The HTTP transport failed — connection refused, timed out, DNS, TLS. The host did
-    /// not answer.
+pub enum FetchError {
+    /// The HTTP transport failed — connection refused, timed out, DNS. The endpoint did not
+    /// answer.
     Http(EspError),
-    /// The host answered with a non-200 status — the wrong endpoint, or an error page.
+    /// The endpoint answered with a non-200 status. `502` is its own backend being down.
     Status(u16),
-    /// The body was reached but was not a usable node_exporter scrape.
-    Parse(ParseError),
+    /// The body exceeded [`BODY_MAX`] before it ended — not the small frame we expect.
+    TooLarge,
+    /// The body was read but was not a usable pulse frame.
+    Parse(WireError),
 }
 
-impl core::fmt::Display for ScrapeError {
+impl core::fmt::Display for FetchError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            ScrapeError::Http(err) => write!(f, "scrape transport failed: {err}"),
-            ScrapeError::Status(status) => write!(f, "scrape returned HTTP {status}, not 200"),
-            ScrapeError::Parse(err) => write!(f, "scrape body was not usable: {err}"),
+            FetchError::Http(err) => write!(f, "pulse fetch transport failed: {err}"),
+            FetchError::Status(status) => {
+                write!(f, "pulse endpoint returned HTTP {status}, not 200")
+            }
+            FetchError::TooLarge => write!(f, "pulse body exceeded {BODY_MAX} bytes"),
+            FetchError::Parse(err) => write!(f, "{err}"),
         }
     }
 }
 
-impl std::error::Error for ScrapeError {}
+impl std::error::Error for FetchError {}
 
-impl From<EspError> for ScrapeError {
+impl From<EspError> for FetchError {
     fn from(err: EspError) -> Self {
-        ScrapeError::Http(err)
+        FetchError::Http(err)
     }
 }
 
-impl MetricsFault for ScrapeError {
+impl PulseFault for FetchError {
     fn fault(&self) -> HostFault {
         match self {
-            // A transport failure means the host did not answer at all.
-            ScrapeError::Http(_) => HostFault::Unreachable,
-            // A wrong status or an unparseable body means it answered, but uselessly.
-            ScrapeError::Status(_) | ScrapeError::Parse(_) => HostFault::Malformed,
+            // A transport failure, or the endpoint reporting its own backend down (502),
+            // means no frame could be had: unreachable, keep the last good frame.
+            FetchError::Http(_) => HostFault::Unreachable,
+            FetchError::Status(502) => HostFault::Unreachable,
+            // Any other bad status or unusable body: it answered, but not with a frame.
+            FetchError::Status(_) | FetchError::TooLarge | FetchError::Parse(_) => {
+                HostFault::Malformed
+            }
         }
     }
 }
 
-/// A [`MetricsSource`] that scrapes a fixed node_exporter URL over HTTP.
+/// A [`PulseSource`] that fetches the hostpulse endpoint over HTTP.
 ///
-/// Holds only the URL; each [`poll`](MetricsSource::poll) opens a fresh connection, so
-/// there is no stale socket state to manage between cycles (a poll is seconds apart). The
-/// composition root builds one from the host address baked in at build time.
-pub struct HttpMetricsSource {
+/// Holds the URL, the bearer header value, and the client config; each
+/// [`poll`](PulseSource::poll) opens a fresh connection, so there is no stale socket state
+/// between cycles (a poll is seconds apart). The composition root builds one from the endpoint
+/// and token baked in at build time. Not `Debug` — the header value carries the secret.
+pub struct HttpPulseSource {
     url: String,
+    authorization: String,
     config: Configuration,
 }
 
-impl HttpMetricsSource {
-    /// A source that scrapes `http://<address>/metrics`, where `address` is `host:port`
-    /// (e.g. `"192.168.1.10:9100"`).
-    pub fn new(address: &str) -> Self {
+impl HttpPulseSource {
+    /// A source that fetches `http://<endpoint>/pulse` with `Authorization: Bearer <token>`.
+    ///
+    /// `endpoint` is `host:port` (e.g. `"10.0.0.10:9099"`); `token` is the bearer secret. The
+    /// token is stored only inside the header value and is never exposed again.
+    pub fn new(endpoint: &str, token: &str) -> Self {
         Self {
-            url: format!("http://{address}/metrics"),
+            url: format!("http://{endpoint}/pulse"),
+            authorization: format!("Bearer {token}"),
             config: Configuration {
-                timeout: Some(SCRAPE_TIMEOUT),
+                timeout: Some(FETCH_TIMEOUT),
                 ..Default::default()
             },
         }
     }
 
-    /// The URL this source scrapes — for the composition root's boot log.
+    /// The URL this source fetches — for the composition root's boot log. Carries no token.
     pub fn url(&self) -> &str {
         &self.url
     }
 }
 
-impl MetricsSource for HttpMetricsSource {
-    type Error = ScrapeError;
+impl PulseSource for HttpPulseSource {
+    type Error = FetchError;
 
-    fn poll(&mut self) -> Result<RawScrape, ScrapeError> {
+    fn poll(&mut self) -> Result<Pulse, FetchError> {
         let mut connection: EspHttpConnection = EspHttpConnection::new(&self.config)?;
-        connection.initiate_request(Method::Get, &self.url, &[])?;
+        let headers: [(&str, &str); 1] = [("Authorization", self.authorization.as_str())];
+        connection.initiate_request(Method::Get, &self.url, &headers)?;
         connection.initiate_response()?;
 
         let status: u16 = connection.status();
         if status != 200 {
-            return Err(ScrapeError::Status(status));
+            return Err(FetchError::Status(status));
         }
 
-        fold_response(&mut connection)
+        let body: Vec<u8> = read_body(&mut connection)?;
+        parse_pulse(&body).map_err(FetchError::Parse)
     }
 }
 
-/// Drain the response body through the pure accumulator, one line at a time.
+/// Read the whole response body into a bounded heap buffer.
 ///
-/// Reads the body in [`CHUNK`]-sized reads, splitting on `\n` and feeding each complete
-/// line to [`observe_line`](ScrapeAccumulator::observe_line). Bounded memory: one chunk
-/// buffer and one line buffer, neither scaling with the response.
-fn fold_response(connection: &mut EspHttpConnection) -> Result<RawScrape, ScrapeError> {
-    let mut accumulator: ScrapeAccumulator = ScrapeAccumulator::new();
+/// Reads in [`CHUNK`]-sized reads until the connection is drained, refusing a body that would
+/// exceed [`BODY_MAX`]. The frame is small, so holding it entire is cheap — and the codec
+/// needs the whole body anyway (JSON is not line-oriented).
+fn read_body(connection: &mut EspHttpConnection) -> Result<Vec<u8>, FetchError> {
+    let mut body: Vec<u8> = Vec::new();
     let mut chunk: [u8; CHUNK] = [0; CHUNK];
-    let mut line: [u8; LINE_MAX] = [0; LINE_MAX];
-    let mut line_len: usize = 0;
-    let mut overflowed: bool = false;
 
     loop {
-        let read: usize = connection.read(&mut chunk).map_err(ScrapeError::Http)?;
+        let read: usize = connection.read(&mut chunk).map_err(FetchError::Http)?;
         if read == 0 {
             break; // end of body
         }
-        for &byte in &chunk[..read] {
-            if byte == b'\n' {
-                if !overflowed {
-                    accumulator.observe_line(&line[..line_len]);
-                }
-                line_len = 0;
-                overflowed = false;
-            } else if line_len < LINE_MAX {
-                line[line_len] = byte;
-                line_len += 1;
-            } else {
-                // Too long to be one of the parser's short metrics: skip the whole line
-                // rather than feed a truncated value that could corrupt a sum.
-                overflowed = true;
-            }
+        if body.len() + read > BODY_MAX {
+            return Err(FetchError::TooLarge);
         }
+        body.extend_from_slice(&chunk[..read]);
     }
 
-    // A final line with no trailing newline (rare, but node_exporter's last line may lack
-    // one on some setups).
-    if !overflowed && line_len > 0 {
-        accumulator.observe_line(&line[..line_len]);
-    }
-
-    accumulator.finish().map_err(ScrapeError::Parse)
+    Ok(body)
 }

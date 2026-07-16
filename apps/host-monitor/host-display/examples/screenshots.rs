@@ -4,116 +4,121 @@
 //! just screens          # → target/screens/*.png
 //! ```
 //!
-//! The pixels come from `host_display::render` — the same function the ST7789 adapter
-//! calls on the board — drawn into a host framebuffer instead of down an SPI bus. So a
-//! reviewer looks at the real layout, not at a drawing of it.
+//! The pixels come from `host_display::render` — the same function the ST7789 adapter calls
+//! on the board — drawn into a host framebuffer instead of down an SPI bus. So a reviewer
+//! looks at the real layout, not at a drawing of it.
 //!
-//! **What these images do not show.** Everything below the `DrawTarget`: the panel's
-//! colour order, its CGRAM offset, its inversion, its backlight. A host framebuffer
-//! paints red as red however the glass is wired. See the crate docs.
+//! **What these images do not show.** Everything below the `DrawTarget`: the panel's colour
+//! order, its CGRAM offset, its inversion, its backlight. A host framebuffer paints red as
+//! red however the glass is wired. See the crate docs.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics_simulator::{OutputSettings, OutputSettingsBuilder, SimulatorDisplay};
-use host_core::{History, HostFault, Percent, Sample, Status};
+use host_core::{HostFault, Pulse, PulseBuilder, Status};
 use host_display::{HostState, SCREEN_SIZE};
 
 /// Where the PNGs land. Under `target/`, so they are build output and git-ignored.
 const OUT_DIR: &str = "target/screens";
 
-/// The 240×135 panel is too small to read on a monitor; scale it up so a human can
-/// actually check the alignment and the wording.
+/// The 240×135 panel is too small to read on a monitor; scale it up so a human can actually
+/// check the alignment and the wording.
 const SCALE: u32 = 4;
 
-/// One captioned screen: the file it lands in, the state to paint, and how far into the
-/// creature's animation to paint it (a still creature ignores the elapsed time).
+/// One captioned screen: the file it lands in, and the state to paint.
 struct Screen {
     file: &'static str,
     state: HostState,
-    elapsed_ms: u64,
 }
 
-/// A percentage, or panic — the screenshots are authored with in-range constants.
-fn pct(value: u8) -> Percent {
-    Percent::new(value).expect("screenshot percent is 0..=100")
+/// A CPU/memory series that rides a slow triangle wave, so a graph shows real motion rather
+/// than a flat line. `len` samples, CPU peaking near `cpu_peak`, memory holding near `mem`.
+fn wave(len: usize, cpu_peak: i32, mem: i32) -> (Vec<Option<i32>>, Vec<Option<i32>>) {
+    let cpu: Vec<Option<i32>> = (0..len)
+        .map(|i: usize| {
+            let phase: i32 = (i % 40) as i32;
+            let up: i32 = if phase < 20 { phase } else { 40 - phase };
+            Some((up * cpu_peak / 20).min(100))
+        })
+        .collect();
+    let memory: Vec<Option<i32>> = (0..len)
+        .map(|i: usize| Some((mem + (i % 7) as i32).min(100)))
+        .collect();
+    (cpu, memory)
 }
 
-/// A history of `count` samples whose CPU rides a slow triangle wave peaking near
-/// `cpu_peak` and whose memory holds near `mem`, so a graph shows real motion rather
-/// than a flat line. Pure integer arithmetic, deterministic (no RNG).
-fn wave(count: usize, cpu_peak: u8, mem: u8) -> History {
-    let mut history: History = History::new();
-    for i in 0..count {
-        // A triangle wave in 0..=cpu_peak, period 40 samples.
-        let phase: usize = i % 40;
-        let up: usize = if phase < 20 { phase } else { 40 - phase };
-        let cpu: u8 = (up as u32 * cpu_peak as u32 / 20) as u8;
-        let mem_wobble: u8 = mem.saturating_add((i % 7) as u8);
-        history.push(Sample::new(pct(cpu.min(100)), pct(mem_wobble.min(100))));
-    }
-    history
+/// The homelab's three hosts, each on its own wave, as one frame.
+fn homelab(len: usize) -> Pulse {
+    let mut b: PulseBuilder = PulseBuilder::new(30, 900);
+    let (fc, fm): (Vec<Option<i32>>, Vec<Option<i32>>) = wave(len, 40, 38);
+    b.push("fedora", &fc, &fm);
+    let (ac, am): (Vec<Option<i32>>, Vec<Option<i32>>) = wave(len, 12, 58);
+    b.push("oracle-arm", &ac, &am);
+    let (dc, dm): (Vec<Option<i32>>, Vec<Option<i32>>) = wave(len, 6, 22);
+    b.push("oracle-amd", &dc, &dm);
+    b.build()
 }
 
-/// A fresh status at `cpu`/`mem`, for the label.
-fn fresh(cpu: u8, mem: u8) -> Status {
-    Status::Fresh(Sample::new(pct(cpu), pct(mem)))
+/// A pegged frame — fedora hammered, the others busy — so the red labels show.
+fn pegged(len: usize) -> Pulse {
+    let mut b: PulseBuilder = PulseBuilder::new(30, 900);
+    let (fc, fm): (Vec<Option<i32>>, Vec<Option<i32>>) = wave(len, 100, 90);
+    b.push("fedora", &fc, &fm);
+    let (ac, am): (Vec<Option<i32>>, Vec<Option<i32>>) = wave(len, 70, 62);
+    b.push("oracle-arm", &ac, &am);
+    let (dc, dm): (Vec<Option<i32>>, Vec<Option<i32>>) = wave(len, 55, 40);
+    b.push("oracle-amd", &dc, &dm);
+    b.build()
+}
+
+/// A frame whose middle host is down (all-null) — the "no data" row.
+fn one_host_down(len: usize) -> Pulse {
+    let mut b: PulseBuilder = PulseBuilder::new(30, 900);
+    let (fc, fm): (Vec<Option<i32>>, Vec<Option<i32>>) = wave(len, 40, 38);
+    b.push("fedora", &fc, &fm);
+    b.push("oracle-arm", &vec![None; len], &vec![None; len]);
+    let (dc, dm): (Vec<Option<i32>>, Vec<Option<i32>>) = wave(len, 6, 22);
+    b.push("oracle-amd", &dc, &dm);
+    b.build()
 }
 
 /// Every state the glass can be in. Adding a state without adding it here means it ships
 /// un-looked-at.
 fn screens() -> Vec<Screen> {
-    let full: usize = History::capacity();
+    let len: usize = 31; // window_s / step_s + 1 = 900/30 + 1
     vec![
-        // Calm: a lightly loaded host, graph mostly low, still breathing creature.
+        // Calm: three lightly loaded hosts, fresh.
         Screen {
             file: "01-calm.png",
-            state: HostState::new(wave(full, 35, 30), fresh(22, 34)),
-            elapsed_ms: 0,
+            state: HostState::new(Some(homelab(len)), Status::Fresh),
         },
-        // Busy: working, not stressed — a still coding creature.
+        // Pegged: fedora hammered — its labels go red.
         Screen {
-            file: "02-busy.png",
-            state: HostState::new(wave(full, 75, 55), fresh(64, 58)),
-            elapsed_ms: 0,
+            file: "02-pegged.png",
+            state: HostState::new(Some(pegged(len)), Status::Fresh),
         },
-        // Pegged: the host is hammered — the label goes red and the creature dances.
+        // A single host down: its row shows "no data", the others keep drawing.
         Screen {
-            file: "03-pegged.png",
-            state: HostState::new(wave(full, 100, 88), fresh(97, 90)),
-            elapsed_ms: 0,
+            file: "03-host-down.png",
+            state: HostState::new(Some(one_host_down(len)), Status::Fresh),
         },
-        // The same pegged state, mid-dance — one frame cannot show that it animates.
+        // Faulted: the endpoint stopped answering — names tint red, a DOWN token, last frame
+        // still on the glass.
         Screen {
-            file: "04-pegged-mid-dance.png",
-            state: HostState::new(wave(full, 100, 88), fresh(97, 90)),
-            elapsed_ms: 700,
+            file: "04-faulted.png",
+            state: HostState::new(Some(homelab(len)), Status::Faulted(HostFault::Unreachable)),
         },
-        // Faulted: the host stopped answering — startled creature, `--` labels, and the
-        // trailing history still on the glass.
+        // Stale: the poller stopped — names dim, an OLD token, frame retained.
         Screen {
-            file: "05-faulted.png",
-            state: HostState::new(wave(full, 60, 50), Status::Faulted(HostFault::Unreachable)),
-            elapsed_ms: 1_200,
+            file: "05-stale.png",
+            state: HostState::new(Some(homelab(len)), Status::Stale),
         },
-        // Stale: the poller stopped — asleep creature, history retained.
+        // Never sampled: no frame yet — the waiting hint.
         Screen {
-            file: "06-stale.png",
-            state: HostState::new(wave(full, 60, 50), Status::Stale),
-            elapsed_ms: 1_400,
-        },
-        // Never sampled: the graph is still filling and no CPU rate exists yet.
-        Screen {
-            file: "07-never-sampled.png",
-            state: HostState::new(History::new(), Status::NeverSampled),
-            elapsed_ms: 900,
-        },
-        // A partially filled graph — the window growing in from the left before it scrolls.
-        Screen {
-            file: "08-filling.png",
-            state: HostState::new(wave(full / 3, 70, 45), fresh(48, 47)),
-            elapsed_ms: 0,
+            file: "06-never-sampled.png",
+            state: HostState::new(None, Status::NeverSampled),
         },
     ]
 }
@@ -121,8 +126,7 @@ fn screens() -> Vec<Screen> {
 /// Paint one screen into a fresh framebuffer and save it.
 fn capture(screen: &Screen, settings: &OutputSettings, out_dir: &Path) -> PathBuf {
     let mut display: SimulatorDisplay<Rgb565> = SimulatorDisplay::new(SCREEN_SIZE);
-    host_display::render(&mut display, screen.state, screen.elapsed_ms)
-        .expect("a framebuffer render cannot fail");
+    host_display::render(&mut display, screen.state, 0).expect("a framebuffer render cannot fail");
     let path: PathBuf = out_dir.join(screen.file);
     display
         .to_rgb_output_image(settings)
