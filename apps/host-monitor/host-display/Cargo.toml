@@ -3,7 +3,7 @@ name = "host-display"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "Device-independent pixel layout of a host monitor: two scrolling CPU/memory sparklines with live percentages and a Claude creature that is calm at low load and frantic when the host is pegged — rendered into any embedded-graphics DrawTarget, so the same code drives the ST7789 panel and a host framebuffer."
+description = "Device-independent pixel layout of a host monitor: one row per homelab host — its name, live CPU/memory percentages, and two scrolling sparklines (gaps drawn as baseline ticks, not zeros) — with the endpoint's health token and window span in the corner, rendered into any embedded-graphics DrawTarget, so the same code drives the ST7789 panel and a host framebuffer."
 
 [lib]
 name = "host_display"
@@ -32,5 +32,10 @@ embedded-graphics = "0.8"
 [dev-dependencies]
 # The shared host framebuffer the render tests draw into.
 platform-display = { path = "../../../platform/platform-display", features = ["testing"] }
-# A host framebuffer that saves a PNG — the screenshots example rasterizes to a file.
+# A host framebuffer that saves a PNG — the screenshots example + goldens test rasterize.
 embedded-graphics-simulator = { version = "0.8", default-features = false }
+# The shared scene catalog (examples/common/scenes.rs) builds frames and speaks Rgb565
+# directly; the goldens integration test and the example both compile it, so these normal
+# deps must also be reachable by name from the test/example targets.
+host-core = { path = "../host-core" }
+embedded-graphics = "0.8"
