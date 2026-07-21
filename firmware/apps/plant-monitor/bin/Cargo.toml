@@ -34,6 +34,14 @@ path = "src/probe_rail_check.rs"
 name = "display-colour-check"
 path = "src/display_colour_check.rs"
 
+# A third: steps the panel through all four rotations, painting a border on the canvas
+# edge at each. An offset error is a translation, and a translation is only visible
+# against a boundary — so this catches the per-orientation CGRAM window, which no host
+# render can see, and the app-to-panel rotation mapping, which no host render can either.
+[[bin]]
+name = "display-rotation-check"
+path = "src/display_rotation_check.rs"
+
 # The imperative shell's outermost layer: it composes adapters and owns effects,
 # so it is the one crate the effect-audit `domain` gate must never tag.
 [package.metadata.hex-arch]

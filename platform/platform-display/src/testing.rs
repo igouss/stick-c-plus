@@ -56,6 +56,24 @@ impl Framebuffer {
         &self.pixels
     }
 
+    /// The colour at `(x, y)`.
+    ///
+    /// For a test asking about one *place* rather than the whole picture — "is the border on
+    /// the edge?", "is this corner marked?" — where indexing `pixels()` by hand would put
+    /// row-major arithmetic in the assertion and bury what is being claimed.
+    ///
+    /// Panics outside the canvas, deliberately: a test that reads a pixel which cannot exist
+    /// is asking a malformed question, and silently handing back black would let it pass.
+    pub fn pixel(&self, x: u32, y: u32) -> Rgb565 {
+        assert!(
+            x < self.size.width && y < self.size.height,
+            "({x}, {y}) is outside the {} x {} canvas",
+            self.size.width,
+            self.size.height
+        );
+        self.pixels[(y * self.size.width + x) as usize]
+    }
+
     /// How many pixels carry ink (are not the black background).
     pub fn lit_pixels(&self) -> usize {
         self.pixels

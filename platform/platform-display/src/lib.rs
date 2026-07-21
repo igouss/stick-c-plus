@@ -18,6 +18,8 @@
 //!   axis, so a signed reading's sign is legible as direction. The same one-window
 //!   erase-in-place fill, so a bar tracking a live sensor never flashes either.
 //! - [`colour_bands`] — the RGB bring-up self-test that makes a channel swap falsifiable.
+//! - [`rotation_frame`] — its sibling for rotation: a border on the canvas edge that makes a
+//!   wrong CGRAM window, and a wrong way up, falsifiable on the glass.
 //! - [`RenderError`] — the render failure, generic in the target's own error, so this
 //!   crate names no concrete panel.
 //! - [`testing`] — a pixel-counting host `DrawTarget` for dependents' tests (feature
@@ -36,6 +38,7 @@ extern crate alloc;
 
 mod colour_check;
 mod error;
+mod rotation_check;
 mod signed_bar;
 mod sparkline;
 mod text;
@@ -46,6 +49,7 @@ pub mod testing;
 
 pub use colour_check::colour_bands;
 pub use error::RenderError;
+pub use rotation_check::rotation_frame;
 pub use signed_bar::signed_bar;
 pub use sparkline::sparkline;
 pub use text::{text_line, text_overlay, FONT, LINE_CAP, SCREEN_SIZE};

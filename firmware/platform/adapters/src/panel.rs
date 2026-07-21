@@ -134,9 +134,49 @@ fn render_fault<E: core::fmt::Debug>(op: &str, err: RenderError<E>) -> St7789Err
     }
 }
 
+/// The panel rotation that shows the app's native landscape.
+///
+/// The panel is a 135×240 portrait part mounted sideways, so the picture every app has drawn
+/// since the display landed is the controller turned a quarter turn. This is that quarter turn,
+/// named once: it is the *zero* of the app-facing [`ScreenRotation`] scale, not of mipidsi's.
+const NATIVE_LANDSCAPE: Rotation = Rotation::Deg90;
+
+/// The mipidsi rotation that draws the picture at `rotation`.
+///
+/// The two scales share a step but not an origin. [`ScreenRotation::Deg0`] means "the panel's
+/// native landscape", which is [`NATIVE_LANDSCAPE`] on the controller — so the app scale is the
+/// controller scale shifted by a quarter turn, and this function is that shift.
+///
+/// **The direction of the shift is a hypothesis until the glass rules on it.** Both scales call
+/// their steps "clockwise", but they are describing different things — mipidsi rotates the
+/// *memory scan*, `ScreenRotation` rotates the *image* — and those run opposite ways whenever
+/// the panel is mounted turned, which this one is. The precedent for not reasoning this out is
+/// expensive and local: `ColorOrder` was derived correctly from the factory driver and was
+/// still wrong on the glass (see the module docs).
+///
+/// So: this is the +90° reading. If `display-rotation-check` shows a clean, correctly placed
+/// border whose `UP` points a quarter turn the wrong way, and the error is consistently the
+/// *same* quarter turn at all four stops, the shift is inverted — swap the `Deg90` and `Deg270`
+/// arms below and nothing else changes. If instead the border itself is broken, this mapping is
+/// not the suspect; the offsets are.
+const fn panel_rotation(rotation: ScreenRotation) -> Rotation {
+    match rotation {
+        ScreenRotation::Deg0 => NATIVE_LANDSCAPE,
+        ScreenRotation::Deg90 => Rotation::Deg180,
+        ScreenRotation::Deg180 => Rotation::Deg270,
+        ScreenRotation::Deg270 => Rotation::Deg0,
+    }
+}
+
 /// The M5StickC Plus onboard ST7789 TFT, brought up and ready to draw into.
 pub struct Panel {
     target: PanelTarget,
+    /// The rotation the controller is currently scanning at, in app terms.
+    ///
+    /// Held so [`Panel::set_rotation`] can skip a redundant `set_orientation`: it is a MADCTL
+    /// write plus a full clear, and the render loop offers a rotation on *every* tick. Without
+    /// this the panel would be reconfigured 25 times a second to the value it already had.
+    showing: ScreenRotation,
 }
 
 impl Panel {
@@ -183,7 +223,11 @@ impl Panel {
         let mut target: PanelTarget = Builder::new(ST7789, interface)
             .display_size(PANEL_W, PANEL_H)
             .display_offset(OFFSET_X, OFFSET_Y)
-            .orientation(Orientation::new().rotate(Rotation::Deg90))
+            // The offsets above are the *native portrait* window, and they must stay that way:
+            // mipidsi derives every other orientation's window from this pair together with
+            // `display_size` and the model's framebuffer size, in `set_address_window`. Bake a
+            // rotated offset in here and the derivation compounds it.
+            .orientation(Orientation::new().rotate(NATIVE_LANDSCAPE))
             .invert_colors(ColorInversion::Inverted)
             // Rgb, NOT Bgr — measured on the glass, not inferred from the factory
             // driver. See the module docs: `Bgr` renders red as blue on this panel.
@@ -198,7 +242,56 @@ impl Panel {
         // a changed value repaints (the render loop suppresses steady ticks).
         target.clear(Rgb565::BLACK).map_err(|e| fault("clear", e))?;
 
-        Ok(Self { target })
+        Ok(Self {
+            target,
+            showing: ScreenRotation::Deg0,
+        })
+    }
+
+    /// Turn the panel to `rotation`, if it is not already there.
+    ///
+    /// This is **hardware** rotation: it rewrites MADCTL so the controller scans its memory
+    /// differently, and mipidsi recomputes the CGRAM window to match. The alternative — a
+    /// rotating [`DrawTarget`] wrapper — was rejected because mapping rows onto columns
+    /// destroys `fill_contiguous`, and at roughly 13 700 pixels a frame that is the difference
+    /// between fitting the tick budget and missing it (see
+    /// `kb/findings/mipidsi-rectangle-fill-costs-an-address-window.md`).
+    ///
+    /// A turn **clears the glass**. It has to: the canvas changes shape between landscape and
+    /// portrait, so the pixels of the old picture are not merely stale but are in coordinates
+    /// that no longer exist. Leaving them would show a fragment of the previous layout down the
+    /// edge that the new one does not reach. The caller repaints immediately afterwards — the
+    /// render loop's `Shown` carries the rotation, so a turn always forces a repaint — which
+    /// keeps the black frame to a single tick.
+    ///
+    /// A no-op when the rotation has not changed, which is the overwhelmingly common case.
+    pub fn set_rotation(&mut self, rotation: ScreenRotation) -> Result<(), St7789Error> {
+        if rotation == self.showing {
+            return Ok(());
+        }
+        self.target
+            .set_orientation(Orientation::new().rotate(panel_rotation(rotation)))
+            .map_err(|e| fault("set orientation", e))?;
+        self.target
+            .clear(Rgb565::BLACK)
+            .map_err(|e| fault("clear after turn", e))?;
+        self.showing = rotation;
+        Ok(())
+    }
+
+    /// Paint the rotation self-test frame, labelled with the rotation it is drawn at.
+    ///
+    /// The sibling of [`Self::colour_check`], and evidence for the same reason: the picture is
+    /// [`platform_display::rotation_frame`], but what makes it *proof* is that it is drawn
+    /// through the production panel — this init, these offsets, this MADCTL — rather than into
+    /// a host framebuffer that would place every pixel perfectly whatever the controller does.
+    ///
+    /// See `rotation_frame`'s own docs for how to read the glass; the short version is that the
+    /// border answers "is the window right?" and `UP` answers "is it the right way up?", and
+    /// they fail independently.
+    pub fn rotation_check(&mut self, label: &str) -> Result<(), St7789Error> {
+        platform_display::rotation_frame(&mut self.target, label)
+            .map_err(|err| render_fault("rotation frame", err))
     }
 
     /// Bring-up self-test: paint the three primary bands on the real glass.
@@ -224,6 +317,45 @@ impl Panel {
     }
 }
 
+/// Whether a screen's panel follows the rotation it is handed.
+///
+/// The rotation capability is **opt-in per binary**, and this is where opting in happens: not a
+/// runtime flag but a type, chosen by the composition root. An app that will never turn
+/// instantiates [`Fixed`], whose [`apply`](RotationPolicy::apply) is an empty function over a
+/// zero-sized type — so the turn, the MADCTL write and the clear behind it are not merely
+/// skipped at runtime, they are never generated.
+///
+/// That is the difference between "costs nothing to run" and "costs nothing at all", and it is
+/// the requirement: an app that does not rotate must not pay for rotation in flash. Measured on
+/// this board, an unconditional `set_rotation` call on the render path cost `host-monitor`
+/// 744 bytes of text for a branch it could never take.
+pub trait RotationPolicy {
+    /// Bring `panel` to `rotation`, or do nothing at all.
+    fn apply(panel: &mut Panel, rotation: ScreenRotation) -> Result<(), St7789Error>;
+}
+
+/// The panel never turns: it stays in the native landscape it was built in.
+///
+/// The default, and what every app did before rotation existed. Costs nothing.
+pub struct Fixed;
+
+impl RotationPolicy for Fixed {
+    /// Deliberately empty. The rotation is still *offered* to the render function — an app can
+    /// lay itself out differently without the panel turning — but the panel is left alone.
+    fn apply(_panel: &mut Panel, _rotation: ScreenRotation) -> Result<(), St7789Error> {
+        Ok(())
+    }
+}
+
+/// The panel follows the rotation it is handed.
+pub struct Turning;
+
+impl RotationPolicy for Turning {
+    fn apply(panel: &mut Panel, rotation: ScreenRotation) -> Result<(), St7789Error> {
+        panel.set_rotation(rotation)
+    }
+}
+
 /// The panel as a generic [`Screen`] of app state `S`.
 ///
 /// It owns a [`Panel`] and a `render` function — `plant_display::render` for the plant
@@ -232,36 +364,66 @@ impl Panel {
 /// stays app-agnostic: it knows how to bring the panel up and how to log a failure, and
 /// nothing about what is drawn. The composition root builds the panel, injects the render
 /// function, and hands the result to `platform_runtime::spawn_display`.
-pub struct PanelScreen<S, F>
+/// `P` is the [`RotationPolicy`] — [`Fixed`] unless the composition root asks for [`Turning`].
+pub struct PanelScreen<S, F, P = Fixed>
 where
     F: FnMut(&mut PanelTarget, S, Tick, ScreenRotation) -> Result<(), RenderError<PanelDrawError>>,
 {
     panel: Panel,
     render: F,
     _state: PhantomData<S>,
+    _rotation: PhantomData<P>,
 }
 
 /// The panel [`DrawTarget`]'s own error — an SPI/interface failure — that a render function
 /// returns wrapped in a [`RenderError`].
 type PanelDrawError = <PanelTarget as DrawTarget>::Error;
 
-impl<S, F> PanelScreen<S, F>
+impl<S, F> PanelScreen<S, F, Fixed>
 where
     F: FnMut(&mut PanelTarget, S, Tick, ScreenRotation) -> Result<(), RenderError<PanelDrawError>>,
 {
-    /// Wrap `panel` with the app's `render` function.
+    /// Wrap `panel` with the app's `render` function, leaving the panel in its native
+    /// landscape however the board is held.
+    ///
+    /// The render function is still handed the rotation — an app may lay itself out for it —
+    /// but the glass does not turn, and this binary links none of the machinery that would
+    /// turn it. For an app that follows the board, use [`turning`](Self::turning).
     pub fn new(panel: Panel, render: F) -> Self {
         Self {
             panel,
             render,
             _state: PhantomData,
+            _rotation: PhantomData,
         }
     }
 }
 
-impl<S, F> Screen<S> for PanelScreen<S, F>
+impl<S, F> PanelScreen<S, F, Turning>
 where
     F: FnMut(&mut PanelTarget, S, Tick, ScreenRotation) -> Result<(), RenderError<PanelDrawError>>,
+{
+    /// Wrap `panel` with the app's `render` function, turning the glass to whatever rotation
+    /// it is handed.
+    ///
+    /// **This is the opt-in.** Choosing this constructor is what links the rotation path into a
+    /// binary; choosing [`new`](Self::new) is what keeps it out. Pair it with a real rotation
+    /// source at `spawn_display`, or the panel will faithfully hold the one constant rotation
+    /// it is given forever.
+    pub fn turning(panel: Panel, render: F) -> Self {
+        Self {
+            panel,
+            render,
+            _state: PhantomData,
+            _rotation: PhantomData,
+        }
+    }
+}
+
+impl<S, F, P> Screen<S> for PanelScreen<S, F, P>
+where
+    F: FnMut(&mut PanelTarget, S, Tick, ScreenRotation) -> Result<(), RenderError<PanelDrawError>>,
+    P: RotationPolicy,
 {
     type Error = St7789Error;
 
@@ -275,9 +437,16 @@ where
         elapsed: Tick,
         rotation: ScreenRotation,
     ) -> Result<(), St7789Error> {
-        // The rotation is handed to the app's render function, which lays the picture out for
-        // the canvas shape it implies. Turning the *panel* to match is a separate concern and
-        // does not happen yet — see the epic's panel bead.
+        // Turn the panel *before* rendering, and in the same call. The order is the whole of
+        // the correctness argument: turning changes the shape of the draw target, so a render
+        // that ran first would lay the picture out for the canvas the panel is about to stop
+        // being. Doing both here also means no app can do one without the other — the render
+        // function is handed a target already scanning the right way, and simply draws.
+        //
+        // Under `Fixed` this call is an empty function on a zero-sized type and disappears
+        // entirely; under `Turning` it is the MADCTL write. That is the opt-in, resolved at
+        // compile time rather than paid for on every tick.
+        P::apply(&mut self.panel, rotation)?;
         (self.render)(&mut self.panel.target, state, elapsed, rotation)
             .map_err(|err| render_fault("render", err))
     }

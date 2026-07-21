@@ -34,6 +34,6 @@ mod power_source;
 pub use button::GpioButton;
 pub use buzzer::LedcBuzzer;
 pub use imu::Mpu6886Imu;
-pub use panel::{Panel, PanelScreen, PanelTarget, St7789Error};
+pub use panel::{Fixed, Panel, PanelScreen, PanelTarget, RotationPolicy, St7789Error, Turning};
 pub use pdm_mic::PdmMic;
 pub use power_source::Axp192PowerSource;
