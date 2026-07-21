@@ -77,13 +77,16 @@ ce1.4 or ce1.5 honestly without someone turning the stick and reporting what the
 
 ```sh
 br show stick-c-plus-screen-rotation-platform-ce1     # the epic, with the settled scope
-br ready                                             # ce1.4 is the next P1
+br ready                                             # ce1.5 is the next P1
 cat docs/plans/screen-rotation-platform-capability.md
 ```
 
-Take **ce1.4** first, then **ce1.5**. ce1.4 is the one that can waste an afternoon on a panel
-that lies, and ce1.5 needs it. **ce1.9** (wiring pomodoro and plant-monitor) can go any time
-after ce1.4; it is independent of ce1.5.
+Take **ce1.5** first. Every piece it needs now exists and is proven, so it should be small —
+if it is not, read "What ce1.5 actually is" below before writing anything, because the most
+likely cause is that you are rebuilding something that already works.
+
+**ce1.9** (wiring pomodoro and plant-monitor) is independent of ce1.5 and can go either side
+of it.
 
 Do **not** start ce1.6/.7 (the portrait layouts) without asking. They are the part the user
 deferred. They show as ready because the seam they need exists, not because they are wanted.
@@ -135,30 +138,72 @@ Verified, not assumed. Do not re-derive any of it.
   It reads the two faults independently because they have different fixes. Built twice — a
   1-px border proved unreadable on the real panel, and a fill-then-cover frame flashed white
   on every redraw, imitating the very artefact it exists to expose.
-- **`orientation-display` has a finished portrait layout** — `Layout` value, `LANDSCAPE` and
-  `PORTRAIT` consts, invariants in a `const fn` that fails the *build*. It renders in
-  `just screens` (14 screens, all four quadrants). **It has never been seen on glass.**
+- **`orientation-display` already picks its layout from the rotation.**
+  `screen.rs:92` — `let layout: Layout = Layout::for_rotation(rotation);` — and
+  `Layout::for_rotation` (`layout.rs:112`) maps `Deg0`/`Deg180` to `LANDSCAPE` and
+  `Deg90`/`Deg270` to `PORTRAIT`, with four unit tests pinning it. The `Layout` value carries
+  its own `canvas`, and the invariants sit in a `const fn` that fails the *build*. It renders
+  in `just screens` (14 screens, all four quadrants). **This is why ce1.5 is wiring and not
+  work** — and it has never been seen on glass.
 - **The other three display crates take the rotation and ignore it**, and say so in the
   signature.
 
 ## What is not true yet, and is the work
 
-**Nothing rotates on the device.** The device draws `Deg0` always, because the panel is never
-told to scan differently (ce1.4) and no binary spawns the rotation source (ce1.5, ce1.9).
+**No app rotates on the device.** The panel *can* turn and is proven to (ce1.4), but no binary
+feeds it a real rotation: all four still pass the constant `landscape` closure and take
+`PanelScreen::new`.
 
 ### ce1.5 — the orientation readout turns, end to end *(next; needs the board)*
 
-The first app to actually rotate; proves ce1.1–ce1.4 together. Everything it needs will exist.
-**If it turns out to need new domain logic, something above it was under-built** — stop and
-look upward rather than adding logic here.
+The first app to actually rotate, and the bead that proves ce1.1–ce1.4 together by putting
+them all on the glass at once.
 
-One real obstacle, found during ce1.2 and not yet solved: **orientation already owns the IMU.**
-`firmware/apps/orientation/bin/src/main.rs:145` *moves* the sensor into `spawn_sampler`, so
-this binary cannot also call `spawn_rotation`. It must feed the same `SharedRotation` from
-what it already reads. Where that call goes is an open design question with a layering
-constraint on it: `orientation-shell` is `context = "orientation"` and `platform-runtime` is
-`context = "shared"`, and `hex-lint` enforces that axis. The composition root can name both.
-Weigh that against putting the feed inside the sampler before you write anything.
+**What ce1.5 actually is.** Four things in one composition root,
+`firmware/apps/orientation/bin/src/main.rs`, and nothing else:
+
+1. Make a `SharedRotation`.
+2. Feed it. See the obstacle below.
+3. `PanelScreen::turning(panel, orientation_display::render)` instead of `::new` — this is the
+   opt-in, and without it the panel stays landscape however good the rotation source is.
+4. Pass `rotation.source()` to `spawn_display` in place of `let landscape = |_now: Tick| …`.
+
+**Everything below that line already works and is tested.** The settler, the panel, and the
+layout selection are all in place — `orientation-display::render` has picked its layout from
+the rotation since before this epic began. **If you find yourself writing domain logic, stop**:
+something above you was under-built, and the fix is there, not here.
+
+**The one real obstacle: orientation already owns the IMU.**
+`main.rs:145` *moves* the sensor into `spawn_sampler`, so this binary cannot also call
+`spawn_rotation` — a single I2C device cannot have two owners. It has to feed the same
+`SharedRotation` from readings it already takes.
+
+The recommended shape, and why. `SharedOrientation` already publishes an `Orientation` that
+carries `.acceleration`, and `SharedRotation::update` wants exactly an `Acceleration` and a
+`Tick`. So the rotation source closure can do both jobs at once, in the composition root:
+
+```rust
+let rotation_source = {
+    let pose: SharedOrientation = shared.clone();
+    let turned: SharedRotation = SharedRotation::new();
+    move |now: Tick| {
+        turned.update(pose.last_known().acceleration, now);
+        turned.current()
+    }
+};
+```
+
+No second device owner, no second thread, no duplicated settler. It runs in the display thread
+at 25 Hz — 40 ms a fold, against a 250 ms settle window, so it is nowhere near tight.
+
+Why the composition root rather than inside the sampler: `orientation-shell` is
+`context = "orientation"` and `platform-runtime` is `context = "shared"`, and `hex-lint`
+enforces that axis in the gate. The root has no context and may name both. Putting the feed in
+the sampler would mean `orientation-shell` depending on `platform-runtime`, which is a
+cross-context edge — check it before you try it.
+
+Weigh this against alternatives if you like, but do not reach for `spawn_rotation` here; it is
+for the apps in ce1.9 that have no IMU thread.
 
 ### ce1.9 — wire pomodoro and plant-monitor
 
@@ -179,33 +224,41 @@ global const and the three other display crates pin every origin against it, eac
 > A binary that does not opt in must not link the capability, and must pay nothing in flash or
 > RAM for its existence.
 
-**This is true today, and it was measured rather than argued** (2026-07-21):
+**This is true today, and it was measured rather than argued** — twice, because the first
+version of ce1.4 broke it.
 
-- The shared rotation source is **byte-identical** across all four binaries. `spawn_rotation`
-  is generic, so it is never instantiated unless called, and `SharedRotation` is dead-stripped.
-- `nm` finds **zero** rotation, settler, or up-axis symbols in `host-monitor`.
-- The ce1.3 seam itself costs `host-monitor` +260 B of text out of ~1 MB (0.03%) and the other
-  two +4 B, while `orientation` *shrank* 40 B — i.e. inlining jitter, not linked logic.
+**`size` is the signal. `nm` is not sufficient, and believing it once already cost a
+regression.** An unconditional `set_rotation` on the render path added **744 bytes** to
+`host-monitor` for a branch it can never take, and `nm` still reported *zero* rotation symbols,
+because the call was inlined into `Screen::show` and left no symbol of its own. Run both, but
+trust the byte count.
 
-Baseline, `size` on the release elfs at commit `f8aa0ef`:
+That regression is why the opt-in is a **type** (`Fixed` / `Turning`) rather than a runtime
+branch: `Fixed::apply` is an empty function on a zero-sized type, so the turn is not skipped at
+run time, it is never generated.
+
+Baseline, `size` on the release elfs at commit `7979b6d` (all four still `Fixed`):
 
 | binary | text | data | bss |
 |---|---|---|---|
-| host-monitor | 1 000 941 | 203 356 | 23 321 |
-| pomodoro | 391 648 | 105 220 | 6 633 |
-| plant-monitor | 981 441 | 190 360 | 25 353 |
-| orientation | 394 720 | 97 428 | 6 641 |
+| host-monitor | 1 000 949 | 203 356 | 23 321 |
+| pomodoro | 391 644 | 105 220 | 6 633 |
+| plant-monitor | 981 417 | 190 360 | 25 353 |
+| orientation | 394 736 | 97 428 | 6 641 |
 
-**Keep it true.** The opt-in must stay a composition-root choice: `spawn_rotation` stays
-generic, and nothing non-generic gets referenced from a shared path every binary walks. Before
-closing any bead that touches a composition root or a shared path:
+Judgement on what a diff means: **anything under ~±50 B that drifts in both directions across
+the four binaries is inlining jitter**, not linked logic — that pattern has now appeared twice.
+A consistent several-hundred-byte rise in one direction is a real link and needs explaining.
+
+**ce1.5 and ce1.9 will legitimately grow the binaries they touch** — that is what opting in
+means. What must not move is `host-monitor`, which opts into nothing. Before closing either
+bead:
 
 ```sh
 just build
 for b in host-monitor pomodoro plant-monitor orientation; do
-  size firmware/target/xtensa-esp32-espidf/release/$b | tail -1
+  printf '%-14s %s\n' "$b" "$(size firmware/target/xtensa-esp32-espidf/release/$b | tail -1)"
 done
-nm -C firmware/target/xtensa-esp32-espidf/release/host-monitor | grep -ic "rotation\|settler\|up_axis"   # must be 0
 ```
 
 ## The hazards, which are real and were paid for
@@ -237,18 +290,77 @@ nm -C firmware/target/xtensa-esp32-espidf/release/host-monitor | grep -ic "rotat
 
 ## Working with the user on the board
 
-They have offered, and ce1.4 cannot be closed without them. Do the work first, get to a
-flashable build, then ask — do not ask them to stand by while you write code.
+They have offered, they are quick to respond, and ce1.5 cannot be closed without them. Do the
+work first, get to a flashable build, then ask — do not ask them to stand by while you write
+code. You can flash it yourself: `just run-bin <name>`, or `just run` to put the plant monitor
+back. Serial needs `timeout N just run-bin … > file 2>&1`; piping to `tail` swallows it.
 
-When you ask, give them something specific to answer. For each of the four quadrants, you want
-to know whether the picture is:
+**ce1.5's question is different from ce1.4's, and easier.** ce1.4 asked about the panel and
+needed a careful four-part answer. ce1.5 asks the epic's own acceptance test, and it is one
+sentence: *pick the board up, stand it on its USB-C port, and the readout is drawn upright and
+is easy to read.* Then set it flat on the desk and confirm it does **not** scramble, and give
+it a shake and confirm it does not spin — those are the settler's two promises
+(`rotation_for` returns `current` when flat or moving) and this is the first time either has
+been on glass.
 
-- **(a) upright and correctly placed** — that rotation's offsets are right;
-- **(b) upright but shifted** by a visible margin — wrong CGRAM offset for that rotation;
-- **(c) showing a stripe of junk** down one edge — same, worse.
+**Three lessons about asking, all of them paid for during ce1.4:**
 
-(b) and (c) are the hazard above, and they are invisible to every test you can run yourself.
-Ask for the four answers together; a report of "it works" is not usable.
+1. **A report of "it works" is not usable, and neither is "looks good".** Ask for something
+   specific enough that a wrong answer looks different from a right one.
+2. **Watch for an answer that reads two ways.** "All the rotations give same results" can mean
+   "correct at every stop" or "the picture never moved" — opposite conclusions, one of them a
+   false green. When you get one, do not pick the flattering reading: name both readings back
+   and ask for the observation that separates them.
+3. **If the instrument is hard to read, the instrument is wrong.** The first rotation frame
+   drew a 1-pixel border and got "very thin, hard to see" — which is a failed instrument, not a
+   passed test. Rebuild it around what a person judges reliably (comparing two thicknesses,
+   naming a colour) rather than what is easiest to draw. See the lesson below.
+
+## Show the user the pictures — do not make them squint
+
+**The user asked for this directly**, and it is the cheapest review loop in the project:
+
+> "I think next time you can make screenshots in every orientations to see how it rotates and
+> how it looks."
+
+`just screens` renders every state of all four apps to `target/screens/*.png` through the
+**same** render functions the panel calls — `orientation-display`'s example already covers all
+four quadrants. Send the PNGs. A 1.14″ panel is a poor review surface for layout questions, and
+a reviewer looking at a rendered image can tell you "that label is clipped in portrait" in a
+way nobody can while turning a stick in their hand.
+
+Use it **before** asking for a board session, not instead of one. The split is exact and worth
+holding onto:
+
+- **Screenshots answer layout**: wording, spacing, alignment, what fits in 13 columns instead
+  of 24, whether a portrait variant is any good.
+- **Only the glass answers the panel**: CGRAM window, MADCTL, colour order, flicker, tick
+  budget — everything below `DrawTarget`.
+
+Getting the layout right on the host first means the board session is spent on the questions
+only the board can answer.
+
+## A lesson worth keeping: build the instrument for the eye that reads it
+
+`display-rotation-check` was built three times, and the two rebuilds were both defects that
+only the bench could find. It is worth stating as a general rule because the next on-glass test
+will meet it again:
+
+- **Correct is not the same as legible.** A 1-px line at the extreme edge of a 1.14″ panel
+  behind a bezel cannot be judged present-or-absent. It was a perfect test that could not
+  falsify anything.
+- **Prefer judgements humans are good at.** Comparing two thicknesses, or naming a colour, beat
+  detecting a hairline. The band goes *lopsided* under a translated window rather than
+  vanishing, and four differently-coloured corners make "which colour is top-left" a complete
+  rotation answer that needs no reading of upside-down text.
+- **Do not let the instrument imitate the fault.** The second version filled the canvas white
+  and laid black back over the interior — two draws instead of five — which flashed the whole
+  glass on every redraw. A full-screen flash is exactly what a stale-memory stripe looks like,
+  so the test was mimicking the artefact it exists to expose. It now draws four strips and
+  never touches the interior.
+- **Note where the host is blind.** Fill-then-cover and four-strips leave a framebuffer
+  byte-identical; the flicker lives in the *sequence* of writes, which a framebuffer does not
+  record. That is said in the test module, so a green suite does not imply more than it proves.
 
 ## House rules that are easy to re-break
 
@@ -279,5 +391,7 @@ Ask for the four answers together; a report of "it works" is not usable.
    nobody has ever seen it appear on the glass. That needs a throwaway build with a
    deliberately failing IMU. Not part of this epic; just do not count it as done.
 2. **`orientation-display`'s portrait layout** renders correctly into a host framebuffer and
-   has never been on glass. `just screens` proves the layout, not the panel. Until ce1.4 lands
-   it is an untested picture, and it is exactly the picture ce1.5 will put up first.
+   **has still never been on glass.** `just screens` proves the layout, not the panel — a
+   framebuffer places every pixel exactly where asked, whatever the controller does. It is
+   exactly the picture ce1.5 will put up first, so expect ce1.5 to be the moment it is finally
+   tested, and treat a surprise there as information rather than as a setback.
