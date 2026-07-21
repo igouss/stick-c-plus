@@ -4,7 +4,9 @@
 //! to the code.
 
 use cucumber::{given, then, when, World};
-use orientation_core::{Facing, Orientation, Reading, Signal, Smoother};
+use orientation_core::{
+    Facing, Orientation, Reading, RotationSettler, ScreenRotation, Signal, Smoother,
+};
 use platform_core::{Acceleration, Tick};
 
 /// The scenario's latest orientation, the smoother it was read through (if any), and how long
@@ -17,6 +19,10 @@ struct BoardWorld {
     orientation: Orientation,
     /// Milliseconds since the last successful read — what the staleness rule judges.
     age_ms: Tick,
+    /// The wall clock the rotation settler is driven from.
+    now_ms: Tick,
+    /// Which way up the picture is being drawn, and what is waiting to replace it.
+    settler: RotationSettler,
 }
 
 impl BoardWorld {
@@ -29,6 +35,7 @@ impl BoardWorld {
         };
         self.orientation = Orientation::of(effective);
         self.age_ms = 0;
+        self.settler.update(effective, self.now_ms);
     }
 
     /// What the glass is handed: the pose, and whether it is still being confirmed.
@@ -78,6 +85,27 @@ fn the_accelerometer_does_not_answer(world: &mut BoardWorld, silent_ms: Tick) {
     // A failed read publishes nothing, so the last pose simply ages — the same mechanism the
     // sampler relies on, with no dead-sensor branch anywhere.
     world.age_ms += silent_ms;
+}
+
+#[when(regex = r"^(\d+) milliseconds pass$")]
+fn milliseconds_pass(world: &mut BoardWorld, elapsed_ms: Tick) {
+    world.now_ms += elapsed_ms;
+    // Time passing is not a new reading: the settler sees the pose it already had, which is
+    // exactly what lets a held rotation come good without the board being touched.
+    let held: Acceleration = world.orientation.acceleration;
+    world.settler.update(held, world.now_ms);
+}
+
+#[then(regex = r"^the picture is drawn at (\d+) degrees$")]
+fn the_picture_is_drawn_at(world: &mut BoardWorld, degrees: u32) {
+    let expected: ScreenRotation = match degrees {
+        0 => ScreenRotation::Deg0,
+        90 => ScreenRotation::Deg90,
+        180 => ScreenRotation::Deg180,
+        270 => ScreenRotation::Deg270,
+        other => panic!("{other} is not a quarter turn"),
+    };
+    assert_eq!(world.settler.showing(), expected);
 }
 
 #[then(regex = r"^the facing is (\w+)$")]

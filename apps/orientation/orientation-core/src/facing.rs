@@ -103,7 +103,7 @@ impl Facing {
 ///
 /// Compared as squares so the check needs no square root — the same discipline
 /// [`magnitude_squared_mg2`](platform_core::Acceleration::magnitude_squared_mg2) is built for.
-fn is_at_rest(acceleration: Acceleration) -> bool {
+pub(crate) fn is_at_rest(acceleration: Acceleration) -> bool {
     let low: i64 = i64::from(ONE_G_MG - REST_TOLERANCE_MG);
     let high: i64 = i64::from(ONE_G_MG + REST_TOLERANCE_MG);
     let magnitude_squared: i64 = acceleration.magnitude_squared_mg2();
