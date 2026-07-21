@@ -19,6 +19,14 @@ path = "src/main.rs"
 name = "chime-selftest"
 path = "src/chime_selftest.rs"
 
+# A bench tool, not the timer: times the paint at each of the four rotations, for a picture
+# with a large contiguous fill and one without, so an over-budget paint can be located rather
+# than only noticed. Written after the timer's animated screen began reporting 60 ms paints
+# against its 50 ms budget with a spread of 0.6 ms -- too tight to be scheduler jitter.
+[[bin]]
+name = "paint-profile"
+path = "src/paint_profile.rs"
+
 # The imperative shell's outermost layer: it composes adapters and owns effects, so it is the
 # one crate the effect-audit `domain` gate must never tag.
 [package.metadata.hex-arch]

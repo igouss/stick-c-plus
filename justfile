@@ -200,6 +200,13 @@ alias flash := run
 run-bin bin:
     cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p plant-monitor --bin {{bin}}'
 
+# Flash and monitor one named bin of the pomodoro package — the bench tools that live beside
+# the timer. `just run-bin-pomodoro paint-profile` times the paint at each of the four
+# rotations, for a picture with a large contiguous fill and one without, so an over-budget
+# paint can be located rather than only noticed. `just run-pomodoro` puts the timer back.
+run-bin-pomodoro bin:
+    cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p pomodoro --bin {{bin}}'
+
 # Build, flash, and monitor the standalone pomodoro timer. `just run` puts the plant monitor
 # back. Front tap = start/pause, front double-tap = restart session, front hold = reset, side
 # tap = skip.

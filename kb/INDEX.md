@@ -158,6 +158,7 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
   Records the `window.PRESET` bleed that made one preset silently become another, and
   the two-path hash verification (`node:vm` vs a real browser) that pins the copy.
 - `experiment` [2026-07-09 · Does a 100×100 sprite frame fit a 50 ms tick?](experiments/2026-07-09-sprite-fill-throughput/README.md)
+- `experiment` [2026-07-21 · Does turning the panel cost paint time? (no — and what does)](experiments/2026-07-21-paint-cost-by-rotation/README.md)
   — **confirmed**: 400 per-cell `Rectangle` fills = ~85 ms/frame; one `fill_contiguous`
   = 0 over-budget paints. Two flashes, same pixels, only the fill strategy changed.
 - `finding` [mipidsi-rectangle-fill-costs-an-address-window](findings/mipidsi-rectangle-fill-costs-an-address-window.md)
