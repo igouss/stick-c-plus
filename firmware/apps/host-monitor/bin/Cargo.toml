@@ -37,6 +37,8 @@ host-adapters = { path = "../adapters" }
 # The board-generic runtime (context=shared): the Monotonic clock this root makes and
 # shares, and the generic spawn_display render loop it wires the ST7789 Screen into.
 platform-runtime = { path = "../../../../platform/platform-runtime" }
+# The shared kernel, for the ScreenRotation the render loop is handed each tick.
+platform-core = { path = "../../../../platform/platform-core" }
 # The board-generic driven adapters (shared): the ST7789 Panel + generic PanelScreen the
 # composition root wraps with the host render function.
 platform-adapters = { path = "../../../platform/adapters" }

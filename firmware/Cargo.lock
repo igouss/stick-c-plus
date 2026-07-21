@@ -914,6 +914,7 @@ dependencies = [
  "log",
  "net",
  "platform-adapters",
+ "platform-core",
  "platform-runtime",
  "serde",
  "toml",
@@ -1286,6 +1287,7 @@ dependencies = [
  "plant-display",
  "plant-shell",
  "platform-adapters",
+ "platform-core",
  "platform-runtime",
 ]
 

@@ -12,6 +12,7 @@
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use orientation_core::{Facing, Signal};
+use platform_core::ScreenRotation;
 use platform_display::{signed_bar, text_line, RenderError};
 
 use crate::layout::{
@@ -73,8 +74,8 @@ const fn label_colour(facing: Facing, signal: Signal) -> Rgb565 {
 /// Render the orientation screen: the face label, the angles, and the three axis bars.
 ///
 /// The picture is the same instrument at every rotation — the geometry it is laid out through
-/// is the only thing the view's rotation changes here. Which way the *panel* is scanning is
-/// the driven adapter's business, not this crate's.
+/// is the only thing `rotation` changes here. Which way the *panel* is scanning is the driven
+/// adapter's business, not this crate's.
 ///
 /// `elapsed_ms` is how long this state has been current. Nothing on this screen animates, so
 /// it is unused — the parameter is the generic render loop's contract, kept so this app drives
@@ -83,11 +84,12 @@ pub fn render<D>(
     target: &mut D,
     view: OrientationView,
     _elapsed_ms: u64,
+    rotation: ScreenRotation,
 ) -> Result<(), RenderError<D::Error>>
 where
     D: DrawTarget<Color = Rgb565>,
 {
-    let layout: Layout = Layout::for_rotation(view.rotation);
+    let layout: Layout = Layout::for_rotation(rotation);
 
     facing_label(target, &layout, view)?;
     angles(target, &layout, view)?;
@@ -210,10 +212,8 @@ mod tests {
         ))
     }
 
-    /// The same board, read with the picture turned a quarter onto the narrow canvas.
-    fn portrait_view_of(x_mg: i32, y_mg: i32, z_mg: i32) -> OrientationView {
-        view_of(x_mg, y_mg, z_mg).rotated(ScreenRotation::Deg90)
-    }
+    /// The quarter turn the portrait assertions are made at.
+    const PORTRAIT: ScreenRotation = ScreenRotation::Deg90;
 
     /// The same board, aged past the point where the readout still vouches for it.
     fn stale_view_of(x_mg: i32, y_mg: i32, z_mg: i32) -> OrientationView {
@@ -223,16 +223,21 @@ mod tests {
         ))
     }
 
-    /// A canvas the shape `view` is drawn on — the *only* canvas its escape count means
-    /// anything against.
-    fn canvas_for(view: OrientationView) -> Framebuffer {
-        Framebuffer::sized(Layout::for_rotation(view.rotation).canvas)
+    /// A canvas the shape `rotation` draws on — the *only* canvas an escape count taken at
+    /// that rotation means anything against.
+    fn canvas_at(rotation: ScreenRotation) -> Framebuffer {
+        Framebuffer::sized(Layout::for_rotation(rotation).canvas)
     }
 
-    /// Paint `view` into a fresh framebuffer of its own shape and hand it back for inspection.
+    /// Paint `view` at the panel's native landscape.
     fn painted(view: OrientationView) -> Framebuffer {
-        let mut fb: Framebuffer = canvas_for(view);
-        render(&mut fb, view, 0).expect("a framebuffer render cannot fail");
+        painted_at(view, ScreenRotation::Deg0)
+    }
+
+    /// Paint `view` at `rotation`, into a fresh framebuffer of the matching shape.
+    fn painted_at(view: OrientationView, rotation: ScreenRotation) -> Framebuffer {
+        let mut fb: Framebuffer = canvas_at(rotation);
+        render(&mut fb, view, 0, rotation).expect("a framebuffer render cannot fail");
         fb
     }
 
@@ -311,9 +316,15 @@ mod tests {
     fn a_smaller_reading_fully_replaces_a_larger_one() {
         let small: OrientationView = view_of(0, 0, ONE_G_MG);
 
-        let mut reused: Framebuffer = canvas_for(small);
-        render(&mut reused, view_of(-950, 900, -900), 0).expect("the large reading");
-        render(&mut reused, small, 0).expect("the small reading over it");
+        let mut reused: Framebuffer = canvas_at(ScreenRotation::Deg0);
+        render(
+            &mut reused,
+            view_of(-950, 900, -900),
+            0,
+            ScreenRotation::Deg0,
+        )
+        .expect("the large reading");
+        render(&mut reused, small, 0, ScreenRotation::Deg0).expect("the small reading over it");
 
         assert_eq!(
             reused.pixels(),
@@ -376,9 +387,15 @@ mod tests {
     fn recovering_the_signal_fully_replaces_the_stale_picture() {
         let live: OrientationView = view_of(0, 0, ONE_G_MG);
 
-        let mut reused: Framebuffer = canvas_for(live);
-        render(&mut reused, stale_view_of(0, 0, ONE_G_MG), 0).expect("the stale reading");
-        render(&mut reused, live, 0).expect("the live reading over it");
+        let mut reused: Framebuffer = canvas_at(ScreenRotation::Deg0);
+        render(
+            &mut reused,
+            stale_view_of(0, 0, ONE_G_MG),
+            0,
+            ScreenRotation::Deg0,
+        )
+        .expect("the stale reading");
+        render(&mut reused, live, 0, ScreenRotation::Deg0).expect("the live reading over it");
 
         assert_eq!(
             reused.pixels(),
@@ -390,7 +407,7 @@ mod tests {
     /// One, turned: the pose the board sits in puts ink on the narrow canvas too.
     #[test]
     fn a_portrait_readout_paints_pixels() {
-        assert!(painted(portrait_view_of(0, 0, ONE_G_MG)).lit_pixels() > 0);
+        assert!(painted_at(view_of(0, 0, ONE_G_MG), PORTRAIT).lit_pixels() > 0);
     }
 
     /// Nothing escapes the narrow canvas in any state either — the widest label, the widest
@@ -398,11 +415,14 @@ mod tests {
     /// is where a field runs off an edge if one is going to.
     #[test]
     fn no_portrait_state_escapes_the_narrow_canvas() {
-        assert_eq!(painted(portrait_view_of(0, ONE_G_MG, 0)).escaped(), 0);
-        assert_eq!(painted(portrait_view_of(0, 0, -ONE_G_MG)).escaped(), 0);
-        assert_eq!(painted(portrait_view_of(8_000, -8_000, 8_000)).escaped(), 0);
+        assert_eq!(painted_at(view_of(0, ONE_G_MG, 0), PORTRAIT).escaped(), 0);
+        assert_eq!(painted_at(view_of(0, 0, -ONE_G_MG), PORTRAIT).escaped(), 0);
         assert_eq!(
-            painted(portrait_view_of(-8_000, 8_000, -8_000)).escaped(),
+            painted_at(view_of(8_000, -8_000, 8_000), PORTRAIT).escaped(),
+            0
+        );
+        assert_eq!(
+            painted_at(view_of(-8_000, 8_000, -8_000), PORTRAIT).escaped(),
             0
         );
     }
@@ -413,8 +433,14 @@ mod tests {
     /// the wrong edges.
     #[test]
     fn the_landscape_picture_does_not_fit_the_narrow_canvas() {
-        let mut narrow: Framebuffer = canvas_for(portrait_view_of(0, 0, ONE_G_MG));
-        render(&mut narrow, view_of(0, ONE_G_MG, 0), 0).expect("a framebuffer render cannot fail");
+        let mut narrow: Framebuffer = canvas_at(PORTRAIT);
+        render(
+            &mut narrow,
+            view_of(0, ONE_G_MG, 0),
+            0,
+            ScreenRotation::Deg0,
+        )
+        .expect("a framebuffer render cannot fail");
         assert!(
             narrow.escaped() > 0,
             "the landscape layout fitted 135 px of width, so the portrait layout proves nothing"
@@ -427,7 +453,7 @@ mod tests {
     fn turning_the_picture_paints_a_different_readout() {
         assert_ne!(
             painted(view_of(0, 0, ONE_G_MG)).pixels(),
-            painted(portrait_view_of(0, 0, ONE_G_MG)).pixels()
+            painted_at(view_of(0, 0, ONE_G_MG), PORTRAIT).pixels()
         );
     }
 
@@ -437,8 +463,8 @@ mod tests {
     fn the_two_quarter_turns_paint_the_same_picture() {
         let reading: OrientationView = view_of(0, 0, ONE_G_MG);
         assert_eq!(
-            painted(reading.rotated(ScreenRotation::Deg90)).pixels(),
-            painted(reading.rotated(ScreenRotation::Deg270)).pixels()
+            painted_at(reading, ScreenRotation::Deg90).pixels(),
+            painted_at(reading, ScreenRotation::Deg270).pixels()
         );
     }
 
@@ -447,15 +473,15 @@ mod tests {
     /// clear would smear.
     #[test]
     fn a_smaller_reading_fully_replaces_a_larger_one_in_portrait() {
-        let small: OrientationView = portrait_view_of(0, 0, ONE_G_MG);
+        let small: OrientationView = view_of(0, 0, ONE_G_MG);
 
-        let mut reused: Framebuffer = canvas_for(small);
-        render(&mut reused, portrait_view_of(-950, 900, -900), 0).expect("the large reading");
-        render(&mut reused, small, 0).expect("the small reading over it");
+        let mut reused: Framebuffer = canvas_at(PORTRAIT);
+        render(&mut reused, view_of(-950, 900, -900), 0, PORTRAIT).expect("the large reading");
+        render(&mut reused, small, 0, PORTRAIT).expect("the small reading over it");
 
         assert_eq!(
             reused.pixels(),
-            painted(small).pixels(),
+            painted_at(small, PORTRAIT).pixels(),
             "the previous reading was not fully erased — the readout would smear as it moves"
         );
     }
@@ -464,13 +490,13 @@ mod tests {
     /// nine characters into a thirteen-column line, and it does not look like a live reading.
     #[test]
     fn a_portrait_lost_signal_is_drawn_and_does_not_escape() {
-        let lost: OrientationView = stale_view_of(0, ONE_G_MG, 0).rotated(ScreenRotation::Deg90);
+        let lost: OrientationView = stale_view_of(0, ONE_G_MG, 0);
         assert_eq!(lost.label(), "NO SIGNAL");
-        assert!(painted(lost).lit_pixels() > 0);
-        assert_eq!(painted(lost).escaped(), 0);
+        assert!(painted_at(lost, PORTRAIT).lit_pixels() > 0);
+        assert_eq!(painted_at(lost, PORTRAIT).escaped(), 0);
         assert_ne!(
-            painted(lost).pixels(),
-            painted(portrait_view_of(0, ONE_G_MG, 0)).pixels()
+            painted_at(lost, PORTRAIT).pixels(),
+            painted_at(view_of(0, ONE_G_MG, 0), PORTRAIT).pixels()
         );
     }
 

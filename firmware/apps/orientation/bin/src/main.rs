@@ -45,7 +45,7 @@ use orientation_core::{Orientation, Reading};
 use orientation_display::OrientationView;
 use orientation_shell::{spawn_sampler, SamplerConfig, SharedOrientation};
 use platform_adapters::{Axp192PowerSource, LedcBuzzer, Mpu6886Imu, Panel, PanelScreen};
-use platform_core::Tick;
+use platform_core::{ScreenRotation, Tick};
 use platform_runtime::{
     spawn_buzzer, spawn_display, spawn_power_watch, DisplayConfig, Monotonic, PowerWatchConfig,
 };
@@ -120,8 +120,8 @@ fn main() {
     .expect("ST7789 panel bring-up");
     let screen: PanelScreen<OrientationView, _> = PanelScreen::new(
         panel,
-        |target: &mut _, view: OrientationView, elapsed: Tick| {
-            orientation_display::render(target, view, elapsed)
+        |target: &mut _, view: OrientationView, elapsed: Tick, rotation: ScreenRotation| {
+            orientation_display::render(target, view, elapsed, rotation)
         },
     );
 
@@ -159,7 +159,13 @@ fn main() {
         animation_period: READOUT_PERIOD,
         ..DisplayConfig::default()
     };
-    let _display = spawn_display(screen, source, clock, config).expect("spawn orientation-display");
+    // Which way up to draw. Fixed at the panel's native landscape for now: this app has no
+    // rotation source yet, and its screen has only a landscape layout to be drawn in. The
+    // platform supplies the capability regardless, so wiring one in later is a change here
+    // and nowhere else.
+    let landscape = |_now: Tick| ScreenRotation::Deg0;
+    let _display =
+        spawn_display(screen, source, landscape, clock, config).expect("spawn orientation-display");
     info!("display thread up: ST7789 rendering the X/Y/Z bars at 25 Hz");
 
     // Power-watch: poll VBUS on the retained AXP192, debounce it, and chime a settled USB plug

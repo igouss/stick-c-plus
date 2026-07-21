@@ -50,7 +50,7 @@ use esp_idf_hal::units::FromValueType;
 use mipidsi::models::ST7789;
 use mipidsi::options::{ColorInversion, ColorOrder, Orientation, Rotation};
 use mipidsi::{interface::SpiInterface, Builder, Display};
-use platform_core::{Screen, Tick};
+use platform_core::{Screen, ScreenRotation, Tick};
 use platform_display::{RenderError, SCREEN_SIZE};
 use static_cell::StaticCell;
 
@@ -234,7 +234,7 @@ impl Panel {
 /// function, and hands the result to `platform_runtime::spawn_display`.
 pub struct PanelScreen<S, F>
 where
-    F: FnMut(&mut PanelTarget, S, Tick) -> Result<(), RenderError<PanelDrawError>>,
+    F: FnMut(&mut PanelTarget, S, Tick, ScreenRotation) -> Result<(), RenderError<PanelDrawError>>,
 {
     panel: Panel,
     render: F,
@@ -247,7 +247,7 @@ type PanelDrawError = <PanelTarget as DrawTarget>::Error;
 
 impl<S, F> PanelScreen<S, F>
 where
-    F: FnMut(&mut PanelTarget, S, Tick) -> Result<(), RenderError<PanelDrawError>>,
+    F: FnMut(&mut PanelTarget, S, Tick, ScreenRotation) -> Result<(), RenderError<PanelDrawError>>,
 {
     /// Wrap `panel` with the app's `render` function.
     pub fn new(panel: Panel, render: F) -> Self {
@@ -261,7 +261,7 @@ where
 
 impl<S, F> Screen<S> for PanelScreen<S, F>
 where
-    F: FnMut(&mut PanelTarget, S, Tick) -> Result<(), RenderError<PanelDrawError>>,
+    F: FnMut(&mut PanelTarget, S, Tick, ScreenRotation) -> Result<(), RenderError<PanelDrawError>>,
 {
     type Error = St7789Error;
 
@@ -269,8 +269,16 @@ where
     /// the colours, the creature and its frame, the in-place erase — is the app display
     /// crate's decision, made once and reviewable on the host; this adapter's contribution is
     /// the panel it draws on.
-    fn show(&mut self, state: S, elapsed: Tick) -> Result<(), St7789Error> {
-        (self.render)(&mut self.panel.target, state, elapsed)
+    fn show(
+        &mut self,
+        state: S,
+        elapsed: Tick,
+        rotation: ScreenRotation,
+    ) -> Result<(), St7789Error> {
+        // The rotation is handed to the app's render function, which lays the picture out for
+        // the canvas shape it implies. Turning the *panel* to match is a separate concern and
+        // does not happen yet — see the epic's panel bead.
+        (self.render)(&mut self.panel.target, state, elapsed, rotation)
             .map_err(|err| render_fault("render", err))
     }
 }

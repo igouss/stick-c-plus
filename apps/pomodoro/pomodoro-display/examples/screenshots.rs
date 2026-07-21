@@ -8,6 +8,7 @@
 //! calls on the board — drawn into a host framebuffer instead of down an SPI bus. So a
 //! reviewer looks at the real layout, not at a drawing of it.
 
+use platform_core::ScreenRotation;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -88,8 +89,13 @@ fn screens() -> Vec<Screen> {
 /// Paint one screen into a fresh framebuffer and save it.
 fn capture(screen: &Screen, settings: &OutputSettings, out_dir: &Path) -> PathBuf {
     let mut display: SimulatorDisplay<Rgb565> = SimulatorDisplay::new(SCREEN_SIZE);
-    pomodoro_display::render(&mut display, screen.view, screen.elapsed_ms)
-        .expect("a framebuffer render cannot fail");
+    pomodoro_display::render(
+        &mut display,
+        screen.view,
+        screen.elapsed_ms,
+        ScreenRotation::Deg0,
+    )
+    .expect("a framebuffer render cannot fail");
     let path: PathBuf = out_dir.join(screen.file);
     display
         .to_rgb_output_image(settings)

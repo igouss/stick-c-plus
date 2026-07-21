@@ -11,6 +11,7 @@
 //! library that ships to the board. Cargo does not auto-compile files in an example
 //! subdirectory without a `main.rs`, so this is a shared module, not an example of its own.
 
+use platform_core::ScreenRotation;
 use std::path::Path;
 
 use embedded_graphics::pixelcolor::Rgb565;
@@ -153,7 +154,8 @@ pub fn scenes() -> Vec<Screen> {
 /// it. Shared by the example and the goldens, so both produce byte-identical PNGs.
 pub fn render_png(state: HostState, path: &Path) {
     let mut display: SimulatorDisplay<Rgb565> = SimulatorDisplay::new(SCREEN_SIZE);
-    host_display::render(&mut display, state, 0).expect("a framebuffer render cannot fail");
+    host_display::render(&mut display, state, 0, ScreenRotation::Deg0)
+        .expect("a framebuffer render cannot fail");
     let settings: OutputSettings = OutputSettingsBuilder::new().scale(SCALE).build();
     display
         .to_rgb_output_image(&settings)

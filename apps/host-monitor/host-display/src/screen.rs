@@ -29,6 +29,7 @@ use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::Rectangle;
 use host_core::{HostFault, HostSeries, HostState, Percent, Pulse, Series, Status};
+use platform_core::ScreenRotation;
 use platform_display::{sparkline, text_line, RenderError};
 
 use crate::layout::{
@@ -61,6 +62,9 @@ pub fn render<D>(
     target: &mut D,
     state: HostState,
     _elapsed_ms: u64,
+    // This screen is landscape-only for now: it takes the rotation the platform supplies
+    // and does not yet honour it. A portrait layout is its own bead.
+    _rotation: ScreenRotation,
 ) -> Result<(), RenderError<D::Error>>
 where
     D: DrawTarget<Color = Rgb565>,
@@ -374,7 +378,7 @@ mod tests {
     /// Paint `state` into a fresh framebuffer.
     fn painted(state: HostState) -> Framebuffer {
         let mut fb: Framebuffer = Framebuffer::new();
-        render(&mut fb, state, 0).expect("a framebuffer render cannot fail");
+        render(&mut fb, state, 0, ScreenRotation::Deg0).expect("a framebuffer render cannot fail");
         fb
     }
 
@@ -546,6 +550,7 @@ mod tests {
                 Status::Fresh,
             ),
             0,
+            ScreenRotation::Deg0,
         )
         .expect("tall render");
         let tall: usize = lit_inside(&fb, cpu_graph(0));
@@ -557,6 +562,7 @@ mod tests {
                 Status::Fresh,
             ),
             0,
+            ScreenRotation::Deg0,
         )
         .expect("short render");
         let short: usize = lit_inside(&fb, cpu_graph(0));

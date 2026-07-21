@@ -60,6 +60,8 @@ plant-shell = { path = "../../../../apps/plant-monitor/plant-shell" }
 # shares, and the generic spawn_display render loop it wires the ST7789 Screen into. Only
 # a composition root depends on this infra crate.
 platform-runtime = { path = "../../../../platform/platform-runtime" }
+# The shared kernel, for the ScreenRotation the render loop is handed each tick.
+platform-core = { path = "../../../../platform/platform-core" }
 # The plant picture: the Glass view the render loop's source wraps each Observation in, so
 # the ST7789 Screen<Glass> adapter can paint it.
 plant-display = { path = "../../../../apps/plant-monitor/plant-display" }

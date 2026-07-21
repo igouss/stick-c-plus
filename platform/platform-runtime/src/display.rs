@@ -43,7 +43,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use log::warn;
-use platform_core::{Animated, Clock, Screen, Tick};
+use platform_core::{Animated, Clock, Screen, ScreenRotation, Tick};
 
 /// How often the panel is repainted while a state is **still**.
 ///
@@ -148,15 +148,18 @@ impl DisplayTask {
 /// (or `animation_period` while the creature moves).
 ///
 /// `source` computes the current app state from whatever the app owns; it moves into the
-/// thread, so it must be [`Send`] + `'static`. `clock` is the shared time base — the same one
-/// the app's writer stamps against — so a state's age is measured on one clock. `display`
-/// likewise moves in; its error must be [`Display`] so a render failure can be logged.
+/// thread, so it must be [`Send`] + `'static`. `rotation` does the same for which way up the
+/// picture is drawn — an app with no rotation source hands back a constant, and pays nothing.
+/// `clock` is the shared time base — the same one the app's writer stamps against — so a
+/// state's age is measured on one clock. `display` likewise moves in; its error must be
+/// [`Display`] so a render failure can be logged.
 ///
 /// Returns the [`DisplayTask`] handle, or the [`io::Error`] from failing to spawn the OS/RTOS
 /// thread.
-pub fn spawn_display<S, D, F, C>(
+pub fn spawn_display<S, D, F, R, C>(
     display: D,
     source: F,
+    rotation: R,
     clock: C,
     config: DisplayConfig,
 ) -> io::Result<DisplayTask>
@@ -165,6 +168,7 @@ where
     D: Screen<S> + Send + 'static,
     D::Error: Display,
     F: FnMut(Tick) -> S + Send + 'static,
+    R: FnMut(Tick) -> ScreenRotation + Send + 'static,
     C: Clock + Send + 'static,
 {
     let stop: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
@@ -172,16 +176,23 @@ where
     let handle: JoinHandle<()> = thread::Builder::new()
         .name("platform-display".to_string())
         .stack_size(config.stack_size)
-        .spawn(move || render_loop(display, source, clock, config, stop_in_thread))?;
+        .spawn(move || render_loop(display, source, rotation, clock, config, stop_in_thread))?;
     Ok(DisplayTask { handle, stop })
 }
 
 /// What is currently on the glass: the state painted, the *frame* of its creature that was
-/// painted, and the [`Tick`] at which this state's [`anchor`](Animated::anchor) last changed.
+/// painted, which way up it was drawn, and the [`Tick`] at which this state's
+/// [`anchor`](Animated::anchor) last changed.
+///
+/// `rotation` is a field rather than an argument passed straight through because this struct
+/// *is* the repaint-suppression rule. A turn that did not enter the comparison would leave the
+/// glass holding the previous quadrant's pixels, correctly rotated and wrong, until the app's
+/// own state happened to change.
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Shown<S: Animated> {
     state: S,
     frame: usize,
+    rotation: ScreenRotation,
     since: Tick,
 }
 
@@ -189,9 +200,10 @@ struct Shown<S: Animated> {
 type Glass<S> = Option<Shown<S>>;
 
 /// The thread body: on each tick, redraw only if the picture changed — until asked to stop.
-fn render_loop<S, D, F, C>(
+fn render_loop<S, D, F, R, C>(
     mut display: D,
     mut source: F,
+    mut rotation: R,
     clock: C,
     config: DisplayConfig,
     stop: Arc<AtomicBool>,
@@ -200,13 +212,14 @@ fn render_loop<S, D, F, C>(
     D: Screen<S>,
     D::Error: Display,
     F: FnMut(Tick) -> S,
+    R: FnMut(Tick) -> ScreenRotation,
     C: Clock,
 {
     let mut glass: Glass<S> = None;
     while !stop.load(Ordering::Relaxed) {
         let before: Glass<S> = glass;
         let started: Instant = Instant::now();
-        glass = render_once(&mut display, &mut source, clock.now(), glass);
+        glass = render_once(&mut display, &mut source, &mut rotation, clock.now(), glass);
         let budget: Duration = config.tick_period(glass);
 
         // A paint that outruns its own tick means the creature cannot keep its timing: the
@@ -239,14 +252,22 @@ fn render_loop<S, D, F, C>(
 ///
 /// A render error is logged, not propagated, and leaves the glass unchanged so the next tick
 /// retries.
-fn render_once<S, D, F>(display: &mut D, source: &mut F, now: Tick, glass: Glass<S>) -> Glass<S>
+fn render_once<S, D, F, R>(
+    display: &mut D,
+    source: &mut F,
+    rotation: &mut R,
+    now: Tick,
+    glass: Glass<S>,
+) -> Glass<S>
 where
     S: Animated,
     D: Screen<S>,
     D::Error: Display,
     F: FnMut(Tick) -> S,
+    R: FnMut(Tick) -> ScreenRotation,
 {
     let state: S = source(now);
+    let rotation: ScreenRotation = rotation(now);
 
     // The animation's zero: the tick this state's anchor became current. A changed anchor
     // restarts the creature; an unchanged one keeps counting across value updates.
@@ -260,12 +281,13 @@ where
     let next: Shown<S> = Shown {
         state,
         frame,
+        rotation,
         since,
     };
     if glass == Some(next) {
         return glass; // same picture — leave the glass untouched.
     }
-    match display.show(state, elapsed) {
+    match display.show(state, elapsed, rotation) {
         Ok(()) => Some(next),
         Err(err) => {
             warn!("platform-display: render failed, skipping this cycle: {err}");
@@ -338,6 +360,7 @@ mod tests {
     struct FakeScreen {
         shown: Arc<Mutex<Vec<TestState>>>,
         elapsed: Arc<Mutex<Vec<Tick>>>,
+        drawn_at: Arc<Mutex<Vec<ScreenRotation>>>,
         fail: bool,
         ping: Option<Sender<()>>,
     }
@@ -348,6 +371,7 @@ mod tests {
             let screen: FakeScreen = FakeScreen {
                 shown: Arc::clone(&shown),
                 elapsed: Arc::new(Mutex::new(Vec::new())),
+                drawn_at: Arc::new(Mutex::new(Vec::new())),
                 fail: false,
                 ping: None,
             };
@@ -358,6 +382,7 @@ mod tests {
             FakeScreen {
                 shown: Arc::new(Mutex::new(Vec::new())),
                 elapsed: Arc::new(Mutex::new(Vec::new())),
+                drawn_at: Arc::new(Mutex::new(Vec::new())),
                 fail: true,
                 ping: None,
             }
@@ -371,14 +396,28 @@ mod tests {
         fn elapsed_log(&self) -> Vec<Tick> {
             self.elapsed.lock().expect("elapsed log lock").clone()
         }
+
+        /// Which way up each paint was drawn, in order.
+        fn rotation_log(&self) -> Vec<ScreenRotation> {
+            self.drawn_at.lock().expect("rotation log lock").clone()
+        }
     }
 
     impl Screen<TestState> for FakeScreen {
         type Error = TestError;
 
-        fn show(&mut self, state: TestState, elapsed: Tick) -> Result<(), TestError> {
+        fn show(
+            &mut self,
+            state: TestState,
+            elapsed: Tick,
+            rotation: ScreenRotation,
+        ) -> Result<(), TestError> {
             self.shown.lock().expect("shown log lock").push(state);
             self.elapsed.lock().expect("elapsed log lock").push(elapsed);
+            self.drawn_at
+                .lock()
+                .expect("rotation log lock")
+                .push(rotation);
             if let Some(tx) = &self.ping {
                 let _ = tx.send(());
             }
@@ -395,6 +434,22 @@ mod tests {
         move |_now: Tick| state
     }
 
+    /// A rotation source that never turns — what an app with no IMU hands the loop.
+    fn landscape() -> impl FnMut(Tick) -> ScreenRotation {
+        |_now: Tick| ScreenRotation::Deg0
+    }
+
+    /// A rotation source that turns once, at `turn_at`.
+    fn turning_at(turn_at: Tick) -> impl FnMut(Tick) -> ScreenRotation {
+        move |now: Tick| {
+            if now >= turn_at {
+                ScreenRotation::Deg90
+            } else {
+                ScreenRotation::Deg0
+            }
+        }
+    }
+
     /// The states a glass is showing, in order.
     fn shown_states(shown: &Arc<Mutex<Vec<TestState>>>) -> Vec<TestState> {
         shown.lock().expect("shown log lock").clone()
@@ -403,8 +458,13 @@ mod tests {
     #[test]
     fn the_first_paint_shows_the_state() {
         let (mut screen, shown): (FakeScreen, _) = FakeScreen::new();
-        let after: Glass<TestState> =
-            render_once(&mut screen, &mut fixed(TestState::Still(30)), 20, None);
+        let after: Glass<TestState> = render_once(
+            &mut screen,
+            &mut fixed(TestState::Still(30)),
+            &mut landscape(),
+            20,
+            None,
+        );
 
         assert_eq!(shown_states(&shown), vec![TestState::Still(30)]);
         assert!(after.is_some(), "the state is now on the glass");
@@ -416,19 +476,66 @@ mod tests {
         let (mut screen, shown): (FakeScreen, _) = FakeScreen::new();
         let mut src = fixed(TestState::Still(30));
 
-        let g0: Glass<TestState> = render_once(&mut screen, &mut src, 20, None);
-        let g1: Glass<TestState> = render_once(&mut screen, &mut src, 21, g0);
-        let _g2: Glass<TestState> = render_once(&mut screen, &mut src, 22, g1);
+        let g0: Glass<TestState> = render_once(&mut screen, &mut src, &mut landscape(), 20, None);
+        let g1: Glass<TestState> = render_once(&mut screen, &mut src, &mut landscape(), 21, g0);
+        let _g2: Glass<TestState> = render_once(&mut screen, &mut src, &mut landscape(), 22, g1);
 
         assert_eq!(shown_states(&shown).len(), 1, "a steady state repainted");
+    }
+
+    /// Turning the picture repaints an otherwise unchanged state.
+    ///
+    /// The reason rotation is a field of `Shown` rather than an argument passed straight
+    /// through to the panel. Without it, a board turned while its app sat still would rotate
+    /// the glass and leave the previous quadrant's pixels on it — correctly oriented and
+    /// wrong — until something else happened to change the state.
+    #[test]
+    fn turning_the_picture_repaints_an_unchanged_state() {
+        let (mut screen, shown): (FakeScreen, _) = FakeScreen::new();
+        let mut src = fixed(TestState::Still(30));
+        let mut turns = turning_at(21);
+
+        let g0: Glass<TestState> = render_once(&mut screen, &mut src, &mut turns, 20, None);
+        let _g1: Glass<TestState> = render_once(&mut screen, &mut src, &mut turns, 21, g0);
+
+        assert_eq!(
+            shown_states(&shown).len(),
+            2,
+            "the state did not change, but the picture turned — that is a repaint"
+        );
+        assert_eq!(
+            screen.rotation_log(),
+            vec![ScreenRotation::Deg0, ScreenRotation::Deg90],
+            "each paint must be drawn at the rotation current when it was painted"
+        );
+    }
+
+    /// ...and a rotation that does not change suppresses exactly as before, so the new field
+    /// costs a still readout no SPI traffic.
+    #[test]
+    fn an_unchanged_rotation_still_suppresses_the_repaint() {
+        let (mut screen, shown): (FakeScreen, _) = FakeScreen::new();
+        let mut src = fixed(TestState::Still(30));
+        let mut turns = turning_at(21);
+
+        // Both ticks land after the turn, so the rotation is Deg90 for each of them.
+        let g0: Glass<TestState> = render_once(&mut screen, &mut src, &mut turns, 30, None);
+        let _g1: Glass<TestState> = render_once(&mut screen, &mut src, &mut turns, 31, g0);
+
+        assert_eq!(shown_states(&shown).len(), 1, "a steady picture repainted");
     }
 
     #[test]
     fn a_still_state_keeps_the_slow_cadence() {
         let config: DisplayConfig = DisplayConfig::default();
         let (mut screen, _shown): (FakeScreen, _) = FakeScreen::new();
-        let g0: Glass<TestState> =
-            render_once(&mut screen, &mut fixed(TestState::Still(30)), 0, None);
+        let g0: Glass<TestState> = render_once(
+            &mut screen,
+            &mut fixed(TestState::Still(30)),
+            &mut landscape(),
+            0,
+            None,
+        );
         assert_eq!(config.tick_period(g0), RENDER_PERIOD);
     }
 
@@ -438,8 +545,14 @@ mod tests {
         let (mut screen, shown): (FakeScreen, _) = FakeScreen::new();
         let mut src = fixed(TestState::Moving(0));
 
-        let g0: Glass<TestState> = render_once(&mut screen, &mut src, 100, None);
-        let _g1: Glass<TestState> = render_once(&mut screen, &mut src, 100 + FRAME_HOLD, g0);
+        let g0: Glass<TestState> = render_once(&mut screen, &mut src, &mut landscape(), 100, None);
+        let _g1: Glass<TestState> = render_once(
+            &mut screen,
+            &mut src,
+            &mut landscape(),
+            100 + FRAME_HOLD,
+            g0,
+        );
 
         assert_eq!(
             shown_states(&shown),
@@ -459,9 +572,21 @@ mod tests {
         let (mut screen, shown): (FakeScreen, _) = FakeScreen::new();
         let mut src = fixed(TestState::Moving(0));
 
-        let g0: Glass<TestState> = render_once(&mut screen, &mut src, 100, None);
-        let g1: Glass<TestState> = render_once(&mut screen, &mut src, 100 + FRAME_HOLD / 2, g0);
-        let _g2: Glass<TestState> = render_once(&mut screen, &mut src, 100 + FRAME_HOLD - 1, g1);
+        let g0: Glass<TestState> = render_once(&mut screen, &mut src, &mut landscape(), 100, None);
+        let g1: Glass<TestState> = render_once(
+            &mut screen,
+            &mut src,
+            &mut landscape(),
+            100 + FRAME_HOLD / 2,
+            g0,
+        );
+        let _g2: Glass<TestState> = render_once(
+            &mut screen,
+            &mut src,
+            &mut landscape(),
+            100 + FRAME_HOLD - 1,
+            g1,
+        );
 
         assert_eq!(shown_states(&shown).len(), 1, "a mid-frame tick repainted");
     }
@@ -472,10 +597,20 @@ mod tests {
         // elapsed handed to the second paint is 0, not the age of the first.
         let (mut screen, _shown): (FakeScreen, _) = FakeScreen::new();
 
-        let g0: Glass<TestState> =
-            render_once(&mut screen, &mut fixed(TestState::Still(9)), 1_000, None);
-        let _g1: Glass<TestState> =
-            render_once(&mut screen, &mut fixed(TestState::Moving(0)), 1_500, g0);
+        let g0: Glass<TestState> = render_once(
+            &mut screen,
+            &mut fixed(TestState::Still(9)),
+            &mut landscape(),
+            1_000,
+            None,
+        );
+        let _g1: Glass<TestState> = render_once(
+            &mut screen,
+            &mut fixed(TestState::Moving(0)),
+            &mut landscape(),
+            1_500,
+            g0,
+        );
 
         assert_eq!(
             screen.elapsed_log(),
@@ -492,9 +627,9 @@ mod tests {
         let cell: Cell<TestState> = Cell::new(TestState::Moving(0));
         let mut src = |_now: Tick| cell.get();
 
-        let g0: Glass<TestState> = render_once(&mut screen, &mut src, 0, None);
+        let g0: Glass<TestState> = render_once(&mut screen, &mut src, &mut landscape(), 0, None);
         cell.set(TestState::Moving(1));
-        let _g1: Glass<TestState> = render_once(&mut screen, &mut src, 250, g0);
+        let _g1: Glass<TestState> = render_once(&mut screen, &mut src, &mut landscape(), 250, g0);
 
         assert_eq!(
             shown_states(&shown),
@@ -514,9 +649,9 @@ mod tests {
         let cell: Cell<TestState> = Cell::new(TestState::Still(30));
         let mut src = |_now: Tick| cell.get();
 
-        let g0: Glass<TestState> = render_once(&mut screen, &mut src, 10, None);
+        let g0: Glass<TestState> = render_once(&mut screen, &mut src, &mut landscape(), 10, None);
         cell.set(TestState::Still(60));
-        let _g1: Glass<TestState> = render_once(&mut screen, &mut src, 20, g0);
+        let _g1: Glass<TestState> = render_once(&mut screen, &mut src, &mut landscape(), 20, g0);
 
         assert_eq!(
             shown_states(&shown),
@@ -527,8 +662,13 @@ mod tests {
     #[test]
     fn a_render_error_keeps_the_prior_state_and_is_not_fatal() {
         let mut screen: FakeScreen = FakeScreen::failing();
-        let after: Glass<TestState> =
-            render_once(&mut screen, &mut fixed(TestState::Still(55)), 0, None);
+        let after: Glass<TestState> = render_once(
+            &mut screen,
+            &mut fixed(TestState::Still(55)),
+            &mut landscape(),
+            0,
+            None,
+        );
         assert!(
             after.is_none(),
             "a failed paint does not advance the shown state"
@@ -541,11 +681,13 @@ mod tests {
         let animating: Glass<TestState> = Some(Shown {
             state: TestState::Moving(0),
             frame: 0,
+            rotation: ScreenRotation::Deg0,
             since: 0,
         });
         let still: Glass<TestState> = Some(Shown {
             state: TestState::Still(30),
             frame: 0,
+            rotation: ScreenRotation::Deg0,
             since: 0,
         });
 
@@ -574,8 +716,8 @@ mod tests {
             move |_now: Tick| *state.lock().expect("state lock")
         };
 
-        let task: DisplayTask =
-            spawn_display(screen, source, clock, config).expect("spawn display thread");
+        let task: DisplayTask = spawn_display(screen, source, landscape(), clock, config)
+            .expect("spawn display thread");
 
         rx.recv_timeout(Duration::from_secs(2))
             .expect("the display must paint the first value");

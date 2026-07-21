@@ -5,6 +5,7 @@
 
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
+use platform_core::ScreenRotation;
 use platform_display::{sprite, text_line, RenderError};
 use pomodoro_core::{Phase, Status};
 
@@ -48,6 +49,9 @@ pub fn render<D>(
     target: &mut D,
     view: PomodoroView,
     elapsed_ms: u64,
+    // This screen is landscape-only for now: it takes the rotation the platform supplies
+    // and does not yet honour it. A portrait layout is its own bead.
+    _rotation: ScreenRotation,
 ) -> Result<(), RenderError<D::Error>>
 where
     D: DrawTarget<Color = Rgb565>,
@@ -130,7 +134,8 @@ mod tests {
 
     fn painted_at(view: PomodoroView, elapsed_ms: u64) -> Framebuffer {
         let mut fb: Framebuffer = Framebuffer::new();
-        render(&mut fb, view, elapsed_ms).expect("a framebuffer render cannot fail");
+        render(&mut fb, view, elapsed_ms, ScreenRotation::Deg0)
+            .expect("a framebuffer render cannot fail");
         fb
     }
 

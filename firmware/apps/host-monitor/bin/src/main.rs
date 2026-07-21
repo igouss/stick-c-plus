@@ -33,6 +33,7 @@ use host_shell::{spawn_poller, PollerConfig, SharedMetrics};
 use log::{error, info, warn};
 use net::wifi::WifiStation;
 use platform_adapters::{Axp192PowerSource, LedcBuzzer, Panel, PanelScreen};
+use platform_core::ScreenRotation;
 use platform_runtime::{
     spawn_buzzer, spawn_display, spawn_power_watch, DisplayConfig, Monotonic, PowerWatchConfig,
 };
@@ -139,8 +140,8 @@ fn main() {
     // host monitor; the picture is injected here.
     let screen: PanelScreen<Glass, _> = PanelScreen::new(
         panel,
-        |target: &mut _, Glass(state): Glass, elapsed: Tick| {
-            host_display::render(target, state, elapsed)
+        |target: &mut _, Glass(state): Glass, elapsed: Tick, rotation: ScreenRotation| {
+            host_display::render(target, state, elapsed, rotation)
         },
     );
     // host_display draws three host rows — three names, six percentages, six sparklines —
@@ -163,7 +164,12 @@ fn main() {
         let shared: SharedMetrics = shared.clone();
         move |now: Tick| Glass(shared.snapshot(now, max_age))
     };
-    let _display = spawn_display(screen, display_source, clock, display_config)
+    // Which way up to draw. Fixed at the panel's native landscape for now: this app has no
+    // rotation source yet, and its screen has only a landscape layout to be drawn in. The
+    // platform supplies the capability regardless, so wiring one in later is a change here
+    // and nowhere else.
+    let landscape = |_now: Tick| ScreenRotation::Deg0;
+    let _display = spawn_display(screen, display_source, landscape, clock, display_config)
         .expect("spawn host-monitor display");
     info!("display thread up: ST7789 rendering three host rows every {display_period:?}");
 

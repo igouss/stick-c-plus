@@ -24,7 +24,7 @@ use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::EspLogger;
 use log::info;
 use platform_adapters::{Axp192PowerSource, GpioButton, LedcBuzzer, Panel, PanelScreen};
-use platform_core::Tick;
+use platform_core::{ScreenRotation, Tick};
 use platform_runtime::{
     spawn_buzzer, spawn_display, spawn_power_watch, DisplayConfig, Monotonic, PowerWatchConfig,
 };
@@ -70,8 +70,8 @@ fn main() {
     .expect("ST7789 panel bring-up");
     let screen: PanelScreen<PomodoroView, _> = PanelScreen::new(
         panel,
-        |target: &mut _, view: PomodoroView, elapsed: Tick| {
-            pomodoro_display::render(target, view, elapsed)
+        |target: &mut _, view: PomodoroView, elapsed: Tick, rotation: ScreenRotation| {
+            pomodoro_display::render(target, view, elapsed, rotation)
         },
     );
 
@@ -113,7 +113,12 @@ fn main() {
         let shared: SharedTimer = shared.clone();
         move |now: Tick| PomodoroView::of(&shared.snapshot(), now, CLASSIC)
     };
-    let _display = spawn_display(screen, source, clock, DisplayConfig::default())
+    // Which way up to draw. Fixed at the panel's native landscape for now: this app has no
+    // rotation source yet, and its screen has only a landscape layout to be drawn in. The
+    // platform supplies the capability regardless, so wiring one in later is a change here
+    // and nowhere else.
+    let landscape = |_now: Tick| ScreenRotation::Deg0;
+    let _display = spawn_display(screen, source, landscape, clock, DisplayConfig::default())
         .expect("spawn pomodoro-display");
     info!("display thread up: ST7789 rendering mm:ss + the Claude creature");
 

@@ -8,6 +8,7 @@
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use plant_core::{Observation, ProbeFault};
+use platform_core::ScreenRotation;
 use platform_display::{sprite, text_line, RenderError};
 
 use crate::layout::{LINE_WIDTH, PCT_Y, RAW_Y, SPRITE_ORIGIN, SPRITE_SCALE, TEXT_X};
@@ -49,6 +50,9 @@ pub fn render<D>(
     target: &mut D,
     observation: Observation,
     elapsed_ms: u64,
+    // This screen is landscape-only for now: it takes the rotation the platform supplies
+    // and does not yet honour it. A portrait layout is its own bead.
+    _rotation: ScreenRotation,
 ) -> Result<(), RenderError<D::Error>>
 where
     D: DrawTarget<Color = Rgb565>,
@@ -170,7 +174,8 @@ mod tests {
     /// Paint `observation` after it has been on the glass for `elapsed_ms`.
     fn painted_at(observation: Observation, elapsed_ms: u64) -> Framebuffer {
         let mut fb: Framebuffer = Framebuffer::new();
-        render(&mut fb, observation, elapsed_ms).expect("a framebuffer render cannot fail");
+        render(&mut fb, observation, elapsed_ms, ScreenRotation::Deg0)
+            .expect("a framebuffer render cannot fail");
         fb
     }
 
@@ -278,8 +283,14 @@ mod tests {
         let advanced: u64 =
             u64::from(crate::scene::scene(Observation::Stale).sprite.frames()[0].hold_ms());
         let mut canvas: Framebuffer = Framebuffer::new();
-        render(&mut canvas, Observation::Stale, 0).expect("the first frame");
-        render(&mut canvas, Observation::Stale, advanced).expect("the second frame");
+        render(&mut canvas, Observation::Stale, 0, ScreenRotation::Deg0).expect("the first frame");
+        render(
+            &mut canvas,
+            Observation::Stale,
+            advanced,
+            ScreenRotation::Deg0,
+        )
+        .expect("the second frame");
 
         assert_eq!(
             canvas.pixels(),
@@ -293,8 +304,8 @@ mod tests {
     /// painted onto a blank canvas: no glyph of `first` survives.
     fn repaint(first: Observation, second: Observation) -> Framebuffer {
         let mut canvas: Framebuffer = Framebuffer::new();
-        render(&mut canvas, first, 0).expect("the first paint");
-        render(&mut canvas, second, 0).expect("the second paint");
+        render(&mut canvas, first, 0, ScreenRotation::Deg0).expect("the first paint");
+        render(&mut canvas, second, 0, ScreenRotation::Deg0).expect("the second paint");
         canvas
     }
 

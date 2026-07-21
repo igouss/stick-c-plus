@@ -148,12 +148,13 @@ fn screens() -> Vec<Screen> {
 /// Paint one screen into a fresh framebuffer and save it.
 fn capture(screen: &Screen, settings: &OutputSettings, out_dir: &Path) -> PathBuf {
     let reading: Reading = Reading::aged(Orientation::of(screen.acceleration), screen.age_ms);
-    let view: OrientationView = OrientationView::of(&reading).rotated(screen.rotation);
+    let view: OrientationView = OrientationView::of(&reading);
     // Sized for the rotation, not for the panel: a landscape canvas would silently clip the
     // right-hand third of a portrait screen and save a PNG that looked fine.
     let canvas: Size = canvas_size(screen.rotation);
     let mut display: SimulatorDisplay<Rgb565> = SimulatorDisplay::new(canvas);
-    orientation_display::render(&mut display, view, 0).expect("a framebuffer render cannot fail");
+    orientation_display::render(&mut display, view, 0, screen.rotation)
+        .expect("a framebuffer render cannot fail");
     let path: PathBuf = out_dir.join(screen.file);
     display
         .to_rgb_output_image(settings)

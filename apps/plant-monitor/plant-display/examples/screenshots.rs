@@ -13,6 +13,7 @@
 //! paints red as red however the glass is wired. To answer *that* question, flash
 //! `just run-bin display-colour-check` and look at the board. See the crate docs.
 
+use platform_core::ScreenRotation;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -105,7 +106,7 @@ fn capture(screen: &Screen, settings: &OutputSettings, out_dir: &Path) -> PathBu
     let mut display: SimulatorDisplay<Rgb565> = SimulatorDisplay::new(SCREEN_SIZE);
     match screen.subject {
         Subject::Observation(observation, elapsed_ms) => {
-            plant_display::render(&mut display, observation, elapsed_ms)
+            plant_display::render(&mut display, observation, elapsed_ms, ScreenRotation::Deg0)
                 .expect("a framebuffer render cannot fail")
         }
         Subject::ColourBands => {

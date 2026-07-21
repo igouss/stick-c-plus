@@ -48,6 +48,7 @@ use plant_core::{Observation, Tick};
 use plant_display::Glass;
 use plant_shell::{spawn_sampler, SamplerConfig, SharedMoisture};
 use platform_adapters::{Axp192PowerSource, LedcBuzzer, Panel, PanelScreen};
+use platform_core::ScreenRotation;
 use platform_runtime::{
     spawn_buzzer, spawn_display, spawn_power_watch, DisplayConfig, Monotonic, PowerWatchConfig,
 };
@@ -222,8 +223,8 @@ fn main() {
     // plant; the picture is injected here.
     let screen: PanelScreen<Glass, _> = PanelScreen::new(
         panel,
-        |target: &mut _, Glass(observation): Glass, elapsed: Tick| {
-            plant_display::render(target, observation, elapsed)
+        |target: &mut _, Glass(observation): Glass, elapsed: Tick, rotation: ScreenRotation| {
+            plant_display::render(target, observation, elapsed, rotation)
         },
     );
     let display_config: DisplayConfig = DisplayConfig::default();
@@ -237,8 +238,13 @@ fn main() {
         let shared: SharedMoisture = shared.clone();
         move |now: Tick| Glass(shared.observe(now, max_age))
     };
-    let _display =
-        spawn_display(screen, display_source, clock, display_config).expect("spawn plant-display");
+    // Which way up to draw. Fixed at the panel's native landscape for now: this app has no
+    // rotation source yet, and its screen has only a landscape layout to be drawn in. The
+    // platform supplies the capability regardless, so wiring one in later is a change here
+    // and nowhere else.
+    let landscape = |_now: Tick| ScreenRotation::Deg0;
+    let _display = spawn_display(screen, display_source, landscape, clock, display_config)
+        .expect("spawn plant-display");
     info!("display thread up: ST7789 rendering raw + percent every {display_period:?}");
 
     // The on-board passive buzzer (LEDC on G2), behind one owner thread so the power-watch chime
