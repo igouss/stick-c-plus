@@ -179,9 +179,11 @@ narrow: *did the layout change shape — the stacked portrait header with `UPRIG
 line — or did it stay the wide single-row one?* A picture that never turned would have failed
 that question differently. **Ask for the shape, not the verdict.**
 
-**Still not witnessed: the flat-on-desk case**, where no axis is meaningfully up and the
-settler should hold what it had. Host-tested, never seen to misbehave, never directly looked
-at. Small — but do not count it as done, and it is nearly free to ask for during ce1.9.
+**All three settler promises are witnessed**, the flat-on-desk case last: *"lot looks good when
+flat on desk, orientation holds correctly."* That is the case where no axis is meaningfully up
+and `rotation_for` must return `current` rather than pick a quadrant from noise — the one most
+likely to scramble, and it holds. Together with shake-does-not-spin and release-then-settle,
+the settler is now proven on hardware and not only on the host.
 
 The size result, measured against the `7979b6d` baseline: `host-monitor`, `pomodoro` and
 `plant-monitor` came out **byte-identical**, and `orientation` grew 1540 text / 48 data / 8
@@ -345,9 +347,9 @@ which live in the *plant-monitor* package (it will not find an app binary). Seri
 
 **ce1.9's question is ce1.5's, asked of two more apps**, and ce1.5's answer is the template:
 *pick the board up, stand it on its USB-C port, and the readout is drawn upright and is easy
-to read.* Add the flat-on-desk case, which is the one settler promise still unwitnessed — set
-it flat and confirm it does **not** scramble. Shake-does-not-spin and release-then-settle were
-both confirmed at ce1.5.
+to read.* The settler itself no longer needs re-proving — flat, shaken and released were all
+confirmed on hardware at ce1.5 — so ce1.9's board time is about **these two apps' wiring**,
+not about whether rotation works.
 
 **Four lessons about asking. The first three were paid for at ce1.4 — and the fourth is that
 ce1.4's lessons did not stop it happening again at ce1.5, so read them as live.**
@@ -449,5 +451,6 @@ will meet it again:
    was no surprise. The general point survives for the ce1.6/.7 layouts: `just screens` proves
    the layout, not the panel, because a framebuffer places every pixel exactly where asked
    whatever the controller does.
-3. **The flat-on-desk settler case.** Shake-does-not-spin and release-then-settle were both
-   witnessed at ce1.5; *flat*, where no axis is meaningfully up, was not. Host-tested only.
+*(A third entry stood here — the flat-on-desk settler case — and was cleared on 2026-07-21
+when the user confirmed it on the board. All three of the settler's promises are now witnessed
+on hardware.)*
