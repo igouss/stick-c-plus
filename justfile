@@ -208,8 +208,10 @@ run-bin-pomodoro bin:
     cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p pomodoro --bin {{bin}}'
 
 # Build, flash, and monitor the standalone pomodoro timer. `just run` puts the plant monitor
-# back. Front tap = start/pause, front double-tap = restart session, front hold = reset, side
-# tap = skip.
+# back. Front click = start/pause, front double-click = restart session, front long hold =
+# reset, side click = skip, power click = light or darken the glass (a dark screen is not
+# painted at all). Only the front button reports double-clicks, so only its lone click waits
+# out the 300 ms window; the side and power buttons stay immediate.
 run-pomodoro:
     cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p pomodoro'
 
