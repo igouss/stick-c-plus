@@ -52,4 +52,4 @@ pub use error::RenderError;
 pub use rotation_check::rotation_frame;
 pub use signed_bar::signed_bar;
 pub use sparkline::sparkline;
-pub use text::{text_line, text_overlay, FONT, LINE_CAP, SCREEN_SIZE};
+pub use text::{text_field, text_line, text_overlay, FieldAlign, FONT, LINE_CAP, SCREEN_SIZE};

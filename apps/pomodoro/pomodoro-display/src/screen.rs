@@ -6,12 +6,10 @@
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use platform_core::ScreenRotation;
-use platform_display::{sprite, text_line, RenderError};
+use platform_display::{sprite, text_field, RenderError};
 use pomodoro_core::{Phase, Status};
 
-use crate::layout::{
-    CLOCK_ORIGIN, CLOCK_WIDTH, LABEL_ORIGIN, LABEL_WIDTH, SPRITE_ORIGIN, SPRITE_SCALE,
-};
+use crate::layout::{Layout, CLOCK_WIDTH, LABEL_WIDTH, SPRITE_SCALE};
 use crate::scene;
 use crate::view::PomodoroView;
 
@@ -49,43 +47,53 @@ pub fn render<D>(
     target: &mut D,
     view: PomodoroView,
     elapsed_ms: u64,
-    // This screen is landscape-only for now: it takes the rotation the platform supplies
-    // and does not yet honour it. A portrait layout is its own bead.
-    _rotation: ScreenRotation,
+    rotation: ScreenRotation,
 ) -> Result<(), RenderError<D::Error>>
 where
     D: DrawTarget<Color = Rgb565>,
 {
-    label(target, view)?;
-    clock(target, view)?;
-    creature(target, view, elapsed_ms)
+    let layout: Layout = Layout::for_rotation(rotation);
+
+    label(target, &layout, view)?;
+    clock(target, &layout, view)?;
+    creature(target, &layout, view, elapsed_ms)
 }
 
 /// Paint the phase label row.
-fn label<D>(target: &mut D, view: PomodoroView) -> Result<(), RenderError<D::Error>>
+fn label<D>(
+    target: &mut D,
+    layout: &Layout,
+    view: PomodoroView,
+) -> Result<(), RenderError<D::Error>>
 where
     D: DrawTarget<Color = Rgb565>,
 {
-    text_line(
+    text_field(
         target,
-        LABEL_ORIGIN,
+        layout.label_origin,
         label_colour(view),
         LABEL_WIDTH,
+        layout.text_align,
         format_args!("{}", label_text(view)),
     )
 }
 
 /// Paint the `MM:SS` clock row.
-fn clock<D>(target: &mut D, view: PomodoroView) -> Result<(), RenderError<D::Error>>
+fn clock<D>(
+    target: &mut D,
+    layout: &Layout,
+    view: PomodoroView,
+) -> Result<(), RenderError<D::Error>>
 where
     D: DrawTarget<Color = Rgb565>,
 {
     let (minutes, seconds): (u32, u32) = view.minutes_seconds();
-    text_line(
+    text_field(
         target,
-        CLOCK_ORIGIN,
+        layout.clock_origin,
         Rgb565::WHITE,
         CLOCK_WIDTH,
+        layout.text_align,
         format_args!("{minutes:02}:{seconds:02}"),
     )
 }
@@ -96,6 +104,7 @@ where
 /// black background, so an animating creature never smears the frame before it.
 fn creature<D>(
     target: &mut D,
+    layout: &Layout,
     view: PomodoroView,
     elapsed_ms: u64,
 ) -> Result<(), RenderError<D::Error>>
@@ -108,7 +117,7 @@ where
         target,
         sprite,
         &sprite.frames()[index],
-        SPRITE_ORIGIN,
+        layout.sprite_origin,
         SPRITE_SCALE,
         Rgb565::BLACK,
     )
@@ -117,6 +126,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layout::canvas_size;
     use platform_display::testing::Framebuffer;
 
     fn view(phase: Phase, status: Status, remaining_secs: u32) -> PomodoroView {
@@ -127,15 +137,28 @@ mod tests {
         }
     }
 
-    /// Paint `view` at the instant it appeared.
+    /// Paint `view` at the instant it appeared, in the panel's native landscape.
     fn painted(view: PomodoroView) -> Framebuffer {
         painted_at(view, 0)
     }
 
     fn painted_at(view: PomodoroView, elapsed_ms: u64) -> Framebuffer {
-        let mut fb: Framebuffer = Framebuffer::new();
-        render(&mut fb, view, elapsed_ms, ScreenRotation::Deg0)
-            .expect("a framebuffer render cannot fail");
+        painted_turned(view, elapsed_ms, ScreenRotation::Deg0)
+    }
+
+    /// Paint `view` at `rotation`, on a canvas allocated to that rotation's shape.
+    ///
+    /// Sizing the target from [`canvas_size`] is the whole reason these tests can speak about
+    /// escaping at all: a landscape framebuffer would report every correctly-placed portrait
+    /// pixel below y=135 as having escaped, and a target sized to the *picture* rather than to
+    /// the rotation would hide a real overrun.
+    fn painted_turned(
+        view: PomodoroView,
+        elapsed_ms: u64,
+        rotation: ScreenRotation,
+    ) -> Framebuffer {
+        let mut fb: Framebuffer = Framebuffer::sized(canvas_size(rotation));
+        render(&mut fb, view, elapsed_ms, rotation).expect("a framebuffer render cannot fail");
         fb
     }
 
@@ -213,6 +236,75 @@ mod tests {
         assert_eq!(
             painted(view(Phase::Focus, Status::Finished, 0)).escaped(),
             0
+        );
+    }
+
+    /// The same proof in portrait, on the taller canvas — the widest label, the largest clock
+    /// value, and the finished state all stay on the glass. This is the check the portrait
+    /// layout exists to pass, and the one a wrong origin fails loudly.
+    #[test]
+    fn no_state_escapes_the_portrait_canvas() {
+        assert_eq!(
+            painted_turned(
+                view(Phase::LongBreak, Status::Running, 15 * 60),
+                0,
+                ScreenRotation::Deg90
+            )
+            .escaped(),
+            0
+        );
+        assert_eq!(
+            painted_turned(
+                view(Phase::Focus, Status::Idle, 25 * 60),
+                0,
+                ScreenRotation::Deg270
+            )
+            .escaped(),
+            0
+        );
+        assert_eq!(
+            painted_turned(
+                view(Phase::Focus, Status::Finished, 0),
+                0,
+                ScreenRotation::Deg90
+            )
+            .escaped(),
+            0
+        );
+    }
+
+    /// Turning the board really does redraw the timer differently — the same state at a
+    /// quarter turn is a different picture, not the landscape one on a taller canvas.
+    ///
+    /// Compared by *lit pixel count* rather than by buffer equality, because two framebuffers
+    /// of different shapes cannot be compared pixel-for-pixel at all; what this pins is that
+    /// the portrait layout puts a different amount of ink in a different place, which a render
+    /// that ignored its rotation could not do.
+    #[test]
+    fn a_quarter_turn_paints_a_different_picture() {
+        let running: PomodoroView = view(Phase::Focus, Status::Running, 1_500);
+        let flat: Framebuffer = painted_turned(running, 0, ScreenRotation::Deg0);
+        let turned: Framebuffer = painted_turned(running, 0, ScreenRotation::Deg90);
+        assert_ne!(
+            flat.size(),
+            turned.size(),
+            "the canvas shape follows the turn"
+        );
+        assert!(turned.lit_pixels() > 0, "the turned picture is not blank");
+    }
+
+    /// Both quarter turns draw the same picture, and both half turns draw the other one — a
+    /// layout answers the SHAPE of the canvas, and only the panel cares which way up it is.
+    #[test]
+    fn the_two_turns_of_each_shape_paint_identically() {
+        let running: PomodoroView = view(Phase::ShortBreak, Status::Running, 300);
+        assert_eq!(
+            painted_turned(running, 0, ScreenRotation::Deg90).pixels(),
+            painted_turned(running, 0, ScreenRotation::Deg270).pixels()
+        );
+        assert_eq!(
+            painted_turned(running, 0, ScreenRotation::Deg0).pixels(),
+            painted_turned(running, 0, ScreenRotation::Deg180).pixels()
         );
     }
 }

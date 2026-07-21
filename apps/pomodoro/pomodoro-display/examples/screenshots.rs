@@ -23,11 +23,33 @@ const OUT_DIR: &str = "target/screens";
 /// The 240×135 panel is too small to read on a monitor; scale it up.
 const SCALE: u32 = 4;
 
-/// One captioned screen: the file it lands in, the view to paint, and the creature's clock.
+/// One captioned screen: the file it lands in, the view to paint, the creature's clock, and
+/// the way up it is drawn.
 struct Screen {
     file: &'static str,
     view: PomodoroView,
     elapsed_ms: u64,
+    rotation: ScreenRotation,
+}
+
+/// A landscape screen — the panel's native way up, and what most of these are.
+fn flat(file: &'static str, view: PomodoroView, elapsed_ms: u64) -> Screen {
+    Screen {
+        file,
+        view,
+        elapsed_ms,
+        rotation: ScreenRotation::Deg0,
+    }
+}
+
+/// A portrait screen: the board stood on its USB-C port, drawn on the taller canvas.
+fn turned(file: &'static str, view: PomodoroView, elapsed_ms: u64) -> Screen {
+    Screen {
+        file,
+        view,
+        elapsed_ms,
+        rotation: ScreenRotation::Deg90,
+    }
 }
 
 fn view(phase: Phase, status: Status, remaining_secs: u32) -> PomodoroView {
@@ -38,62 +60,94 @@ fn view(phase: Phase, status: Status, remaining_secs: u32) -> PomodoroView {
     }
 }
 
-/// Every state the glass can be in. Adding a state without adding it here means it ships
-/// un-looked-at.
+/// Every state the glass can be in, in both shapes. Adding a state without adding it here
+/// means it ships un-looked-at.
+///
+/// The portrait set is deliberately shorter than the landscape one: the animation and the
+/// pause behaviour are properties of the *view*, which the two shapes share, so re-shooting
+/// every frame of the creature's loop at a quarter turn would add files without adding a
+/// question. What portrait has to answer is whether each element fits and reads on thirteen
+/// columns — so it covers the widest label, the largest clock, and the finished state.
 fn screens() -> Vec<Screen> {
     vec![
-        Screen {
-            file: "pomodoro-01-ready.png",
-            view: view(Phase::Focus, Status::Idle, 25 * 60),
-            elapsed_ms: 0,
-        },
-        Screen {
-            file: "pomodoro-02-focus.png",
-            view: view(Phase::Focus, Status::Running, 24 * 60 + 37),
-            elapsed_ms: 400,
-        },
+        flat(
+            "pomodoro-01-ready.png",
+            view(Phase::Focus, Status::Idle, 25 * 60),
+            0,
+        ),
+        flat(
+            "pomodoro-02-focus.png",
+            view(Phase::Focus, Status::Running, 24 * 60 + 37),
+            400,
+        ),
         // The same focus, later in the coding creature's loop — proof it animates.
-        Screen {
-            file: "pomodoro-03-focus-mid-frame.png",
-            view: view(Phase::Focus, Status::Running, 24 * 60 + 37),
-            elapsed_ms: 1_200,
-        },
-        Screen {
-            file: "pomodoro-04-paused.png",
-            view: view(Phase::Focus, Status::Paused, 12 * 60 + 30),
-            elapsed_ms: 0,
-        },
-        Screen {
-            file: "pomodoro-05-short-break.png",
-            view: view(Phase::ShortBreak, Status::Running, 5 * 60),
-            elapsed_ms: 400,
-        },
-        Screen {
-            file: "pomodoro-06-long-break.png",
-            view: view(Phase::LongBreak, Status::Running, 15 * 60),
-            elapsed_ms: 400,
-        },
-        Screen {
-            file: "pomodoro-07-done.png",
-            view: view(Phase::Focus, Status::Finished, 0),
-            elapsed_ms: 0,
-        },
-        Screen {
-            file: "pomodoro-08-done-mid-wink.png",
-            view: view(Phase::Focus, Status::Finished, 0),
-            elapsed_ms: 500,
-        },
+        flat(
+            "pomodoro-03-focus-mid-frame.png",
+            view(Phase::Focus, Status::Running, 24 * 60 + 37),
+            1_200,
+        ),
+        flat(
+            "pomodoro-04-paused.png",
+            view(Phase::Focus, Status::Paused, 12 * 60 + 30),
+            0,
+        ),
+        flat(
+            "pomodoro-05-short-break.png",
+            view(Phase::ShortBreak, Status::Running, 5 * 60),
+            400,
+        ),
+        flat(
+            "pomodoro-06-long-break.png",
+            view(Phase::LongBreak, Status::Running, 15 * 60),
+            400,
+        ),
+        flat(
+            "pomodoro-07-done.png",
+            view(Phase::Focus, Status::Finished, 0),
+            0,
+        ),
+        flat(
+            "pomodoro-08-done-mid-wink.png",
+            view(Phase::Focus, Status::Finished, 0),
+            500,
+        ),
+        // Stood on the USB-C port. `LONG BREAK` is the widest label and `25:00` the largest
+        // clock, so between them these three put every field at its full width on the narrow
+        // canvas.
+        turned(
+            "pomodoro-09-portrait-focus.png",
+            view(Phase::Focus, Status::Running, 24 * 60 + 37),
+            400,
+        ),
+        turned(
+            "pomodoro-10-portrait-long-break.png",
+            view(Phase::LongBreak, Status::Running, 15 * 60),
+            400,
+        ),
+        turned(
+            "pomodoro-11-portrait-ready.png",
+            view(Phase::Focus, Status::Idle, 25 * 60),
+            0,
+        ),
+        turned(
+            "pomodoro-12-portrait-done.png",
+            view(Phase::Focus, Status::Finished, 0),
+            0,
+        ),
     ]
 }
 
 /// Paint one screen into a fresh framebuffer and save it.
 fn capture(screen: &Screen, settings: &OutputSettings, out_dir: &Path) -> PathBuf {
-    let mut display: SimulatorDisplay<Rgb565> = SimulatorDisplay::new(SCREEN_SIZE);
+    // Sized from the ROTATION, not from the panel: a portrait screen drawn into a landscape
+    // target would be silently clipped at y=135 and the PNG would look like a layout bug.
+    let mut display: SimulatorDisplay<Rgb565> =
+        SimulatorDisplay::new(pomodoro_display::canvas_size(screen.rotation));
     pomodoro_display::render(
         &mut display,
         screen.view,
         screen.elapsed_ms,
-        ScreenRotation::Deg0,
+        screen.rotation,
     )
     .expect("a framebuffer render cannot fail");
     let path: PathBuf = out_dir.join(screen.file);
@@ -118,9 +172,11 @@ fn main() {
         .iter()
         .for_each(|path: &PathBuf| println!("{}", path.display()));
     println!(
-        "\n{} pomodoro screens at {}×{} (scaled {SCALE}×) → {OUT_DIR}/",
+        "\n{} pomodoro screens at {}×{} and {}×{} (scaled {SCALE}×) → {OUT_DIR}/",
         written.len(),
         SCREEN_SIZE.width,
-        SCREEN_SIZE.height
+        SCREEN_SIZE.height,
+        SCREEN_SIZE.height,
+        SCREEN_SIZE.width
     );
 }

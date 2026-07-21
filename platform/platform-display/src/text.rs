@@ -40,14 +40,30 @@ pub const LINE_CAP: usize = 16;
 /// `String`, so a redraw allocates nothing on the ESP32's scarce SRAM.
 type Line = heapless::String<LINE_CAP>;
 
+/// Where a value sits inside the fixed field it is padded to.
+///
+/// The field is the same pixels either way — that is what erases the previous value — so this
+/// only decides where the padding goes, not how much of it there is.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum FieldAlign {
+    /// Flush left, all the padding trailing. The right choice when something sits to the
+    /// field's right to align against, which is how every landscape layout on this board is
+    /// built.
+    #[default]
+    Left,
+    /// Centred, the padding split either side.
+    ///
+    /// For a stacked layout — a narrow canvas, nothing beside the field — where a left-flush
+    /// short value inside a wide field reads as having drifted rather than as being aligned.
+    /// An odd remainder goes to the right, so a field's contents never shift by a pixel
+    /// between two values of the same length.
+    Centred,
+}
+
 /// Draw one baseline-top text line at `origin`, padded to `width` characters with an
 /// opaque black background so it overwrites its whole field in place.
 ///
-/// The opaque background is the whole mechanism by which a shorter new value's trailing
-/// spaces erase the leftover glyphs of a longer old one — so a redraw touches only its own
-/// field, with no full-screen clear and therefore no flash. `width` must be less than
-/// [`LINE_CAP`]; content that would exceed [`LINE_CAP`] is refused as
-/// [`RenderError::LineOverflow`] rather than silently truncated.
+/// Flush left; see [`text_field`] to place the value inside the field.
 pub fn text_line<D>(
     target: &mut D,
     origin: Point,
@@ -58,11 +74,64 @@ pub fn text_line<D>(
 where
     D: DrawTarget<Color = Rgb565>,
 {
+    text_field(target, origin, color, width, FieldAlign::Left, content)
+}
+
+/// Draw one baseline-top text line at `origin`, padded to `width` characters with an
+/// opaque black background so it overwrites its whole field in place, with the value
+/// placed inside that field by `align`.
+///
+/// The opaque background is the whole mechanism by which a shorter new value's padding
+/// erases the leftover glyphs of a longer old one — so a redraw touches only its own
+/// field, with no full-screen clear and therefore no flash. **That is why the padding is
+/// split rather than moved** for [`FieldAlign::Centred`]: the drawn string still spans the
+/// whole field, so a centred `DONE` erases every pixel a `LONG BREAK` had left behind. A
+/// centring that repositioned a shorter string would leave the ends of the longer one on the
+/// glass.
+///
+/// `width` must be less than [`LINE_CAP`]; content that would exceed [`LINE_CAP`] is refused
+/// as [`RenderError::LineOverflow`] rather than silently truncated.
+pub fn text_field<D>(
+    target: &mut D,
+    origin: Point,
+    color: Rgb565,
+    width: usize,
+    align: FieldAlign,
+    content: core::fmt::Arguments<'_>,
+) -> Result<(), RenderError<D::Error>>
+where
+    D: DrawTarget<Color = Rgb565>,
+{
     let mut line: Line = Line::new();
-    line.write_fmt(content)
-        .map_err(|_| RenderError::LineOverflow)?;
+    // Two paths rather than one, and the split is deliberate: the left-flush case formats
+    // STRAIGHT into the line buffer, exactly as this function did before centring existed.
+    //
+    // Measuring it is what forced the shape. A single path that formatted into a scratch
+    // buffer and then copied it in — needed only to learn the value's length before placing
+    // it — cost `host-monitor` 44 bytes, and `host-monitor` draws nothing but left-flush text
+    // and opts into no rotation at all. `align` is a constant at every call site that cares,
+    // so this match folds and the branch not taken is never generated. See the epic's
+    // no-penalty requirement in docs/plans/screen-rotation-handoff.md.
+    match align {
+        FieldAlign::Left => {
+            line.write_fmt(content)
+                .map_err(|_| RenderError::LineOverflow)?;
+        }
+        FieldAlign::Centred => {
+            let mut value: Line = Line::new();
+            value
+                .write_fmt(content)
+                .map_err(|_| RenderError::LineOverflow)?;
+            // Half the slack leads, and the remainder falls to the trailing pad below — so an
+            // odd gap widens the right side rather than shifting the value off the glyph grid.
+            let lead: usize = width.saturating_sub(value.len()) / 2;
+            // Each `push` only fails at LINE_CAP, which a sane `width` is well inside.
+            while line.len() < lead && line.push(' ').is_ok() {}
+            line.push_str(value.as_str())
+                .map_err(|_| RenderError::LineOverflow)?;
+        }
+    }
     // Pad to a fixed field so a shorter value fully erases the longer one it replaces.
-    // `push` only fails at LINE_CAP, which a sane `width` is well inside.
     while line.len() < width && line.push(' ').is_ok() {}
 
     let style: MonoTextStyle<'_, Rgb565> = MonoTextStyleBuilder::new()
@@ -98,4 +167,127 @@ where
         .draw(target)
         .map_err(RenderError::Draw)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::Framebuffer;
+
+    /// The field both alignments are measured in, wide enough that a short value leaves a
+    /// visible gap either side.
+    const WIDTH: usize = 10;
+
+    /// A single origin, so two renders differ only by what was asked of them.
+    const ORIGIN: Point = Point::new(0, 0);
+
+    fn painted(align: FieldAlign, value: &str) -> Framebuffer {
+        let mut fb: Framebuffer = Framebuffer::new();
+        text_field(
+            &mut fb,
+            ORIGIN,
+            Rgb565::WHITE,
+            WIDTH,
+            align,
+            format_args!("{value}"),
+        )
+        .expect("a framebuffer render cannot fail");
+        fb
+    }
+
+    /// The x of the leftmost lit pixel — where the value actually starts on the glass.
+    fn ink_starts_at(fb: &Framebuffer) -> u32 {
+        let width: u32 = fb.size().width;
+        (0..width)
+            .find(|x: &u32| (0..fb.size().height).any(|y: u32| fb.pixel(*x, y) != Rgb565::BLACK))
+            .expect("the value put ink on the glass")
+    }
+
+    /// Centring moves a short value in by exactly half its slack, in whole character cells.
+    ///
+    /// Measured as the *difference* between the two alignments rather than against the origin:
+    /// `FONT_10X20` gives its glyphs a left side bearing, so even a flush-left `D` starts a
+    /// pixel or so inside its cell. The gap between the two renders is free of that offset,
+    /// because both pay it.
+    #[test]
+    fn centring_moves_a_short_value_in_by_half_its_slack() {
+        let value: &str = "DONE";
+        let cells: u32 = (WIDTH - value.len()) as u32 / 2;
+        assert_eq!(cells, 3, "a four-character value in a ten-wide field");
+        assert_eq!(
+            ink_starts_at(&painted(FieldAlign::Centred, value))
+                - ink_starts_at(&painted(FieldAlign::Left, value)),
+            cells * FONT.character_size.width,
+            "centring should shift the value by whole cells, so it stays on the glyph grid"
+        );
+    }
+
+    /// A value that exactly fills its field is drawn identically either way — there is no
+    /// padding left to distribute, so the alignment cannot move it.
+    #[test]
+    fn a_value_that_fills_its_field_is_placed_identically_by_both() {
+        let full: &str = "LONG BREAK";
+        assert_eq!(full.len(), WIDTH);
+        assert_eq!(
+            painted(FieldAlign::Left, full).pixels(),
+            painted(FieldAlign::Centred, full).pixels()
+        );
+    }
+
+    /// **The reason the padding is split rather than moved.** A centred short value must
+    /// still erase every pixel of the longer value it replaces, so overpainting one with the
+    /// other leaves exactly the short value's own picture — no fragment of the long one
+    /// surviving at either end.
+    #[test]
+    fn a_centred_short_value_erases_the_longer_one_it_replaces() {
+        let mut fb: Framebuffer = Framebuffer::new();
+        let paint = |fb: &mut Framebuffer, value: &str| {
+            text_field(
+                fb,
+                ORIGIN,
+                Rgb565::WHITE,
+                WIDTH,
+                FieldAlign::Centred,
+                format_args!("{value}"),
+            )
+            .expect("a framebuffer render cannot fail");
+        };
+        paint(&mut fb, "LONG BREAK");
+        paint(&mut fb, "DONE");
+        assert_eq!(
+            fb.pixels(),
+            painted(FieldAlign::Centred, "DONE").pixels(),
+            "a fragment of the longer value survived the overpaint"
+        );
+    }
+
+    /// `text_line` is the left-flush case of `text_field` and nothing more — stated as a test
+    /// so the two cannot drift apart.
+    #[test]
+    fn text_line_is_the_left_flush_field() {
+        let mut fb: Framebuffer = Framebuffer::new();
+        text_line(&mut fb, ORIGIN, Rgb565::WHITE, WIDTH, format_args!("DONE"))
+            .expect("a framebuffer render cannot fail");
+        assert_eq!(fb.pixels(), painted(FieldAlign::Left, "DONE").pixels());
+    }
+
+    /// Content wider than the line buffer is refused rather than truncated, in both
+    /// alignments — a truncated reading on the glass looks like a real, smaller value.
+    #[test]
+    fn content_beyond_the_line_buffer_is_refused_not_truncated() {
+        let mut fb: Framebuffer = Framebuffer::new();
+        let too_long: &str = "0123456789ABCDEFGHIJ";
+        assert!(too_long.len() > LINE_CAP);
+        assert!(matches!(
+            text_field(
+                &mut fb,
+                ORIGIN,
+                Rgb565::WHITE,
+                WIDTH,
+                FieldAlign::Centred,
+                format_args!("{too_long}")
+            ),
+            Err(RenderError::LineOverflow)
+        ));
+    }
 }

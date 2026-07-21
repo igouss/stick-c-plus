@@ -25,6 +25,7 @@ mod scene;
 mod screen;
 mod view;
 
+pub use layout::canvas_size;
 pub use screen::{label_text, render};
 pub use view::PomodoroView;
 
