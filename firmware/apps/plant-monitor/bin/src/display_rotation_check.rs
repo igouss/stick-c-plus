@@ -29,16 +29,25 @@
 //!
 //! At each stop the frame names its rotation. Hold the board so that rotation *should* be
 //! upright — `DEG0` is the stick held horizontally with the USB-C port to the right, and each
-//! step is a further quarter turn — and check two things independently:
+//! step is a further quarter turn — then read two things, independently:
 //!
-//! - **The border.** Four complete edges, flush with the bezel, one tick in each corner.
-//!   Clipped on one side with a gap on the other means the CGRAM offset is wrong for that
-//!   orientation. A stripe of noise means the same, worse.
-//! - **The `UP` marker.** It should be at the top as you are holding the board.
+//! - **The white band, for alignment.** It runs flush to all four edges. Even thickness all the
+//!   way round means the CGRAM window is right for that orientation. Thinner on one side and
+//!   thicker opposite means the window is offset by the difference; a clipped corner square
+//!   means the same, larger; a stripe of noise along an edge means it is exposing controller
+//!   memory this frame never wrote.
+//! - **The corner colours, for which way up.** Correct is RED top-left, GREEN top-right, BLUE
+//!   bottom-right, YELLOW bottom-left. Naming the colour in the top-left corner is a complete
+//!   answer on its own, and does not require reading text that may be upside down.
 //!
-//! They fail independently and have different fixes, which is why the frame shows both. A
-//! perfect border with `UP` a quarter turn out is a rotation-mapping bug (`panel_rotation` in
-//! `platform-adapters`); a broken border is an offset bug.
+//! They fail independently and have different fixes, which is why the frame shows both. An even
+//! band with the colours turned is a rotation-mapping bug (`panel_rotation` in
+//! `platform-adapters`); a lopsided band is an offset bug.
+//!
+//! The band is thick and the corner squares are large on purpose. An earlier version drew a
+//! 1-pixel outline, which was correct and unreadable on a 1.14" panel behind a bezel — an
+//! instrument nobody can read cannot falsify anything, so it was rebuilt around judgements a
+//! person makes reliably: comparing two thicknesses, and naming a colour.
 
 use std::cell::RefCell;
 
@@ -102,10 +111,11 @@ fn main() {
     )
     .expect("ST7789 display bring-up");
 
-    info!("hold the board so each named rotation is upright, and check TWO things:");
-    info!("  1. the border: four complete edges flush with the bezel, a tick in each corner");
-    info!("  2. the UP marker: at the top, as you are holding it");
-    info!("a broken border is a CGRAM offset bug; a good border with UP turned is a mapping bug");
+    info!("hold the board so each named rotation is upright, and read TWO things:");
+    info!("  1. the white band: same thickness all the way round? (lopsided = offset bug)");
+    info!("  2. the corners: RED top-left, GREEN top-right, BLUE bottom-right, YELLOW");
+    info!("     bottom-left? (turned = mapping bug in panel_rotation)");
+    info!("naming the colour in the TOP-LEFT corner is a complete answer on its own");
 
     loop {
         STOPS
