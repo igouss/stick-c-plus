@@ -12,6 +12,7 @@ members = [
     # portable ESPHome native-API crates every network app reuses).
     "platform/platform-core",
     "platform/platform-audio",
+    "platform/platform-input",
     "platform/platform-bench",
     "platform/platform-display",
     "platform/platform-runtime",

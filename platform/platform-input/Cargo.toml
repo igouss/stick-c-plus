@@ -1,0 +1,35 @@
+[package]
+name = "platform-input"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The M5StickC Plus's buttons as one pure event source: the levelled front/side GPIO ports, the latched AXP192 power-button port, and the pure recognizer that turns a bouncing level into a click, double-click or long hold. Framework-free and host-tested."
+
+[lib]
+name = "platform_input"
+path = "src/lib.rs"
+
+# Pure input domain: the two driven-side button ports and the gesture recognizer that folds
+# their readings into events. No I/O, no framework, no clock of its own — every rule is a pure
+# function of (reading, now), so it is verified on the host and named by any context.
+# context = "shared": the one context any crate may depend on.
+[package.metadata.hex-arch]
+role = "domain"
+context = "shared"
+
+[dependencies]
+# Tick — the millisecond time base every gesture window is measured against. The one shared
+# value type; no ports or logic are taken from it.
+platform-core = { path = "../platform-core" }
+
+# Host-only. These link std and never reach the Xtensa build (a dependent excludes them).
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin gesture suite needs its own harness; unit + property tests run under the default
+# harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false
