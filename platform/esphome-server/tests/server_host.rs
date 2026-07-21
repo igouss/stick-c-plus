@@ -265,12 +265,32 @@ fn serves_a_thousand_cycles_without_leaking() {
     server.stop();
 }
 
-/// One connect/handshake/disconnect against the running server.
+/// One connect/handshake/disconnect against the running server, completed before it returns.
+///
+/// The wait at the end is not politeness, it is the difference between this test measuring fd
+/// reclamation and it measuring a race. Closing the socket only *starts* the server's teardown:
+/// its connection thread has to observe EOF and drop the slot guard, and until it does the slot
+/// is still counted. A loop that reconnects immediately can therefore find the cap already full
+/// and be rejected — the server closing the connection exactly as
+/// [`serves_up_to_the_cap_and_rejects_beyond_it`] asks it to — and the next read fails with a
+/// FIN or an RST, depending on how the write raced the close. That was an intermittent failure
+/// under load, at around iteration 600 of 1000.
+///
+/// So each cycle waits for its own slot back. It also makes the assertion stronger: the slot is
+/// now shown to be reclaimed on every one of the thousand cycles, not merely by the end.
 #[cfg(target_os = "linux")]
 fn one_cycle(server: &RunningServer) {
     let mut client: Client = Client::connect(server.addr).expect("connect");
     assert_eq!(client.handshake_hello(), "plantmon");
     // Drop closes the socket; the server observes EOF and frees the slot.
+    drop(client);
+    assert!(
+        wait_until(Duration::from_secs(2), || server
+            .handle
+            .active_connections()
+            == 0),
+        "the cycle's slot must be reclaimed before the next cycle connects"
+    );
 }
 
 /// Open file descriptors of this process, via `/proc/self/fd`.

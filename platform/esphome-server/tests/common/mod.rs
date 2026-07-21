@@ -277,14 +277,32 @@ pub fn sensor_value(frame: &Frame) -> f32 {
         .state
 }
 
+/// The first gap between polls in [`wait_until`] — short enough that a condition which is
+/// already almost true costs a fraction of a millisecond rather than a whole tick.
+const FIRST_POLL_GAP: Duration = Duration::from_micros(100);
+
+/// The longest gap [`wait_until`] backs off to, so a condition that will not hold for seconds
+/// is not polled tens of thousands of times while it waits.
+const LONGEST_POLL_GAP: Duration = Duration::from_millis(10);
+
 /// Poll `cond` until it holds or `timeout` elapses; returns whether it held.
+///
+/// The gap between polls starts at [`FIRST_POLL_GAP`] and doubles to [`LONGEST_POLL_GAP`],
+/// because the waits here are of two quite different kinds and a single interval serves one
+/// badly. Most are for something that has *just* been set in motion on another thread and lands
+/// in microseconds — a slot guard dropping, a socket closing. A flat 10 ms tick rounds every one
+/// of those up to 10 ms, which is invisible in a test that waits once and cost ten seconds in
+/// the one that waits a thousand times. The backoff keeps the cheap case cheap without spinning
+/// on the genuinely slow ones, which reach the same 10 ms within a millisecond of waiting.
 pub fn wait_until(timeout: Duration, mut cond: impl FnMut() -> bool) -> bool {
     let start: Instant = Instant::now();
+    let mut gap: Duration = FIRST_POLL_GAP;
     while start.elapsed() < timeout {
         if cond() {
             return true;
         }
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(gap);
+        gap = (gap * 2).min(LONGEST_POLL_GAP);
     }
     cond()
 }
