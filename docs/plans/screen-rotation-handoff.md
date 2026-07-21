@@ -4,10 +4,10 @@
 **Plan:** `docs/plans/screen-rotation-platform-capability.md` — the inventory the plan was
 written against, the architectural decision, and the hazards. Read it after this file.
 
-Four of nine beads are settled: **ce1.1, ce1.2, ce1.3 done; ce1.8 dropped.** Five remain.
-This file is the context around them that is not in the tracker.
+Five of nine beads are settled: **ce1.1, ce1.2, ce1.3, ce1.4 done; ce1.8 dropped.** Four
+remain. This file is the context around them that is not in the tracker.
 
-Last updated 2026-07-21, after ce1.2 landed and the user narrowed the scope.
+Last updated 2026-07-21, after ce1.4 was confirmed on the glass.
 
 ---
 
@@ -119,6 +119,22 @@ Verified, not assumed. Do not re-derive any of it.
     saved are I2C transactions that would otherwise contend.
   - **They are two halves on purpose.** The sensor *moves* into whichever thread takes it, so
     an app that already runs a sampler cannot also `spawn_rotation` — see ce1.5 below.
+- **The panel turns at runtime.** `Panel::set_rotation` writes MADCTL and mipidsi recomputes
+  the window; `PanelScreen` applies it *before* each render, because turning changes the shape
+  of the draw target. **Confirmed on the glass at all four rotations** (2026-07-21): window
+  aligned, `RED` corner top-left beside `UP` at every stop. `panel_rotation`'s +90° phase is
+  measured, not derived — the two scales share a step but not an origin, and one turns the
+  image while the other turns the memory scan.
+- **Rotation is opted into by TYPE, not by a flag.** `PanelScreen::new` → `Fixed`, the panel
+  never turns and the binary links none of the machinery. `PanelScreen::turning` → `Turning`,
+  it follows. This exists because an unconditional `set_rotation` on the render path cost
+  `host-monitor` **744 bytes** for a branch it can never take; `Fixed::apply` is an empty
+  function on a zero-sized type, so nothing is generated. All four apps are still `Fixed`.
+- **`just run-bin display-rotation-check`** is the on-glass instrument: a thick band flush to
+  every edge (lopsided ⇒ offset bug) and four coloured corner squares (turned ⇒ mapping bug).
+  It reads the two faults independently because they have different fixes. Built twice — a
+  1-px border proved unreadable on the real panel, and a fill-then-cover frame flashed white
+  on every redraw, imitating the very artefact it exists to expose.
 - **`orientation-display` has a finished portrait layout** — `Layout` value, `LANDSCAPE` and
   `PORTRAIT` consts, invariants in a `const fn` that fails the *build*. It renders in
   `just screens` (14 screens, all four quadrants). **It has never been seen on glass.**
@@ -130,21 +146,7 @@ Verified, not assumed. Do not re-derive any of it.
 **Nothing rotates on the device.** The device draws `Deg0` always, because the panel is never
 told to scan differently (ce1.4) and no binary spawns the rotation source (ce1.5, ce1.9).
 
-### ce1.4 — turn the panel *(next; needs the board)*
-
-`firmware/platform/adapters/src/panel.rs` bakes the rotation in at construction:
-
-- `panel.rs:186` — `.orientation(Orientation::new().rotate(Rotation::Deg90))`, a compile-time
-  literal.
-- `panel.rs:68,70` — `OFFSET_X = 52`, `OFFSET_Y = 40`, one pair, applied at `:185` via
-  `.display_offset(...)`.
-- There is **no `set_orientation` call anywhere in the crate.**
-
-Add the runtime path, and the CGRAM offsets that belong to each orientation. Then prove it on
-glass — `Panel::colour_check` (`panel.rs:221`) is the model to follow: a falsifiable on-glass
-test, not a host assertion. ce1.4 deserves its equivalent.
-
-### ce1.5 — the orientation readout turns, end to end
+### ce1.5 — the orientation readout turns, end to end *(next; needs the board)*
 
 The first app to actually rotate; proves ce1.1–ce1.4 together. Everything it needs will exist.
 **If it turns out to need new domain logic, something above it was under-built** — stop and
@@ -208,10 +210,15 @@ nm -C firmware/target/xtensa-esp32-espidf/release/host-monitor | grep -ic "rotat
 
 ## The hazards, which are real and were paid for
 
-- **The CGRAM offsets are orientation-dependent and no recomputation exists.** 52/40 is the
-  native-portrait window. It is *not* valid at another rotation. A wrong offset shows as a
-  picture shifted by dozens of pixels, or a stripe of stale CGRAM down one edge. **No host test
-  can see any of this** — the framebuffer sits below the panel. Only eyes on the glass.
+- **~~The CGRAM offsets are orientation-dependent and no recomputation exists.~~ Wrong, and
+  disproved at ce1.4.** mipidsi 0.10 *does* recompute: `set_address_window` derives every
+  orientation's window from the native-portrait offset pair, the display size and the model's
+  framebuffer size, and `display_size()` swaps the canvas to match. **Do not write a
+  per-rotation offset table** — none is needed, and one would double-count. The live hazard is
+  the opposite of what was written: `display_offset` **must stay 52/40 native-portrait**,
+  because it is the *input* to that derivation, not the current orientation's answer. Bake a
+  rotated offset in and it compounds — perfect at one rotation, tens of pixels out at the other
+  three. See `kb/findings/mipidsi-derives-the-cgram-window-per-orientation.md`.
 - **MADCTL is not portable, by precedent.** Read
   `kb/experiments/2026-07-09-panel-colour-order/README.md` before ce1.4. The factory driver and
   `mipidsi` set the *same* MADCTL bit and the glass still rendered red as blue, because the
