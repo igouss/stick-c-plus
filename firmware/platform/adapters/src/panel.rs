@@ -70,9 +70,19 @@ const OFFSET_X: u16 = 52;
 const OFFSET_Y: u16 = 40;
 /// The display SPI clock — the factory `SPI_FREQUENCY`.
 const SPI_HZ: u32 = 27_000_000;
-/// The pixel-batch buffer `mipidsi`'s SPI interface gathers writes into. Larger is
-/// faster; a few hundred bytes is ample for text and a full-screen clear.
-const BUFFER_LEN: usize = 512;
+/// The pixel-batch buffer `mipidsi`'s SPI interface gathers writes into.
+///
+/// Every batch costs a bus transaction, so this sets how many of them a frame pays for:
+/// `pixels * 2 / BUFFER_LEN`, rounded up per drawn primitive. 512 bytes (256 pixels) was
+/// ample for the two text rows and a sprite the timer and the plant monitor paint, but the
+/// orientation readout paints roughly 13 700 pixels a frame — three bars, five text fields —
+/// and at 256 pixels a batch that measured **31 ms**, which overran its tick budget and left
+/// the render thread no room to yield.
+///
+/// 4 KiB (2048 pixels) cuts that to a handful of transactions per frame. It costs 3.5 KiB
+/// more of the ESP32's 520 KiB SRAM, statically, once — a cheap trade for a frame time that
+/// leaves the scheduler headroom, and every app on the platform gets it.
+const BUFFER_LEN: usize = 4096;
 
 /// The pixel-batch buffer mipidsi's SPI interface borrows for the program's life.
 /// A `StaticCell` gives it a truly `static` home — no allocator, no leaked `Box` —

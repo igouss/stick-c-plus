@@ -60,13 +60,23 @@ pub const RENDER_PERIOD: Duration = Duration::from_secs(1);
 /// same frame due touches no pixels and no SPI bus.
 pub const ANIMATION_PERIOD: Duration = Duration::from_millis(50);
 
-/// The shortest sleep the loop will ever take.
+/// The shortest sleep the loop will ever take — **one FreeRTOS tick**.
 ///
 /// A paint that outran its tick budget would otherwise sleep for zero and the thread would
 /// never yield — starving lower-priority FreeRTOS tasks on a single core. That happened for
 /// real: before the sprite fill was made contiguous, a paint took 85 ms against a 50 ms
 /// budget. The loop survived on luck, and luck is not a scheduling policy.
-pub const MIN_YIELD: Duration = Duration::from_millis(1);
+///
+/// One *tick*, not one millisecond. ESP-IDF here runs at `CONFIG_FREERTOS_HZ = 100`, so a
+/// tick is 10 ms — and a sleep shorter than a tick cannot yield at all. It falls through to a
+/// busy wait, which is worse than not sleeping, because it burns the core while looking in
+/// the source like a pause. A 1 ms floor was therefore no floor at all.
+///
+/// Found on the metal, not on the host: the orientation readout's first flash asked for a
+/// 20 ms cadence against a 31 ms paint, took this floor on every frame, and starved the idle
+/// task on core 1 until the task watchdog fired continuously. A host `cargo test` cannot see
+/// this — `std::thread::sleep` on Linux yields at any duration.
+pub const MIN_YIELD: Duration = Duration::from_millis(10);
 
 /// The display thread's stack, in bytes.
 ///
