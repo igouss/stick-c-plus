@@ -6,7 +6,7 @@ scope: project:stick-c-plus
 derived-from: [2026-07-08-probe-rail-gating]
 supersedes: []
 reviewed: 2026-07-08
-check: grep -q 'pub fn unsaturated' firmware-core/src/saturation.rs && grep -q 'ReadError::Saturated' firmware/adapters/src/adc.rs
+check: grep -q 'pub fn unsaturated' platform/firmware-core/src/saturation.rs && grep -q 'ReadError::Saturated' firmware/apps/plant-monitor/adapters/src/adc.rs
 ---
 
 **Claim:** An ADC count sitting on either rail carries **no information** — every

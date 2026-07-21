@@ -6,7 +6,7 @@ scope: board:m5stickc-plus
 derived-from: [2026-07-09-panel-colour-order]
 supersedes: []
 reviewed: 2026-07-09
-check: grep -q 'ColorOrder::Rgb' firmware/adapters/src/st7789.rs && grep -q 'fn colour_check' firmware/adapters/src/st7789.rs
+check: grep -q 'ColorOrder::Rgb' firmware/platform/adapters/src/panel.rs && grep -q 'fn colour_check' firmware/platform/adapters/src/panel.rs
 ---
 
 **Claim:** Driving the M5StickC Plus's ST7789V2 through `mipidsi` requires

@@ -6,7 +6,7 @@ scope: board:m5stickc-plus
 derived-from: [2026-07-08-probe-rail-gating]
 supersedes: []
 reviewed: 2026-07-08
-check: grep -q 'const EXTEN: u8 = 0x40' firmware/board-support/src/axp192.rs && grep -Fq 'rail=off t=+ 500ms raw=0' kb/experiments/2026-07-08-probe-rail-gating/rail-sweep.log
+check: grep -q 'const EXTEN: u8 = 0x40' firmware/platform/board-support/src/axp192.rs && grep -Fq 'rail=off t=+ 500ms raw=0' kb/experiments/2026-07-08-probe-rail-gating/rail-sweep.log
 ---
 
 **Claim:** Clearing **bit 6 (EXTEN)** of AXP192 register `0x12` removes power from

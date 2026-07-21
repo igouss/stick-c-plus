@@ -6,7 +6,7 @@ scope: board:m5stickc-plus
 derived-from: [2026-07-09-sprite-fill-throughput]
 supersedes: []
 reviewed: 2026-07-09
-check: grep -q '\.fill_contiguous(&area' plant-display/src/sprite/render.rs && grep -q 'over the .* tick budget' plant-shell/src/display.rs
+check: grep -q '\.fill_contiguous(&area' platform/platform-display/src/sprite/render.rs && grep -q 'over the .* tick budget' platform/platform-runtime/src/display.rs
 ---
 
 **Claim:** Painting a region of the M5StickC Plus ST7789V2 as **many small

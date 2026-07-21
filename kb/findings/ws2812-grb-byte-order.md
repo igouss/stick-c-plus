@@ -6,7 +6,7 @@ scope: project:stick-c-plus
 derived-from: []
 supersedes: []
 reviewed: 2026-07-04
-check: grep -Eq 'pub r: u8' domain/src/color.rs   # domain stays RGB; the single wire swap lands in the WS2812 adapter under qqh.1
+check: grep -Eq 'pub r: u8' apps/led-driver/led-core/src/color.rs   # domain stays RGB; the single wire swap lands in the WS2812 adapter under qqh.1
 ---
 
 **Claim:** A WS2812 latches its 24 bits as **green, then red, then blue** — not
