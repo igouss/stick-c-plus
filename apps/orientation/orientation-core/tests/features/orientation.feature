@@ -121,33 +121,11 @@ Feature: The board reads its own orientation from gravity
     And the accelerometer reads 0, 0, 1000 milli-g
     Then the readout is live
 
-  # Which way up the PICTURE is drawn, so the readout can be read in any position. A different
-  # question from which face the board rests on: a board lying flat rests on a nameable face
-  # and has no readable rotation at all. Rotation 0 is the panel's native landscape, which is
-  # legible with the stick held horizontally, USB-C to the right.
-
-  Scenario: The readout starts in the panel's native landscape
-    Then the picture is drawn at 0 degrees
-
-  Scenario: Holding the stick in its natural reading position asks for no rotation
-    When the accelerometer reads 0, -1000, 0 milli-g
-    And 250 milliseconds pass
-    Then the picture is drawn at 0 degrees
-
-  Scenario: Standing the stick on its USB port turns the picture to stay readable
-    When the accelerometer reads 1000, 0, 0 milli-g
-    And 250 milliseconds pass
-    Then the picture is drawn at 270 degrees
-
-  Scenario: Turning the stick the other way turns the picture the other way
-    When the accelerometer reads -1000, 0, 0 milli-g
-    And 250 milliseconds pass
-    Then the picture is drawn at 90 degrees
-
-  Scenario: A new position is not obeyed until it has been held
-    When the accelerometer reads 1000, 0, 0 milli-g
-    And 100 milliseconds pass
-    Then the picture is drawn at 0 degrees
+  # Where the two questions meet. Which quarter turn the picture is drawn at is the board's
+  # question and its rules live in platform-core (tests/features/rotation.feature); what the
+  # two scenarios below add is that naming a FACE and choosing a TURN are independent — a
+  # board can have a perfectly good face and no readable rotation, and vice versa. That
+  # independence is a claim about this app, so it is asserted here.
 
   Scenario: A board lying flat keeps the rotation it was last read at
     When the accelerometer reads 1000, 0, 0 milli-g
@@ -162,8 +140,3 @@ Feature: The board reads its own orientation from gravity
     And 5000 milliseconds pass
     Then the facing is Moving
     And the picture is drawn at 0 degrees
-
-  Scenario: A board resting on a corner keeps its rotation rather than flipping about
-    When the accelerometer reads 707, 707, 0 milli-g
-    And 5000 milliseconds pass
-    Then the picture is drawn at 0 degrees

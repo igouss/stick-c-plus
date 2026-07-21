@@ -198,8 +198,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orientation_core::{Orientation, Reading, ScreenRotation, SIGNAL_TIMEOUT_MS};
-    use platform_core::{Acceleration, ONE_G_MG};
+    use orientation_core::{Orientation, Reading, SIGNAL_TIMEOUT_MS};
+    use platform_core::{Acceleration, ScreenRotation, ONE_G_MG};
     use platform_display::testing::Framebuffer;
 
     /// A live view of the board reading these axes.

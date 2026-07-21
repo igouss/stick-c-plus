@@ -1,7 +1,7 @@
 //! `OrientationView` — a snapshot of the board's pose as an [`Animated`] view the loop shows.
 
-use orientation_core::{Facing, Reading, ScreenRotation, Signal};
-use platform_core::{Acceleration, Animated, Tick};
+use orientation_core::{Facing, Reading, Signal};
+use platform_core::{Acceleration, Animated, ScreenRotation, Tick};
 
 /// What the orientation glass shows at one instant.
 ///

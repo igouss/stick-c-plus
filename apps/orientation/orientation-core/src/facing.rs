@@ -1,6 +1,6 @@
 //! Which way the board is resting — the coarse, nameable answer to "where is up?".
 
-use platform_core::{Acceleration, ONE_G_MG};
+use platform_core::{is_at_rest, Acceleration};
 
 /// How much of a gravity the dominant axis must carry before a face is named.
 ///
@@ -11,13 +11,11 @@ use platform_core::{Acceleration, ONE_G_MG};
 /// board really is lying on it, and anything in between reads [`Facing::Tilted`] instead.
 pub const FACE_THRESHOLD_MG: i32 = 800;
 
-/// How far the vector's magnitude may stray from `1 g` and still be read as gravity alone.
-///
-/// An accelerometer measures *proper* acceleration, so a board being moved reports gravity
-/// plus whatever the hand is doing. When the total is far from `1 g` the vector is not
-/// pointing at the earth and no face it implies is trustworthy — that reads
-/// [`Facing::Moving`], which is a different fact from "resting between two faces".
-pub const REST_TOLERANCE_MG: i32 = 250;
+// Whether a vector is gravity alone is [`is_at_rest`](platform_core::is_at_rest), in the
+// shared kernel: it is a fact about an accelerometer reading rather than about this app's
+// vocabulary of poses. What *this* crate adds is the consequence — a vector that is not
+// gravity reads [`Facing::Moving`], which is a different fact from "resting between two
+// faces".
 
 /// The board's resting pose, as the gravity vector names it.
 ///
@@ -99,17 +97,6 @@ impl Facing {
     }
 }
 
-/// Whether `acceleration`'s magnitude is close enough to `1 g` to be gravity alone.
-///
-/// Compared as squares so the check needs no square root — the same discipline
-/// [`magnitude_squared_mg2`](platform_core::Acceleration::magnitude_squared_mg2) is built for.
-pub(crate) fn is_at_rest(acceleration: Acceleration) -> bool {
-    let low: i64 = i64::from(ONE_G_MG - REST_TOLERANCE_MG);
-    let high: i64 = i64::from(ONE_G_MG + REST_TOLERANCE_MG);
-    let magnitude_squared: i64 = acceleration.magnitude_squared_mg2();
-    magnitude_squared >= low * low && magnitude_squared <= high * high
-}
-
 /// The pose `acceleration` implies.
 ///
 /// Reports [`Facing::Moving`] when the vector is not gravity, [`Facing::Tilted`] when it is
@@ -155,6 +142,7 @@ pub fn facing_of(acceleration: Acceleration) -> Facing {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use platform_core::ONE_G_MG;
 
     /// A clean one-gravity reading down the named axis.
     fn resting(x_mg: i32, y_mg: i32, z_mg: i32) -> Acceleration {

@@ -23,7 +23,16 @@
 //!   any) a transition plays.
 //! - [`Imu`] — a three-axis accelerometer reporting an [`Acceleration`] in milli-g. The
 //!   adapter only reads the registers; what a vector *means* — which way is up, how steeply
-//!   the board is tilted — is decided inward by an app's own domain.
+//!   the board is tilted — is decided inward by an app's own domain. [`is_at_rest`] is the
+//!   one reading of a vector that is *not* an app's business: whether it is gravity alone,
+//!   which is the precondition of every other question.
+//!
+//! ## Which way up the glass is
+//! - [`ScreenRotation`] — the quarter turn the picture is drawn at, with [`rotation_for`]
+//!   deciding it from a gravity vector and [`RotationSettler`] holding it steady so the
+//!   picture does not spin while the board is being turned. This lives in the kernel rather
+//!   than in an app because every app draws on the same glass, which turns the same way for
+//!   all of them; naming the *face* the board rests on stays an app's own business.
 //!
 //! ## The animation contract
 //! - [`Animated`] — an app state that knows its own animation policy: a coarse
@@ -40,6 +49,7 @@ mod imu;
 mod input;
 mod power;
 mod power_debounce;
+mod rotation;
 mod screen;
 mod sound;
 mod tick;
@@ -48,10 +58,14 @@ pub use animated::Animated;
 pub use audio::AudioIn;
 pub use chime::{edge, PowerChime};
 pub use clock::Clock;
-pub use imu::{Acceleration, Imu, ONE_G_MG};
+pub use imu::{is_at_rest, Acceleration, Imu, ONE_G_MG, REST_TOLERANCE_MG};
 pub use input::{Button, ButtonEvent, Debounce, TapCadence, DEBOUNCE_MS, DOUBLE_TAP_MS, HOLD_MS};
 pub use power::PowerSource;
 pub use power_debounce::{PowerDebounce, POWER_DEBOUNCE_MS};
+pub use rotation::{
+    rotation_for, RotationSettler, ScreenRotation, IN_PLANE_MINIMUM_MG, QUADRANT_MARGIN_MG,
+    ROTATION_SETTLE_MS,
+};
 pub use screen::Screen;
 pub use sound::{Note, Tone};
 pub use tick::Tick;

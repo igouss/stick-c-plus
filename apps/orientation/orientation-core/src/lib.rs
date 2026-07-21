@@ -21,13 +21,15 @@
 //! - **Entities / policy**: [`Signal`] — whether a reading is fresh enough to still be true,
 //!   and [`Reading`], the pose paired with that verdict. Liveness is decided from an age in
 //!   milliseconds handed in, never from a clock read here.
-//! - **Entities / policy**: [`ScreenRotation`] and [`RotationSettler`] — which quarter turn
-//!   puts the picture's top toward the sky, and the settling that keeps it from spinning while
-//!   the board is being turned. A different question from [`Facing`]: a board lying flat rests
-//!   on a nameable face and has no readable rotation at all.
 //!
 //! The [`Imu`](platform_core::Imu) port itself lives in the shared kernel beside every other
 //! driven port; this crate only decides what its readings *mean*.
+//!
+//! Which quarter turn the *picture* is drawn at is not here either — see
+//! [`ScreenRotation`](platform_core::ScreenRotation). Every app draws on the same glass and
+//! it turns the same way for all of them, so that question belongs to the board rather than
+//! to this app. Naming the face the board rests on is what stays: a board lying flat has a
+//! perfectly good [`Facing`] and no readable rotation at all.
 //!
 //! ## What an accelerometer cannot tell you
 //!
@@ -41,16 +43,11 @@
 mod attitude;
 mod facing;
 mod orientation;
-mod rotation;
 mod signal;
 mod smooth;
 
 pub use attitude::{attitude_of, Attitude, RIGHT_ANGLE_DEG, STRAIGHT_ANGLE_DEG};
-pub use facing::{facing_of, Facing, FACE_THRESHOLD_MG, REST_TOLERANCE_MG};
+pub use facing::{facing_of, Facing, FACE_THRESHOLD_MG};
 pub use orientation::Orientation;
-pub use rotation::{
-    rotation_for, RotationSettler, ScreenRotation, IN_PLANE_MINIMUM_MG, QUADRANT_MARGIN_MG,
-    ROTATION_SETTLE_MS,
-};
 pub use signal::{Reading, Signal, SIGNAL_TIMEOUT_MS};
 pub use smooth::{Smoother, RESPONSIVE_WEIGHT};

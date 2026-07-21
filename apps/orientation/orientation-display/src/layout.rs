@@ -20,7 +20,7 @@
 
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::Rectangle;
-use orientation_core::ScreenRotation;
+use platform_core::ScreenRotation;
 use platform_display::{FONT, SCREEN_SIZE};
 
 /// How many axis rows there are — one per axis, in either shape.

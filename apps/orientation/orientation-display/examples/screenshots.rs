@@ -18,9 +18,9 @@ use std::path::{Path, PathBuf};
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::Size;
 use embedded_graphics_simulator::{OutputSettings, OutputSettingsBuilder, SimulatorDisplay};
-use orientation_core::{Orientation, Reading, ScreenRotation, SIGNAL_TIMEOUT_MS};
+use orientation_core::{Orientation, Reading, SIGNAL_TIMEOUT_MS};
 use orientation_display::{canvas_size, OrientationView, SCREEN_SIZE};
-use platform_core::{Acceleration, Tick, ONE_G_MG};
+use platform_core::{Acceleration, ScreenRotation, Tick, ONE_G_MG};
 
 /// Where the PNGs land. Under `target/`, so they are build output and git-ignored.
 const OUT_DIR: &str = "target/screens";

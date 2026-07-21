@@ -62,6 +62,29 @@ impl Acceleration {
     }
 }
 
+/// How far the vector's magnitude may stray from `1 g` and still be read as gravity alone.
+///
+/// An accelerometer measures *proper* acceleration, so a board being moved reports gravity
+/// plus whatever the hand is doing. When the total is far from `1 g` the vector is not
+/// pointing at the earth, and nothing it implies about which way up the board is can be
+/// trusted.
+pub const REST_TOLERANCE_MG: i32 = 250;
+
+/// Whether `acceleration`'s magnitude is close enough to `1 g` to be gravity alone.
+///
+/// The precondition of every question asked of a gravity vector — which face is down, which
+/// quarter turn is up — so it sits beside [`Acceleration`] rather than inside whichever
+/// caller happened to need it first.
+///
+/// Compared as squares so the check needs no square root — the same discipline
+/// [`magnitude_squared_mg2`](Acceleration::magnitude_squared_mg2) is built for.
+pub fn is_at_rest(acceleration: Acceleration) -> bool {
+    let low: i64 = i64::from(ONE_G_MG - REST_TOLERANCE_MG);
+    let high: i64 = i64::from(ONE_G_MG + REST_TOLERANCE_MG);
+    let magnitude_squared: i64 = acceleration.magnitude_squared_mg2();
+    magnitude_squared >= low * low && magnitude_squared <= high * high
+}
+
 /// A three-axis accelerometer.
 ///
 /// The driven port for "which way is the board being pulled?" — sibling to

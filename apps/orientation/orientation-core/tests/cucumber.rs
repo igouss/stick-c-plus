@@ -4,10 +4,8 @@
 //! to the code.
 
 use cucumber::{given, then, when, World};
-use orientation_core::{
-    Facing, Orientation, Reading, RotationSettler, ScreenRotation, Signal, Smoother,
-};
-use platform_core::{Acceleration, Tick};
+use orientation_core::{Facing, Orientation, Reading, Signal, Smoother};
+use platform_core::{Acceleration, RotationSettler, ScreenRotation, Tick};
 
 /// The scenario's latest orientation, the smoother it was read through (if any), and how long
 /// ago the sensor last answered.

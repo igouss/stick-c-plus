@@ -19,5 +19,15 @@ context = "shared"
 
 # Zero dependencies, like every domain core here — pure logic, host-testable, and it
 # cross-compiles to xtensa unchanged.
+#
+# Host-only. These link std and never reach the Xtensa build (a dependent excludes them).
 [dev-dependencies]
 proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run under the
+# default harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false

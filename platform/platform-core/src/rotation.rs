@@ -1,13 +1,16 @@
 //! Which way is up *on the glass* — so the readout can be read whichever way the board is held.
 //!
-//! [`Facing`](crate::Facing) answers which face the board is resting on. This answers a
-//! narrower question with a different shape: of the four quarter turns the picture could be
-//! drawn at, which one puts its top toward the sky. The two are not the same question — a
-//! board lying flat has a perfectly good [`Facing`] and no readable rotation at all.
+//! Of the four quarter turns the picture could be drawn at, which one puts its top toward the
+//! sky. A narrow question, and a different one from which face the board is resting on: a
+//! board lying flat rests on a perfectly nameable face and has no readable rotation at all.
+//! Naming the face is an app's business (`orientation-core` does it); the quarter turn is the
+//! *board's*, because every app's glass is the same glass and turns the same way.
+//!
+//! Lives here rather than in an app so that all four apps can be drawn the right way up
+//! without depending on one another — which the context boundary would refuse anyway.
 
-use platform_core::{Acceleration, Tick};
-
-use crate::facing::is_at_rest;
+use crate::imu::is_at_rest;
+use crate::{Acceleration, Tick};
 
 /// How much gravity must lie *in the screen's plane* before a quadrant can be read from it.
 ///
@@ -235,7 +238,7 @@ impl RotationSettler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use platform_core::ONE_G_MG;
+    use crate::ONE_G_MG;
 
     /// A board held with its stick-top at the sky, standing on the USB-C port.
     const UPRIGHT: Acceleration = Acceleration::new(ONE_G_MG, 0, 0);

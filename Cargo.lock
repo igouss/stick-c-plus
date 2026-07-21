@@ -1012,7 +1012,9 @@ dependencies = [
 name = "platform-core"
 version = "0.1.0"
 dependencies = [
+ "cucumber",
  "proptest",
+ "tokio",
 ]
 
 [[package]]
