@@ -887,6 +887,37 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "orientation-core"
+version = "0.1.0"
+dependencies = [
+ "cucumber",
+ "libm",
+ "platform-core",
+ "proptest",
+ "tokio",
+]
+
+[[package]]
+name = "orientation-display"
+version = "0.1.0"
+dependencies = [
+ "embedded-graphics",
+ "embedded-graphics-simulator",
+ "orientation-core",
+ "platform-core",
+ "platform-display",
+]
+
+[[package]]
+name = "orientation-shell"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "orientation-core",
+ "platform-core",
+]
+
+[[package]]
 name = "peg"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

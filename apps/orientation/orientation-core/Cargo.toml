@@ -1,0 +1,40 @@
+[package]
+name = "orientation-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Framework-free orientation domain for the M5StickC Plus: the tilt angles and the resting face an accelerometer's gravity vector implies, plus the pure smoother that keeps a fast readout steady — no_std, host-tested, driven by an injected Acceleration."
+
+[lib]
+name = "orientation_core"
+path = "src/lib.rs"
+
+# The pure heart of the orientation app: the value objects and the transform that turns a
+# raw acceleration into an attitude, no framework and no I/O. context = "orientation" scopes
+# it to its own bounded context; it depends only on the shared kernel (platform-core,
+# context = "shared").
+[package.metadata.hex-arch]
+role = "domain"
+context = "orientation"
+
+[dependencies]
+# The shared kernel: the Acceleration the Imu port yields and the ONE_G_MG scale it is
+# measured in. no_std, zero-dep.
+platform-core = { path = "../../../platform/platform-core" }
+# `atan2`/`sqrt` in no_std. A tilt angle is a genuine arctangent — the integer trick the
+# sparkline uses for bar heights has no honest analogue here, and an approximation would be
+# a lie told to a degree readout. libm is pure computation: no allocator, no I/O, nothing
+# that could make this crate impure.
+libm = "0.2"
+
+# Host-only. These link std and never reach the Xtensa build (a dependent excludes them).
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run under the
+# default harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false

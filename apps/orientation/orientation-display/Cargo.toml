@@ -1,0 +1,39 @@
+[package]
+name = "orientation-display"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Device-independent pixel layout of the orientation readout: the three signed X/Y/Z axis bars, their milli-g values, the pitch and roll, and the resting-face label — rendered into any embedded-graphics DrawTarget, so the same code drives the ST7789 panel and a host framebuffer."
+
+[lib]
+name = "orientation_display"
+path = "src/lib.rs"
+
+# The seam between the orientation domain and the graphics port: it turns an
+# OrientationView (built from an Orientation) into pixels through the board-generic
+# platform-display primitives. port-and-adapter may depend on domain (orientation-core,
+# platform-core) and other port-and-adapter crates (platform-display).
+# context = "orientation".
+[package.metadata.hex-arch]
+role = "port-and-adapter"
+context = "orientation"
+
+[dependencies]
+# The orientation domain: the Orientation the view snapshots, and the Facing whose label
+# and colour the screen shows.
+orientation-core = { path = "../orientation-core" }
+# The board-generic kernel: the Animated contract the view implements, Tick, and the
+# Acceleration + ONE_G_MG the axis bars are scaled against.
+platform-core = { path = "../../../platform/platform-core" }
+# The board-generic picture: the signed-bar primitive, the fixed-width text, and
+# RenderError. This crate holds only the orientation-specific layout on top.
+platform-display = { path = "../../../platform/platform-display" }
+# The graphics port (DrawTarget) plus the Point/Rgb565/Rectangle the layout speaks in.
+embedded-graphics = "0.8"
+
+# Host-only; never reaches the Xtensa build (a dependent excludes dev-deps).
+[dev-dependencies]
+# The shared host framebuffer the render tests draw into.
+platform-display = { path = "../../../platform/platform-display", features = ["testing"] }
+# A host framebuffer that saves a PNG — the screenshots example rasterizes to a file.
+embedded-graphics-simulator = { version = "0.8", default-features = false }

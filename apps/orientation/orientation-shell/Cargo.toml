@@ -1,0 +1,32 @@
+[package]
+name = "orientation-shell"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Host-testable imperative shell for the orientation readout: the shared orientation cache and the high-rate sampler thread that polls the IMU, smooths each reading, and publishes it. std-linked but device-independent."
+
+[lib]
+name = "orientation_shell"
+path = "src/lib.rs"
+
+# A driving (primary) adapter: the sampler is a timer-driven loop that turns the passage of
+# time into repeated reads of the Imu port (the concrete MPU6886 is injected by the
+# composition root, never named here), folds each reading through the pure smoother and the
+# pure Orientation transform, and publishes into the shared cache. It owns effects (a
+# std::thread, an Arc<Mutex>) but names no hardware, so every rule is exercised on the host.
+# It may depend only on domain / usecase / port-and-adapter — here orientation-core and
+# platform-core (both domain). context = "orientation".
+[package.metadata.hex-arch]
+role = "driving-adapter"
+context = "orientation"
+
+[dependencies]
+# The pure orientation domain: the Smoother the sampler folds readings through and the
+# Orientation transform it publishes.
+orientation-core = { path = "../orientation-core" }
+# The board-generic kernel: the Imu port the sampler drives and the Acceleration it yields.
+platform-core = { path = "../../../platform/platform-core" }
+# The shell logs a failed IMU read so a dead sensor is observable on serial; on-device these
+# records reach the ESP-IDF logger the composition root installs, on the host they are inert
+# without a logger.
+log = "0.4"
