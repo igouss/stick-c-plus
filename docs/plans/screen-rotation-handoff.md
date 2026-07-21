@@ -4,8 +4,8 @@
 **Plan:** `docs/plans/screen-rotation-platform-capability.md` — the verified inventory, the
 architectural decision, and the hazards. Read it after this file.
 
-Two of nine beads are done. This file is the context around the rest that is not in the
-tracker.
+Three of nine beads are done (ce1.1, ce1.3, ce1.2), one is dropped (ce1.8). This file is the
+context around the rest that is not in the tracker.
 
 ---
 
@@ -19,9 +19,15 @@ implementation.
 > or down a different version of the view that the current application is displaying should be
 > displayed. I.e views should react to orientation change."
 
-On how wide that reaches — asked explicitly, answered explicitly: **a platform capability,
-all four apps** (orientation, pomodoro, plant-monitor, host-monitor), not a feature of the
-orientation app.
+On how wide that reaches — asked explicitly, answered explicitly: **a platform capability**,
+not a feature of the orientation app.
+
+> **Narrowed 2026-07-21.** That first answer said all four apps. The user has since scoped it
+> down: rotation is **opt-in**, and **`host-monitor` is out entirely** — no IMU, no rotation
+> source, no portrait layout. Three apps: orientation, pomodoro, plant-monitor. The *platform*
+> half of the answer stands unchanged — the capability still lives in the render loop, not in
+> any app's view. What changed is who feeds it, and that a binary which does not must pay
+> nothing for its existence. See "Open questions", below.
 
 On pacing, given the size of that:
 
@@ -45,17 +51,16 @@ read.* Not a passing suite. The board, in your hand.
 
 ```sh
 br show stick-c-plus-screen-rotation-platform-ce1     # the epic
-br ready                                             # ce1.2 and ce1.4 are unblocked
+br ready                                             # ce1.4 is the next P1
 cat docs/plans/screen-rotation-platform-capability.md
 ```
 
-Take **ce1.2** first (the shared rotation source), then **ce1.4**, then **ce1.5**. That order
-is not the dependency graph's preference — ce1.4 is technically unblocked too — it is because
-ce1.5 needs both and ce1.4 is the one that can waste an afternoon on a panel that lies.
+Take **ce1.4** next, then **ce1.5**. ce1.2 has landed; ce1.4 is the one that can waste an
+afternoon on a panel that lies, and ce1.5 needs it.
 
-Do **not** start ce1.6/.7/.8 (the three portrait layouts) without asking. They are the part
-the user deferred. They are marked ready because the seam they need exists, not because they
-are wanted yet.
+Do **not** start ce1.6/.7 (the portrait layouts) without asking. They are the part the user
+deferred. They are marked ready because the seam they need exists, not because they are wanted
+yet. (ce1.8, the third, is closed won't-do.)
 
 ### What is already true
 
@@ -68,7 +73,16 @@ are wanted yet.
 - `spawn_display(display, source, rotation, clock, config)` — the rotation source is a
   `FnMut(Tick) -> ScreenRotation`. All four composition roots currently pass
   `let landscape = |_now: Tick| ScreenRotation::Deg0;`. **Replacing that one line per binary
-  is the whole of "wire in a real source."**
+  is the whole of "wire in a real source."** That line is also where opting *out* lives: leave
+  it alone and the binary links none of the capability.
+- **`SharedRotation` and `spawn_rotation`** live in `platform-runtime` (`src/rotation.rs`),
+  beside the other `spawn_*` threads. `SharedRotation` owns the `RotationSettler` behind its
+  lock and `source()` hands back the closure above; `spawn_rotation` is a thread that owns an
+  IMU and feeds it. **They are two halves on purpose** — the sensor *moves* into whichever
+  thread takes it, so an app that already runs a sampler (orientation, at 100 Hz) cannot spawn
+  a second owner of one I2C device and must feed the same cell instead. Poll period is 50 ms,
+  not the sampler's 10 ms: the settle window is what the eye sees, and the saved polls are I2C
+  transactions that would otherwise contend.
 - `Shown` (in `platform-runtime`'s render loop) carries the rotation, so a turn repaints by
   the same mechanism every other change uses. Two tests pin it.
 - `orientation-display` has a finished **portrait layout** — `Layout` value, `LANDSCAPE` and
@@ -78,15 +92,8 @@ are wanted yet.
 
 ### What is not true yet, and is the work
 
-Nothing rotates on the device. The device draws `Deg0`, always, because no rotation source
-exists (ce1.2) and the panel is never told to scan differently (ce1.4).
-
-**ce1.2 — the shared rotation source.** A thread that owns the IMU, folds readings through a
-`RotationSettler`, and publishes the settled rotation for any binary to read. The existing
-`orientation-shell` sampler is the right shape and the wrong context (`context = "orientation"`,
-so the other three apps cannot use it) — generalize it into a shared crate rather than copying
-it. The `Imu` port and `Acceleration` are already in `platform-core/shared`, so this needs no
-dependency on any app.
+Nothing rotates on the device. The device draws `Deg0`, always, because the panel is never told
+to scan differently (ce1.4) and no binary spawns the rotation source (ce1.5, ce1.9).
 
 **ce1.4 — turn the panel.** `Panel::new` bakes `Rotation::Deg90` in as a compile-time literal
 and applies one CGRAM offset pair, `OFFSET_X = 52` / `OFFSET_Y = 40`, valid under that one
@@ -137,18 +144,38 @@ turns out to need new domain logic, something above it was under-built.
 - **`br` prose via a quoted heredoc or `--description-file`** — backticks in `br -d "..."` get
   command-substituted and silently vanish.
 
-### Open questions — the user's to answer, not yours to assume
+### Open questions — answered by the user, 2026-07-21
 
-1. **Should every app rotate by default, or does each binary opt in?** A pomodoro timer that
-   reflows every time you set it down may be worse than one that stays put. The seam supports
-   either. Suggested default: capability always present, each binary chooses whether to spawn
-   the source.
-2. **Does `host-monitor` earn an IMU at all?** It has WiFi plus a display thread that already
-   needed 16 KiB of stack; a periodic I2C poll is where bus contention would show. It is the
-   riskiest of the three wirings in ce1.9 and should go last if it goes at all.
-3. **What does a screen do when its content genuinely does not fit portrait?** `host-display`
-   is one row per host across the full width — its whole premise is horizontal room. "It does
-   not rotate" is an acceptable answer; ce1.8 is written to permit it.
+All three are settled. They were asked as open; they are recorded here as closed.
+
+1. **Every app by default, or opt in per binary?** → **Opt in.** Not every app uses rotation,
+   and today none of them has a portrait view to turn into, so opting in currently buys
+   nothing. The seam stays always-present; each composition root chooses whether to feed it.
+2. **Does `host-monitor` earn an IMU?** → **No.** It does not handle orientation at all: no
+   IMU, no rotation source, no portrait layout. ce1.9 therefore covers **two** binaries
+   (pomodoro, plant-monitor), and **ce1.8 is closed won't-do**.
+3. **What does a screen do when its content does not fit portrait?** → Answered by (2) for the
+   only screen where it was pressing. "It does not rotate" was the acceptable answer, and it
+   is the one taken.
+
+And one constraint that came with the answer, which is now a **hard requirement on every
+remaining bead**:
+
+> **A binary that does not opt in must not link the capability, and must pay nothing in flash
+> or RAM for its existence.**
+
+This is currently true, and it was measured rather than assumed (2026-07-21, at ce1.2):
+
+- The shared rotation source is **byte-identical** across all four binaries — `spawn_rotation`
+  is generic, so it is never instantiated unless called, and `SharedRotation` is dead-stripped.
+- `nm` finds **zero** rotation, settler, or up-axis symbols in `host-monitor`.
+- The ce1.3 seam itself costs `host-monitor` +260 B of text out of ~1 MB (0.03%) and the other
+  two +4 B, while `orientation` *shrank* by 40 B — i.e. inlining jitter, not linked logic.
+
+Keep it that way: the opt-in must stay a composition-root choice. `spawn_rotation` stays
+generic, and nothing non-generic gets referenced from a shared path every binary walks.
+**Re-measure `size` on all four elfs before closing any bead that touches a composition root
+or a shared path**, and diff against the numbers above.
 
 ### One thing not to let look verified
 

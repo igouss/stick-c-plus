@@ -6,9 +6,13 @@ it is turning into.
 
 This is a **platform capability**, not an orientation-app feature. All four apps get it.
 
-## What exists today
+## What existed when this plan was written
 
-Verified 2026-07-21, not assumed:
+Verified 2026-07-21, not assumed — and now **deliberately kept as the pre-work inventory**.
+Several rows are no longer true: ce1.1 moved the rotation domain into `platform-core`, ce1.3
+put the rotation parameter on `Screen::show` and `spawn_display`, and ce1.2 added the shared
+source. For what is true *now*, read the handoff's "What is already true"; this table records
+the ground the plan was reasoning from.
 
 | Piece | Where | State |
 |---|---|---|
@@ -65,16 +69,22 @@ four, so `PanelScreen`'s injected closure keeps working unchanged.
 
 ## The work
 
-Nine beads. Everything through (5) is infrastructure that changes nothing visible until (5)
-lands; (6)–(8) are independent of each other once (3) exists.
+Nine beads as planned, eight of them live — (8) is dropped. Everything through (5) is
+infrastructure that changes nothing visible until (5) lands; (6) and (7) are independent of
+each other once (3) exists.
 
 1. **Carve the rotation domain into `platform-core`.** `ScreenRotation`, `RotationSettler`, the
    `UpAxis` table. They are facts about the board, not about one app's domain, and
    `context = "orientation"` makes them illegal for the other three to use. Breaks three known
    call sites plus the cucumber suite; no other crate depends on `orientation-core`.
-2. **A shared rotation source.** A thread owning the IMU that publishes the settled rotation.
-   The existing sampler is `context = "orientation"`, so it generalizes into a shared crate
-   rather than being copied. Any binary can spawn it.
+2. **A shared rotation source.** *Landed as two halves, not one.* `SharedRotation` owns the
+   `RotationSettler` behind the lock and hands `spawn_display` its source closure;
+   `spawn_rotation` is a thread that owns an IMU and feeds it. They are separate because the
+   sensor **moves** into whichever thread takes it, so an app that already runs a sampler —
+   orientation does — cannot spawn a second owner of one I2C device, and instead feeds the
+   same cell. A thread-only design would have forced a second settler into that app. Lives in
+   `platform-runtime` (already `driving-adapter`/`shared`) beside the other `spawn_*` threads,
+   so no new crate was needed.
 3. **The render-loop seam.** Widen `Screen::show`, thread rotation through `spawn_display` /
    `render_loop` / `render_once`, add it to `Shown`'s equality, update all four apps' `render`
    signatures and both `Screen` impls. **No visual change** — every app still selects its
@@ -87,12 +97,12 @@ lands; (6)–(8) are independent of each other once (3) exists.
 5. **The orientation readout turns, end to end.** First app to actually rotate. Proves (1)–(4).
 6. **Portrait layout for `pomodoro-display`.**
 7. **Portrait layout for `plant-display`.**
-8. **Portrait layout for `host-display`.**
-9. **The IMU into the other three binaries.**
+8. ~~**Portrait layout for `host-display`.**~~ **Dropped** — `host-monitor` does not rotate.
+9. **The IMU into the other two binaries** (pomodoro, plant-monitor).
 
 ```
 1 → 2 → 3 → 4 → 5
-        3 → 6, 7, 8
+        3 → 6, 7
         2 → 9
 ```
 
@@ -116,12 +126,24 @@ lands; (6)–(8) are independent of each other once (3) exists.
   should go last.
 - **10 ms is the hard floor** for any thread period (`CONFIG_FREERTOS_HZ=100`).
 
-## Open questions
+## Open questions — answered 2026-07-21
 
-- **Should a settled rotation drive every app, or is it opt-in per app?** A pomodoro timer that
-  reflows every time you set it down may be worse than one that stays put. The seam supports
-  either; the default is a policy call. Suggest: capability always present, each binary chooses
-  whether to spawn the rotation source.
-- **Is `host-monitor` worth an IMU at all**, given the bus contention above?
-- **What happens between quadrants** on apps whose content does not fit portrait at all — is
-  there a legible fallback, or does the app simply not rotate?
+- **Every app, or opt-in per app?** → **Opt-in.** The capability stays always-present in the
+  seam; each composition root chooses whether to feed it. No app has a portrait view today, so
+  opting in currently buys nothing.
+- **Is `host-monitor` worth an IMU at all?** → **No.** It does not handle orientation: no IMU,
+  no rotation source, no portrait layout. **(8) is dropped**, and (9) covers two binaries.
+- **What happens on apps whose content does not fit portrait?** → They do not rotate. That was
+  the pressing question only for `host-display`, and (2) answers it.
+
+### The cost constraint that came with opt-in
+
+A binary that does not opt in **must not link the capability**, and must pay nothing in flash
+or RAM for its existence. Measured at (2), not assumed: the shared rotation source is
+byte-identical across all four binaries, and `nm` finds zero rotation/settler/up-axis symbols
+in `host-monitor`. The seam from (3) costs `host-monitor` +260 B of ~1 MB and the other two
++4 B, while `orientation` shrank 40 B — inlining jitter, not linked logic.
+
+Keeping it true is a constraint on the remaining beads: `spawn_rotation` stays generic, and
+nothing non-generic is referenced from a shared path every binary walks. Re-measure `size` on
+all four elfs before closing anything that touches a composition root or a shared path.
