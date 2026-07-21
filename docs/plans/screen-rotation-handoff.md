@@ -4,10 +4,14 @@
 **Plan:** `docs/plans/screen-rotation-platform-capability.md` — the inventory the plan was
 written against, the architectural decision, and the hazards. Read it after this file.
 
-Five of nine beads are settled: **ce1.1, ce1.2, ce1.3, ce1.4 done; ce1.8 dropped.** Four
-remain. This file is the context around them that is not in the tracker.
+Six of nine beads are settled: **ce1.1, ce1.2, ce1.3, ce1.4, ce1.5 done; ce1.8 dropped.**
+Three remain. This file is the context around them that is not in the tracker.
 
-Last updated 2026-07-21, after ce1.4 was confirmed on the glass.
+Last updated 2026-07-21, after ce1.5 put the first turning app on the glass.
+
+**The epic's acceptance test has been met once.** Stood on its USB-C port, the orientation
+readout draws in portrait, upright and readable. What is left is reach (ce1.9, the other two
+apps) and the deferred layouts (ce1.6/.7), not proof that the idea works.
 
 ---
 
@@ -66,8 +70,10 @@ Not a passing suite. The board, in a hand. **And the user has offered to be that
 
 > "and I can help with rotating it, tell me when."
 
-Take them up on it — see "Working with the user on the board" in Part 2. Nobody can close
-ce1.4 or ce1.5 honestly without someone turning the stick and reporting what they saw.
+Take them up on it — see "Working with the user on the board" in Part 2. Nobody can close a
+bead that reaches the glass honestly without someone turning the stick and reporting what they
+saw. **It has now been met once**, at ce1.5: stood on its USB-C port, the orientation readout
+draws upright in portrait. ce1.9 asks the same sentence of two more apps.
 
 ---
 
@@ -77,16 +83,12 @@ ce1.4 or ce1.5 honestly without someone turning the stick and reporting what the
 
 ```sh
 br show stick-c-plus-screen-rotation-platform-ce1     # the epic, with the settled scope
-br ready                                             # ce1.5 is the next P1
+br ready                                             # ce1.9 is the next P1
 cat docs/plans/screen-rotation-platform-capability.md
 ```
 
-Take **ce1.5** first. Every piece it needs now exists and is proven, so it should be small —
-if it is not, read "What ce1.5 actually is" below before writing anything, because the most
-likely cause is that you are rebuilding something that already works.
-
-**ce1.9** (wiring pomodoro and plant-monitor) is independent of ce1.5 and can go either side
-of it.
+Take **ce1.9** — wiring pomodoro and plant-monitor — which is now the only bead in the epic
+that is both ready and wanted. ce1.5 has landed (`67866ba`); what it learned is below.
 
 Do **not** start ce1.6/.7 (the portrait layouts) without asking. They are the part the user
 deferred. They show as ready because the seam they need exists, not because they are wanted.
@@ -143,18 +145,51 @@ Verified, not assumed. Do not re-derive any of it.
   `Layout::for_rotation` (`layout.rs:112`) maps `Deg0`/`Deg180` to `LANDSCAPE` and
   `Deg90`/`Deg270` to `PORTRAIT`, with four unit tests pinning it. The `Layout` value carries
   its own `canvas`, and the invariants sit in a `const fn` that fails the *build*. It renders
-  in `just screens` (14 screens, all four quadrants). **This is why ce1.5 is wiring and not
-  work** — and it has never been seen on glass.
+  in `just screens` (14 screens, all four quadrants). **This is why ce1.5 was wiring and not
+  work**, and it is confirmed on glass as of ce1.5.
+  - One thing to keep an eye on if you touch `PORTRAIT`: the milli-g field ends 1 px from the
+    right edge (`value_left` 74 + 6 chars × 10 px = 134 of 135), so a five-digit reading looks
+    flush to the bezel. It is honest, not clipped, and the build asserts it fits — but it reads
+    tight, and `VALUE_WIDTH` is the one field that must not shrink to buy margin.
 - **The other three display crates take the rotation and ignore it**, and say so in the
   signature.
 
 ## What is not true yet, and is the work
 
-**No app rotates on the device.** The panel *can* turn and is proven to (ce1.4), but no binary
-feeds it a real rotation: all four still pass the constant `landscape` closure and take
-`PanelScreen::new`.
+**~~No app rotates on the device.~~ One does, as of ce1.5** — `orientation` takes
+`PanelScreen::turning` and feeds a real rotation. The other three still pass the constant
+`landscape` closure and take `PanelScreen::new`: `host-monitor` for good (it opts out) and
+pomodoro and plant-monitor until ce1.9.
 
-### ce1.5 — the orientation readout turns, end to end *(next; needs the board)*
+### ce1.5 — the orientation readout turns, end to end *(DONE, 2026-07-21, `67866ba`)*
+
+**It was four lines, exactly as this file predicted**, and the prediction is worth trusting
+again at ce1.9: no domain logic was written, because the settler, the panel and the layout
+selection were all already in place. The recipe below is what landed; read it as the template
+for the two remaining binaries rather than as history.
+
+Confirmed on the glass by the user, in their words:
+
+> "it does say upright, bars drawn corectly. when I shake orienttion stays the same, when I
+> stop it takes correct orrientation."
+
+That answer is worth studying, because the *first* answer was "very nice, it works" — which is
+precisely the report this file warns reads two ways. It was not accepted. The re-ask was
+narrow: *did the layout change shape — the stacked portrait header with `UPRIGHT` on its own
+line — or did it stay the wide single-row one?* A picture that never turned would have failed
+that question differently. **Ask for the shape, not the verdict.**
+
+**Still not witnessed: the flat-on-desk case**, where no axis is meaningfully up and the
+settler should hold what it had. Host-tested, never seen to misbehave, never directly looked
+at. Small — but do not count it as done, and it is nearly free to ask for during ce1.9.
+
+The size result, measured against the `7979b6d` baseline: `host-monitor`, `pomodoro` and
+`plant-monitor` came out **byte-identical**, and `orientation` grew 1540 text / 48 data / 8
+bss. Three unchanged binaries is a stronger signal than the inlining-jitter rule was written to
+handle — the opt-in-by-type really does generate nothing for an app that declines.
+
+<details>
+<summary>What it was, kept as the recipe for ce1.9</summary>
 
 The first app to actually rotate, and the bead that proves ce1.1–ce1.4 together by putting
 them all on the glass at once.
@@ -205,7 +240,12 @@ cross-context edge — check it before you try it.
 Weigh this against alternatives if you like, but do not reach for `spawn_rotation` here; it is
 for the apps in ce1.9 that have no IMU thread.
 
-### ce1.9 — wire pomodoro and plant-monitor
+*(That closure is what shipped, unchanged. It went in beside `spawn_display`; `hex-lint` passed
+first time, so the context reasoning held.)*
+
+</details>
+
+### ce1.9 — wire pomodoro and plant-monitor *(next, and the only ready bead that is wanted)*
 
 Two binaries, not three. Neither has an IMU thread today, so both can `spawn_rotation`
 directly — the easy case. Get the sensor onto each one's I2C bus, spawn the source, replace
@@ -237,14 +277,20 @@ That regression is why the opt-in is a **type** (`Fixed` / `Turning`) rather tha
 branch: `Fixed::apply` is an empty function on a zero-sized type, so the turn is not skipped at
 run time, it is never generated.
 
-Baseline, `size` on the release elfs at commit `7979b6d` (all four still `Fixed`):
+Baseline, `size` on the release elfs. The first three are unchanged since `7979b6d` and are
+the numbers to hold; `orientation` is post-ce1.5 at `67866ba` and is what one opted-in app
+costs.
 
-| binary | text | data | bss |
-|---|---|---|---|
-| host-monitor | 1 000 949 | 203 356 | 23 321 |
-| pomodoro | 391 644 | 105 220 | 6 633 |
-| plant-monitor | 981 417 | 190 360 | 25 353 |
-| orientation | 394 736 | 97 428 | 6 641 |
+| binary | text | data | bss | |
+|---|---|---|---|---|
+| host-monitor | 1 000 949 | 203 356 | 23 321 | opts out — must never move |
+| pomodoro | 391 644 | 105 220 | 6 633 | grows at ce1.9 |
+| plant-monitor | 981 417 | 190 360 | 25 353 | grows at ce1.9 |
+| orientation | 396 276 | 97 476 | 6 641 | **turning** (+1540 / +48 / +8) |
+
+**Expect roughly +1.5 KB of text per app you wire at ce1.9**, and treat a much larger figure as
+something to explain rather than accept — the panel and settler code is already linked into the
+binary that has it, and the second and third app pay for their own copy of it, not for more.
 
 Judgement on what a diff means: **anything under ~±50 B that drifts in both directions across
 the four binaries is inlining jitter**, not linked logic — that pattern has now appeared twice.
@@ -290,20 +336,21 @@ done
 
 ## Working with the user on the board
 
-They have offered, they are quick to respond, and ce1.5 cannot be closed without them. Do the
-work first, get to a flashable build, then ask — do not ask them to stand by while you write
-code. You can flash it yourself: `just run-bin <name>`, or `just run` to put the plant monitor
-back. Serial needs `timeout N just run-bin … > file 2>&1`; piping to `tail` swallows it.
+They have offered, they are quick to respond, and no bead that reaches the glass can be closed
+without them. Do the work first, get to a flashable build, **flash it yourself**, then ask —
+do not ask them to stand by while you write code. `just run-orientation`, `just run-pomodoro`,
+or `just run` to put the plant monitor back; `just run-bin <name>` is for the bench tools,
+which live in the *plant-monitor* package (it will not find an app binary). Serial needs
+`timeout N just run-… > file 2>&1`; piping to `tail` swallows it.
 
-**ce1.5's question is different from ce1.4's, and easier.** ce1.4 asked about the panel and
-needed a careful four-part answer. ce1.5 asks the epic's own acceptance test, and it is one
-sentence: *pick the board up, stand it on its USB-C port, and the readout is drawn upright and
-is easy to read.* Then set it flat on the desk and confirm it does **not** scramble, and give
-it a shake and confirm it does not spin — those are the settler's two promises
-(`rotation_for` returns `current` when flat or moving) and this is the first time either has
-been on glass.
+**ce1.9's question is ce1.5's, asked of two more apps**, and ce1.5's answer is the template:
+*pick the board up, stand it on its USB-C port, and the readout is drawn upright and is easy
+to read.* Add the flat-on-desk case, which is the one settler promise still unwitnessed — set
+it flat and confirm it does **not** scramble. Shake-does-not-spin and release-then-settle were
+both confirmed at ce1.5.
 
-**Three lessons about asking, all of them paid for during ce1.4:**
+**Four lessons about asking. The first three were paid for at ce1.4 — and the fourth is that
+ce1.4's lessons did not stop it happening again at ce1.5, so read them as live.**
 
 1. **A report of "it works" is not usable, and neither is "looks good".** Ask for something
    specific enough that a wrong answer looks different from a right one.
@@ -315,6 +362,13 @@ been on glass.
    drew a 1-pixel border and got "very thin, hard to see" — which is a failed instrument, not a
    passed test. Rebuild it around what a person judges reliably (comparing two thicknesses,
    naming a colour) rather than what is easiest to draw. See the lesson below.
+4. **Expect the ambiguous answer anyway, and be willing to spend one more round.** ce1.5 asked
+   a good question and still got *"very nice, it works, thank you"* — warm, generous, and
+   unusable, because it reads identically whether the picture turned or never moved. Declining
+   it cost one message and got: *"it does say upright, bars drawn corectly."* **Ask for the
+   shape, not the verdict** — "did the header stack onto two lines, or stay one wide row?" is a
+   question a broken build answers differently. Saying *why* you are re-asking ("a false green
+   here ships into the next bead") makes the second ask read as care rather than doubt.
 
 ## Show the user the pictures — do not make them squint
 
@@ -390,8 +444,10 @@ will meet it again:
    that it never *falsely* fires — 125 heartbeats on a healthy sensor, zero triggers — but
    nobody has ever seen it appear on the glass. That needs a throwaway build with a
    deliberately failing IMU. Not part of this epic; just do not count it as done.
-2. **`orientation-display`'s portrait layout** renders correctly into a host framebuffer and
-   **has still never been on glass.** `just screens` proves the layout, not the panel — a
-   framebuffer places every pixel exactly where asked, whatever the controller does. It is
-   exactly the picture ce1.5 will put up first, so expect ce1.5 to be the moment it is finally
-   tested, and treat a surprise there as information rather than as a setback.
+2. **~~`orientation-display`'s portrait layout has never been on glass.~~ Settled at ce1.5** —
+   it went up, and the user reported the bars drawn correctly on the 13-column canvas. There
+   was no surprise. The general point survives for the ce1.6/.7 layouts: `just screens` proves
+   the layout, not the panel, because a framebuffer places every pixel exactly where asked
+   whatever the controller does.
+3. **The flat-on-desk settler case.** Shake-does-not-spin and release-then-settle were both
+   witnessed at ce1.5; *flat*, where no axis is meaningfully up, was not. Host-tested only.
