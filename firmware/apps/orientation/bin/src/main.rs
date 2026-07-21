@@ -25,6 +25,16 @@
 //! shorter sleep on ESP-IDF does not yield, it busy-waits. Asking for more than the hardware
 //! can give does not buy speed, it buys a starved scheduler — see [`READOUT_PERIOD`].
 //!
+//! ## The picture faces the reader
+//!
+//! This is the first app to take the platform's rotation capability. Stand the board on its
+//! USB-C port and the readout turns with it: the panel is told to scan the new way up, and
+//! `orientation_display::render` picks the portrait layout the taller canvas needs.
+//!
+//! Both halves are opted into here and nowhere else — [`PanelScreen::turning`] for the glass,
+//! and a rotation source for the verdict. An app that wants neither takes `PanelScreen::new`
+//! and hands back a constant, and links none of the machinery.
+//!
 //! ## The shared bus
 //!
 //! The AXP192 and the MPU6886 sit on the same two pins and are read from two different
@@ -44,10 +54,11 @@ use log::info;
 use orientation_core::{Orientation, Reading};
 use orientation_display::OrientationView;
 use orientation_shell::{spawn_sampler, SamplerConfig, SharedOrientation};
-use platform_adapters::{Axp192PowerSource, LedcBuzzer, Mpu6886Imu, Panel, PanelScreen};
+use platform_adapters::{Axp192PowerSource, LedcBuzzer, Mpu6886Imu, Panel, PanelScreen, Turning};
 use platform_core::{ScreenRotation, Tick};
 use platform_runtime::{
     spawn_buzzer, spawn_display, spawn_power_watch, DisplayConfig, Monotonic, PowerWatchConfig,
+    SharedRotation,
 };
 use static_cell::StaticCell;
 use std::time::Duration;
@@ -118,7 +129,10 @@ fn main() {
         peripherals.pins.gpio18, // RST
     )
     .expect("ST7789 panel bring-up");
-    let screen: PanelScreen<OrientationView, _> = PanelScreen::new(
+    // `turning`, not `new`: this app opts into the rotation capability, so the panel is told to
+    // scan the way the board is being held before each render. An app that stays landscape takes
+    // `PanelScreen::new` and links none of this — the choice is the type, not a flag.
+    let screen: PanelScreen<OrientationView, _, Turning> = PanelScreen::turning(
         panel,
         |target: &mut _, view: OrientationView, elapsed: Tick, rotation: ScreenRotation| {
             orientation_display::render(target, view, elapsed, rotation)
@@ -159,13 +173,28 @@ fn main() {
         animation_period: READOUT_PERIOD,
         ..DisplayConfig::default()
     };
-    // Which way up to draw. Fixed at the panel's native landscape for now: this app has no
-    // rotation source yet, and its screen has only a landscape layout to be drawn in. The
-    // platform supplies the capability regardless, so wiring one in later is a change here
-    // and nowhere else.
-    let landscape = |_now: Tick| ScreenRotation::Deg0;
-    let _display =
-        spawn_display(screen, source, landscape, clock, config).expect("spawn orientation-display");
+    // Which way up to draw. This app already *moves* its IMU into the sampler, so it cannot
+    // also hand one to `spawn_rotation` — a single I2C device has a single owner. It does not
+    // need to: the sampler already publishes an `Orientation` carrying the very `Acceleration`
+    // the settler wants, so the rotation source folds that reading in and reports the verdict
+    // in one step. One device owner, one settler, no extra thread.
+    //
+    // It runs on the display thread's cadence — a fold every 40 ms against a 250 ms settle
+    // window, so the settler sees roughly six readings inside the interval it judges over.
+    //
+    // This lives in the composition root rather than in the sampler because `orientation-shell`
+    // is context = "orientation" and `platform-runtime` is context = "shared": the root may
+    // name both, a shell crate may not, and `hex-lint` enforces that in the gate.
+    let rotation_source = {
+        let pose: SharedOrientation = shared.clone();
+        let turned: SharedRotation = SharedRotation::new();
+        move |now: Tick| {
+            turned.update(pose.last_known().acceleration, now);
+            turned.current()
+        }
+    };
+    let _display = spawn_display(screen, source, rotation_source, clock, config)
+        .expect("spawn orientation-display");
     info!("display thread up: ST7789 rendering the X/Y/Z bars at 25 Hz");
 
     // Power-watch: poll VBUS on the retained AXP192, debounce it, and chime a settled USB plug
