@@ -46,10 +46,10 @@ test:
 # CGRAM offset, inversion, or backlight. A framebuffer paints red as red however the
 # glass is wired. For THAT question: `just run-bin display-colour-check`, and look.
 screens:
-    cargo run --quiet -p plant-display --example screenshots
-    cargo run --quiet -p pomodoro-display --example screenshots
-    cargo run --quiet -p host-display --example screenshots
-    cargo run --quiet -p orientation-display --example screenshots
+    cargo run --quiet -p plant-display --example plant-screenshots
+    cargo run --quiet -p pomodoro-display --example pomodoro-screenshots
+    cargo run --quiet -p host-display --example host-screenshots
+    cargo run --quiet -p orientation-display --example orientation-screenshots
 
 # Re-bless the host-monitor golden screens from the current render. The `goldens` test
 # (part of `just test`) renders every state and fails if the picture drifts from the
