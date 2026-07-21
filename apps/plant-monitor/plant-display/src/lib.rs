@@ -42,7 +42,7 @@ pub mod scene;
 mod screen;
 
 pub use glass::Glass;
-pub use layout::{LINE_WIDTH, PCT_Y, RAW_Y, SPRITE_ORIGIN, SPRITE_SCALE, TEXT_X};
+pub use layout::{canvas_size, LINE_WIDTH, SPRITE_SCALE};
 pub use scene::{frame_index, is_animated, scene, Motion, Scene};
 pub use screen::{fault_label, render};
 

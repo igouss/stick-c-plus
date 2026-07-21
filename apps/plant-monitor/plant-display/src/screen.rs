@@ -9,9 +9,9 @@ use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use plant_core::{Observation, ProbeFault};
 use platform_core::ScreenRotation;
-use platform_display::{sprite, text_line, RenderError};
+use platform_display::{sprite, text_field, RenderError};
 
-use crate::layout::{LINE_WIDTH, PCT_Y, RAW_Y, SPRITE_ORIGIN, SPRITE_SCALE, TEXT_X};
+use crate::layout::{Layout, LINE_WIDTH, SPRITE_SCALE};
 use crate::scene::{self, Scene};
 
 /// A [`ProbeFault`] as a label that fits [`LINE_WIDTH`](crate::LINE_WIDTH) characters.
@@ -50,15 +50,15 @@ pub fn render<D>(
     target: &mut D,
     observation: Observation,
     elapsed_ms: u64,
-    // This screen is landscape-only for now: it takes the rotation the platform supplies
-    // and does not yet honour it. A portrait layout is its own bead.
-    _rotation: ScreenRotation,
+    rotation: ScreenRotation,
 ) -> Result<(), RenderError<D::Error>>
 where
     D: DrawTarget<Color = Rgb565>,
 {
-    text(target, observation)?;
-    creature(target, observation, elapsed_ms)
+    let layout: Layout = Layout::for_rotation(rotation);
+
+    text(target, &layout, observation)?;
+    creature(target, &layout, observation, elapsed_ms)
 }
 
 /// Paint the creature for `observation` in the panel's right-hand region.
@@ -68,6 +68,7 @@ where
 /// frame before it, and never needs a clear that would flash.
 fn creature<D>(
     target: &mut D,
+    layout: &Layout,
     observation: Observation,
     elapsed_ms: u64,
 ) -> Result<(), RenderError<D::Error>>
@@ -80,17 +81,18 @@ where
         target,
         scene.sprite,
         &scene.sprite.frames()[index],
-        SPRITE_ORIGIN,
+        layout.sprite_origin,
         SPRITE_SCALE,
         Rgb565::BLACK,
     )
 }
 
-/// Draw one plant-monitor text row: the platform [`text_line`] primitive bound to this
-/// app's left column ([`TEXT_X`]) and field width ([`LINE_WIDTH`]), so the eight call sites
-/// below carry only their row, colour, and content.
+/// Draw one plant-monitor text row: the platform [`text_field`] primitive bound to this
+/// layout's column, field width, and alignment, so the eight call sites below carry only
+/// their row, colour, and content.
 fn line<D>(
     target: &mut D,
+    layout: &Layout,
     y: i32,
     color: Rgb565,
     content: core::fmt::Arguments<'_>,
@@ -98,11 +100,22 @@ fn line<D>(
 where
     D: DrawTarget<Color = Rgb565>,
 {
-    text_line(target, Point::new(TEXT_X, y), color, LINE_WIDTH, content)
+    text_field(
+        target,
+        Point::new(layout.text_x, y),
+        color,
+        LINE_WIDTH,
+        layout.text_align,
+        content,
+    )
 }
 
 /// Paint the two text rows for `observation`.
-fn text<D>(target: &mut D, observation: Observation) -> Result<(), RenderError<D::Error>>
+fn text<D>(
+    target: &mut D,
+    layout: &Layout,
+    observation: Observation,
+) -> Result<(), RenderError<D::Error>>
 where
     D: DrawTarget<Color = Rgb565>,
 {
@@ -110,33 +123,66 @@ where
         Observation::Fresh(measurement) => {
             line(
                 target,
-                RAW_Y,
+                layout,
+                layout.raw_y,
                 Rgb565::WHITE,
                 format_args!("RAW  {:>4}", measurement.raw()),
             )?;
             line(
                 target,
-                PCT_Y,
+                layout,
+                layout.pct_y,
                 Rgb565::WHITE,
                 format_args!("SOIL {:>3}%", measurement.percent()),
             )?;
         }
         Observation::Faulted(fault) => {
-            line(target, RAW_Y, Rgb565::RED, format_args!("FAULT"))?;
             line(
                 target,
-                PCT_Y,
+                layout,
+                layout.raw_y,
+                Rgb565::RED,
+                format_args!("FAULT"),
+            )?;
+            line(
+                target,
+                layout,
+                layout.pct_y,
                 Rgb565::RED,
                 format_args!("{}", fault_label(fault)),
             )?;
         }
         Observation::Stale => {
-            line(target, RAW_Y, Rgb565::RED, format_args!("STALE"))?;
-            line(target, PCT_Y, Rgb565::RED, format_args!("NO SAMPLE"))?;
+            line(
+                target,
+                layout,
+                layout.raw_y,
+                Rgb565::RED,
+                format_args!("STALE"),
+            )?;
+            line(
+                target,
+                layout,
+                layout.pct_y,
+                Rgb565::RED,
+                format_args!("NO SAMPLE"),
+            )?;
         }
         Observation::NeverSampled => {
-            line(target, RAW_Y, Rgb565::WHITE, format_args!("SOIL --"))?;
-            line(target, PCT_Y, Rgb565::WHITE, format_args!("starting"))?;
+            line(
+                target,
+                layout,
+                layout.raw_y,
+                Rgb565::WHITE,
+                format_args!("SOIL --"),
+            )?;
+            line(
+                target,
+                layout,
+                layout.pct_y,
+                Rgb565::WHITE,
+                format_args!("starting"),
+            )?;
         }
     }
     Ok(())
@@ -145,6 +191,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layout::canvas_size;
     use plant_core::{Measurement, Moisture};
     use platform_display::testing::Framebuffer;
     use proptest::prelude::*;
@@ -173,8 +220,22 @@ mod tests {
 
     /// Paint `observation` after it has been on the glass for `elapsed_ms`.
     fn painted_at(observation: Observation, elapsed_ms: u64) -> Framebuffer {
-        let mut fb: Framebuffer = Framebuffer::new();
-        render(&mut fb, observation, elapsed_ms, ScreenRotation::Deg0)
+        painted_turned(observation, elapsed_ms, ScreenRotation::Deg0)
+    }
+
+    /// Paint `observation` at `rotation`, on a canvas allocated to that rotation's shape.
+    ///
+    /// Sizing the target from [`canvas_size`] is the whole reason these tests can speak about
+    /// escaping at all: a landscape framebuffer would report every correctly-placed portrait
+    /// pixel below y=135 as having escaped, and a target sized to the *picture* rather than to
+    /// the rotation would hide a real overrun.
+    fn painted_turned(
+        observation: Observation,
+        elapsed_ms: u64,
+        rotation: ScreenRotation,
+    ) -> Framebuffer {
+        let mut fb: Framebuffer = Framebuffer::sized(canvas_size(rotation));
+        render(&mut fb, observation, elapsed_ms, rotation)
             .expect("a framebuffer render cannot fail");
         fb
     }
@@ -387,6 +448,50 @@ mod tests {
         assert_eq!(painted(Observation::NeverSampled).escaped(), 0);
     }
 
+    /// The same proof in portrait, on the taller canvas. This is the check the portrait
+    /// layout exists to pass, and the one a wrong origin fails loudly.
+    #[test]
+    fn no_observation_escapes_the_portrait_canvas() {
+        let turned = |observation: Observation| {
+            painted_turned(observation, 0, ScreenRotation::Deg90).escaped()
+        };
+        assert_eq!(turned(FRESH), 0);
+        assert_eq!(turned(Observation::Faulted(ProbeFault::Unreadable)), 0);
+        assert_eq!(turned(Observation::Stale), 0);
+        assert_eq!(turned(Observation::NeverSampled), 0);
+    }
+
+    /// Turning the board redraws the monitor on a canvas of the other shape — so a render
+    /// that ignored its rotation could not produce this.
+    ///
+    /// Compared by shape rather than by buffer equality, because two framebuffers of
+    /// different shapes cannot be compared pixel-for-pixel at all.
+    #[test]
+    fn a_quarter_turn_paints_onto_the_other_shape() {
+        let flat: Framebuffer = painted_turned(FRESH, 0, ScreenRotation::Deg0);
+        let turned: Framebuffer = painted_turned(FRESH, 0, ScreenRotation::Deg90);
+        assert_ne!(
+            flat.size(),
+            turned.size(),
+            "the canvas shape follows the turn"
+        );
+        assert!(turned.lit_pixels() > 0, "the turned picture is not blank");
+    }
+
+    /// Both quarter turns draw the same picture, and both half turns draw the other one — a
+    /// layout answers the SHAPE of the canvas, and only the panel cares which way up it is.
+    #[test]
+    fn the_two_turns_of_each_shape_paint_identically() {
+        assert_eq!(
+            painted_turned(FRESH, 0, ScreenRotation::Deg90).pixels(),
+            painted_turned(FRESH, 0, ScreenRotation::Deg270).pixels()
+        );
+        assert_eq!(
+            painted_turned(FRESH, 0, ScreenRotation::Deg0).pixels(),
+            painted_turned(FRESH, 0, ScreenRotation::Deg180).pixels()
+        );
+    }
+
     proptest! {
         /// The layout holds for *every* measurement, not just the ones we thought of:
         /// no raw count and no percent can push a glyph off the canvas. `u16::MAX` is
@@ -395,6 +500,19 @@ mod tests {
         #[test]
         fn no_measurement_ever_escapes_the_canvas(raw: u16, percent in 0u8..=100) {
             let fb: Framebuffer = painted(Observation::Fresh(measurement(raw, percent)));
+            prop_assert_eq!(fb.escaped(), 0);
+        }
+
+        /// And the same over the narrow canvas, where the field is the same ten characters
+        /// but has three columns of margin instead of fourteen — so if any reading were ever
+        /// going to run off an edge, it would do it here first.
+        #[test]
+        fn no_measurement_ever_escapes_the_portrait_canvas(raw: u16, percent in 0u8..=100) {
+            let fb: Framebuffer = painted_turned(
+                Observation::Fresh(measurement(raw, percent)),
+                0,
+                ScreenRotation::Deg90,
+            );
             prop_assert_eq!(fb.escaped(), 0);
         }
 

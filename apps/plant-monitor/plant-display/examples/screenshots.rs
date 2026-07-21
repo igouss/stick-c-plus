@@ -29,10 +29,29 @@ const OUT_DIR: &str = "target/screens";
 /// actually check the alignment and the wording.
 const SCALE: u32 = 4;
 
-/// One captioned screen: the file it lands in, and what to paint there.
+/// One captioned screen: the file it lands in, what to paint there, and the way up.
 struct Screen {
     file: &'static str,
     subject: Subject,
+    rotation: ScreenRotation,
+}
+
+/// A landscape screen — the panel's native way up, and what most of these are.
+fn flat(file: &'static str, subject: Subject) -> Screen {
+    Screen {
+        file,
+        subject,
+        rotation: ScreenRotation::Deg0,
+    }
+}
+
+/// A portrait screen: the board stood on its USB-C port, drawn on the taller canvas.
+fn turned(file: &'static str, subject: Subject) -> Screen {
+    Screen {
+        file,
+        subject,
+        rotation: ScreenRotation::Deg90,
+    }
 }
 
 /// What to draw — an observation, or the colour self-test.
@@ -51,62 +70,78 @@ fn measurement(raw: u16, percent: u8) -> Measurement {
 /// here means it ships un-looked-at.
 fn screens() -> Vec<Screen> {
     vec![
-        Screen {
-            file: "01-fresh-damp.png",
-            subject: Subject::Observation(Observation::Fresh(measurement(2048, 50)), 0),
-        },
-        Screen {
-            file: "02-fresh-dry.png",
-            subject: Subject::Observation(Observation::Fresh(measurement(3900, 4)), 0),
-        },
-        Screen {
-            file: "03-fresh-wet.png",
-            subject: Subject::Observation(Observation::Fresh(measurement(1180, 100)), 0),
-        },
-        Screen {
-            file: "04-faulted-over-range.png",
-            subject: Subject::Observation(Observation::Faulted(ProbeFault::OverRange), 0),
-        },
-        Screen {
-            file: "05-faulted-under-range.png",
-            subject: Subject::Observation(Observation::Faulted(ProbeFault::UnderRange), 0),
-        },
-        Screen {
-            file: "06-faulted-unreadable.png",
-            subject: Subject::Observation(Observation::Faulted(ProbeFault::Unreadable), 0),
-        },
-        Screen {
-            file: "07-stale.png",
-            subject: Subject::Observation(Observation::Stale, 0),
-        },
-        Screen {
-            file: "08-never-sampled.png",
-            subject: Subject::Observation(Observation::NeverSampled, 0),
-        },
+        flat(
+            "01-fresh-damp.png",
+            Subject::Observation(Observation::Fresh(measurement(2048, 50)), 0),
+        ),
+        flat(
+            "02-fresh-dry.png",
+            Subject::Observation(Observation::Fresh(measurement(3900, 4)), 0),
+        ),
+        flat(
+            "03-fresh-wet.png",
+            Subject::Observation(Observation::Fresh(measurement(1180, 100)), 0),
+        ),
+        flat(
+            "04-faulted-over-range.png",
+            Subject::Observation(Observation::Faulted(ProbeFault::OverRange), 0),
+        ),
+        flat(
+            "05-faulted-under-range.png",
+            Subject::Observation(Observation::Faulted(ProbeFault::UnderRange), 0),
+        ),
+        flat(
+            "06-faulted-unreadable.png",
+            Subject::Observation(Observation::Faulted(ProbeFault::Unreadable), 0),
+        ),
+        flat("07-stale.png", Subject::Observation(Observation::Stale, 0)),
+        flat(
+            "08-never-sampled.png",
+            Subject::Observation(Observation::NeverSampled, 0),
+        ),
         // The same two unhealthy states, later in their creature's loop. One frame of an
         // animated state cannot show that it animates; these are the proof, and the pair a
         // reviewer compares against 04 and 07.
-        Screen {
-            file: "09-faulted-over-range-mid-startle.png",
-            subject: Subject::Observation(Observation::Faulted(ProbeFault::OverRange), 1_300),
-        },
-        Screen {
-            file: "10-stale-mid-sleep.png",
-            subject: Subject::Observation(Observation::Stale, 1_400),
-        },
-        Screen {
-            file: "11-colour-check.png",
-            subject: Subject::ColourBands,
-        },
+        flat(
+            "09-faulted-over-range-mid-startle.png",
+            Subject::Observation(Observation::Faulted(ProbeFault::OverRange), 1_300),
+        ),
+        flat(
+            "10-stale-mid-sleep.png",
+            Subject::Observation(Observation::Stale, 1_400),
+        ),
+        flat("11-colour-check.png", Subject::ColourBands),
+        // Stood on the USB-C port. The narrow canvas has three columns of margin against
+        // landscape's fourteen, so these cover the widest reading, the longest fault wording,
+        // and the two states whose words are their whole content.
+        turned(
+            "12-portrait-fresh-damp.png",
+            Subject::Observation(Observation::Fresh(measurement(2048, 50)), 0),
+        ),
+        turned(
+            "13-portrait-fresh-wet.png",
+            Subject::Observation(Observation::Fresh(measurement(1180, 100)), 0),
+        ),
+        turned(
+            "14-portrait-faulted-unreadable.png",
+            Subject::Observation(Observation::Faulted(ProbeFault::Unreadable), 0),
+        ),
+        turned(
+            "15-portrait-never-sampled.png",
+            Subject::Observation(Observation::NeverSampled, 0),
+        ),
     ]
 }
 
 /// Paint one screen into a fresh framebuffer and save it.
 fn capture(screen: &Screen, settings: &OutputSettings, out_dir: &Path) -> PathBuf {
-    let mut display: SimulatorDisplay<Rgb565> = SimulatorDisplay::new(SCREEN_SIZE);
+    // Sized from the ROTATION, not from the panel: a portrait screen drawn into a landscape
+    // target would be silently clipped at y=135 and the PNG would look like a layout bug.
+    let mut display: SimulatorDisplay<Rgb565> =
+        SimulatorDisplay::new(plant_display::canvas_size(screen.rotation));
     match screen.subject {
         Subject::Observation(observation, elapsed_ms) => {
-            plant_display::render(&mut display, observation, elapsed_ms, ScreenRotation::Deg0)
+            plant_display::render(&mut display, observation, elapsed_ms, screen.rotation)
                 .expect("a framebuffer render cannot fail")
         }
         Subject::ColourBands => {
@@ -135,9 +170,11 @@ fn main() {
         .iter()
         .for_each(|path: &PathBuf| println!("{}", path.display()));
     println!(
-        "\n{} screens at {}×{} (scaled {SCALE}×) → {OUT_DIR}/",
+        "\n{} screens at {}×{} and {}×{} (scaled {SCALE}×) → {OUT_DIR}/",
         written.len(),
         SCREEN_SIZE.width,
-        SCREEN_SIZE.height
+        SCREEN_SIZE.height,
+        SCREEN_SIZE.height,
+        SCREEN_SIZE.width
     );
 }
