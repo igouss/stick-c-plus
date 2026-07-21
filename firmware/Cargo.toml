@@ -14,6 +14,7 @@
 #   apps/host-monitor/adapters/ driven-adapter — the HTTP hostpulse PulseSource.
 #   apps/host-monitor/bin/    composition-root — the host monitor (crate name "host-monitor").
 #   apps/pomodoro/bin/        composition-root — the standalone pomodoro timer.
+#   apps/orientation/bin/     composition-root — the live IMU orientation readout.
 #
 # Detached (own `[workspace]`, `exclude`d up top) so its Xtensa target and `esp`
 # toolchain (rust-toolchain.toml) never touch the host `cargo test`.
@@ -29,6 +30,7 @@ members = [
     "apps/host-monitor/adapters",
     "apps/host-monitor/bin",
     "apps/pomodoro/bin",
+    "apps/orientation/bin",
 ]
 
 # Profiles live at the (virtual) workspace root; members may not set their own.

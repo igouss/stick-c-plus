@@ -1199,6 +1199,53 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
+name = "orientation"
+version = "0.1.0"
+dependencies = [
+ "board-support",
+ "embedded-hal-bus",
+ "embuild",
+ "esp-idf-hal",
+ "esp-idf-svc",
+ "esp-idf-sys",
+ "log",
+ "orientation-core",
+ "orientation-display",
+ "orientation-shell",
+ "platform-adapters",
+ "platform-core",
+ "platform-runtime",
+ "static_cell",
+]
+
+[[package]]
+name = "orientation-core"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "platform-core",
+]
+
+[[package]]
+name = "orientation-display"
+version = "0.1.0"
+dependencies = [
+ "embedded-graphics",
+ "orientation-core",
+ "platform-core",
+ "platform-display",
+]
+
+[[package]]
+name = "orientation-shell"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "orientation-core",
+ "platform-core",
+]
+
+[[package]]
 name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"

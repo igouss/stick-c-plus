@@ -49,6 +49,7 @@ screens:
     cargo run --quiet -p plant-display --example screenshots
     cargo run --quiet -p pomodoro-display --example screenshots
     cargo run --quiet -p host-display --example screenshots
+    cargo run --quiet -p orientation-display --example screenshots
 
 # Re-bless the host-monitor golden screens from the current render. The `goldens` test
 # (part of `just test`) renders every state and fails if the picture drifts from the
@@ -153,6 +154,12 @@ build:
 build-pomodoro:
     cd firmware && PATH="{{pyshim}}:$PATH" cargo build --release -p pomodoro
 
+# Build just the orientation readout (Xtensa release). Like the pomodoro timer it links the
+# shared ESP-IDF the workspace builds (root crate = plant-monitor); the orientation ELF drops
+# the unused mdns symbols, so the flashed image is offline and clean.
+build-orientation:
+    cd firmware && PATH="{{pyshim}}:$PATH" cargo build --release -p orientation
+
 # Build just the host monitor (Xtensa release), with a lean mdns-free ESP-IDF. Unlike
 # `just build` (root crate = plant-monitor, which pulls the espressif/mdns managed
 # component), setting ESP_IDF_SYS_ROOT_CRATE=host-monitor builds an IDF from host-monitor's
@@ -198,6 +205,14 @@ run-bin bin:
 # tap = skip.
 run-pomodoro:
     cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p pomodoro'
+
+# Build, flash, and monitor the orientation readout: the MPU6886's gravity vector as three
+# live X/Y/Z bars, the pitch and roll, and the face the board is resting on. No buttons —
+# turn the board and watch. The serial heartbeat logs the same vector beside the pose it was
+# read as, which is how the board's axis convention is checked rather than assumed.
+# `just run` puts the plant monitor back.
+run-orientation:
+    cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p orientation'
 
 # Build, flash, and monitor the homelab host monitor. Fetches the bearer-gated hostpulse
 # endpoint ([host_monitor] endpoint+token in firmware/secrets.toml) and draws one row per

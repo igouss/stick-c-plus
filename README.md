@@ -18,9 +18,12 @@ so a new experiment is a new directory under `apps/`, not a new firmware:
    **hostpulse** endpoint over WiFi, which returns a ready-to-plot per-host series for all
    hosts at once (the PromQL `rate()` is done server-side). *Screen + WiFi, a pure metrics
    client.*
-4. **led-driver** — a NightDriverStrip-style **WS2812** animation driver (the repo's
+4. **orientation** — a live readout of **which way the board is pointing**: the MPU6886
+   IMU's gravity vector as three signed X/Y/Z bars, the pitch and roll in degrees, and the
+   face it is resting on. *Screen + IMU, no network, no buttons — turn it and watch.*
+5. **led-driver** — a NightDriverStrip-style **WS2812** animation driver (the repo's
    original purpose; the `led-core` effects domain lives on). *Future.*
-5. **rover** — a controllable robot. *Future; diverges in hardware.*
+6. **rover** — a controllable robot. *Future; diverges in hardware.*
 
 ## Architecture — hexagonal / ECB, on a shared platform
 
@@ -44,7 +47,8 @@ stick-c-plus/
 │  ├─ platform-audio/      #   domain           — the acoustic level (DC-removed RMS) + sound-present
 │  │                       #                      verdict (the chime self-test's ears, host-tested)
 │  ├─ platform-display/    #   port-and-adapter — the ClaudePix sprite library, the fixed-width
-│  │                       #                      text primitives, the sparkline, the colour self-test
+│  │                       #                      text primitives, the sparkline, the signed axis
+│  │                       #                      bar, the colour self-test
 │  ├─ platform-runtime/    #   driving-adapter  — the Monotonic clock + the generic, change-
 │  │                       #                      suppressing render loop (over any Animated state)
 │  ├─ firmware-core/       #   domain           — pure shared kernel (ADC oversampling, gating)
@@ -54,13 +58,15 @@ stick-c-plus/
 │  ├─ pomodoro/            #   pomodoro-core (FSM) · pomodoro-display (screen) · pomodoro-shell
 │  ├─ plant-monitor/       #   plant-core (moisture) · plant-display · plant-shell
 │  ├─ host-monitor/        #   host-core (Pulse frame + clamp/gap transform) · host-wire (JSON codec) · host-display · host-shell
+│  ├─ orientation/         #   orientation-core (tilt + resting face) · orientation-display · orientation-shell
 │  └─ led-driver/          #   led-core (WS2812 effects)
 ├─ firmware/          # the Xtensa boundary — a detached std/ESP-IDF workspace
-│  ├─ platform/            #   board-support (BSP: AXP192, I2C) · adapters (ST7789 panel +
-│  │                       #     generic PanelScreen, G37/G39 buttons, G2 LEDC buzzer, G0/G34 PDM mic) ·
+│  ├─ platform/            #   board-support (BSP: AXP192, MPU6886, I2C) · adapters (ST7789 panel +
+│  │                       #     generic PanelScreen, G37/G39 buttons, G2 LEDC buzzer, G0/G34 PDM mic,
+│  │                       #     MPU6886 IMU) ·
 │  │                       #     net (shared WiFi STA + DNS resolve)
 │  └─ apps/                #   plant-monitor/{adapters, firmware-infra, bin} · host-monitor/{adapters, bin}
-│                          #     · pomodoro/bin (+ the chime-selftest bench tool)
+│                          #     · pomodoro/bin (+ the chime-selftest bench tool) · orientation/bin
 └─ kb/                # Knowledge base — board facts, sources, findings (kbe-style)
 ```
 
@@ -138,6 +144,7 @@ just run-pomodoro       # the standalone pomodoro timer (screen + buttons + buzz
 just run-chime-selftest # play every jingle through the buzzer, hear it back on the PDM mic
 just run                # the plant monitor  (a.k.a. `just flash`)
 just run-host-monitor   # the homelab CPU/memory monitor (WiFi → hostpulse → per-host sparklines)
+just run-orientation    # the IMU orientation readout (X/Y/Z bars + pitch/roll + resting face)
 just monitor            # serial monitor only — pty-free (espflash --non-interactive)
 ```
 
