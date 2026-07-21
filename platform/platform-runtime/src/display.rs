@@ -28,6 +28,18 @@
 //! what the loop resets on. For a plant `Observation`, the anchor is the whole observation, so
 //! this reproduces the original behaviour exactly.
 //!
+//! ## A dark glass
+//!
+//! A screen nobody can see is not worth painting, so a loop whose [`LitFlag`] says dark skips
+//! the whole cycle: no state read, no pixels, no SPI. It keeps a slow heartbeat
+//! ([`DARK_PERIOD`]) so the light coming back is noticed promptly.
+//!
+//! Going dark also *drops the remembered picture*, which is the half that is easy to miss. The
+//! backlight and the panel are separate rails here, so cutting the light leaves the ST7789
+//! holding its framebuffer — the old picture is still physically on the glass. Without the
+//! reset, suppression would compare against it and paint nothing, and the stale picture would
+//! reappear when the light did, standing until the app's state next happened to change.
+//!
 //! ## Fail-visible
 //!
 //! A render error is logged and skipped, never fatal: a flaky panel must not take an app
@@ -44,6 +56,8 @@ use std::time::{Duration, Instant};
 
 use log::{info, warn};
 use platform_core::{Animated, Clock, Screen, ScreenRotation, Tick};
+
+use crate::backlight::LitFlag;
 
 /// How often the panel is repainted while a state is **still**.
 ///
@@ -78,6 +92,15 @@ pub const ANIMATION_PERIOD: Duration = Duration::from_millis(50);
 /// this — `std::thread::sleep` on Linux yields at any duration.
 pub const MIN_YIELD: Duration = Duration::from_millis(10);
 
+/// How often the loop checks back while the glass is **dark**.
+///
+/// A dark screen is painted for nobody, so the loop skips the render entirely — the whole point
+/// of a backlight toggle is to stop doing work, and the expensive part is the SPI traffic, not
+/// the wake. But it must still notice promptly when the glass comes back, so it keeps a slow
+/// heartbeat rather than sleeping until the next second boundary: 100 ms costs one relaxed
+/// atomic load ten times a second and bounds the wake latency below what a thumb can feel.
+pub const DARK_PERIOD: Duration = Duration::from_millis(100);
+
 /// The display thread's stack, in bytes.
 ///
 /// On-device this sizes a FreeRTOS task stack, so it is set explicitly. embedded-graphics
@@ -97,6 +120,8 @@ pub struct DisplayConfig {
     pub period: Duration,
     /// The interval between ticks while the creature animates.
     pub animation_period: Duration,
+    /// The interval between checks while the glass is dark and nothing is painted.
+    pub dark_period: Duration,
     /// The display thread's stack size, in bytes.
     pub stack_size: usize,
 }
@@ -106,6 +131,7 @@ impl Default for DisplayConfig {
         Self {
             period: RENDER_PERIOD,
             animation_period: ANIMATION_PERIOD,
+            dark_period: DARK_PERIOD,
             stack_size: DISPLAY_STACK_SIZE,
         }
     }
@@ -150,9 +176,10 @@ impl DisplayTask {
 /// `source` computes the current app state from whatever the app owns; it moves into the
 /// thread, so it must be [`Send`] + `'static`. `rotation` does the same for which way up the
 /// picture is drawn — an app with no rotation source hands back a constant, and pays nothing.
-/// `clock` is the shared time base — the same one the app's writer stamps against — so a
-/// state's age is measured on one clock. `display` likewise moves in; its error must be
-/// [`Display`] so a render failure can be logged.
+/// `lit` says whether the glass is currently worth painting; an app with no backlight control
+/// passes [`LitFlag::always(true)`](LitFlag::always). `clock` is the shared time base — the same
+/// one the app's writer stamps against — so a state's age is measured on one clock. `display`
+/// likewise moves in; its error must be [`Display`] so a render failure can be logged.
 ///
 /// Returns the [`DisplayTask`] handle, or the [`io::Error`] from failing to spawn the OS/RTOS
 /// thread.
@@ -160,6 +187,7 @@ pub fn spawn_display<S, D, F, R, C>(
     display: D,
     source: F,
     rotation: R,
+    lit: LitFlag,
     clock: C,
     config: DisplayConfig,
 ) -> io::Result<DisplayTask>
@@ -176,7 +204,17 @@ where
     let handle: JoinHandle<()> = thread::Builder::new()
         .name("platform-display".to_string())
         .stack_size(config.stack_size)
-        .spawn(move || render_loop(display, source, rotation, clock, config, stop_in_thread))?;
+        .spawn(move || {
+            render_loop(
+                display,
+                source,
+                rotation,
+                lit,
+                clock,
+                config,
+                stop_in_thread,
+            )
+        })?;
     Ok(DisplayTask { handle, stop })
 }
 
@@ -200,10 +238,17 @@ struct Shown<S: Animated> {
 type Glass<S> = Option<Shown<S>>;
 
 /// The thread body: on each tick, redraw only if the picture changed — until asked to stop.
+///
+/// A dark glass short-circuits the whole cycle: no state is read, no pixel is pushed, no SPI
+/// transaction is issued. The remembered picture is dropped at the same time, so whatever the
+/// app did while nobody was looking is painted in full the moment the light comes back — the
+/// panel keeps its framebuffer across a backlight cut, so without that reset a stale picture
+/// would sit on the glass until the app's state next happened to change.
 fn render_loop<S, D, F, R, C>(
     mut display: D,
     mut source: F,
     mut rotation: R,
+    lit: LitFlag,
     clock: C,
     config: DisplayConfig,
     stop: Arc<AtomicBool>,
@@ -217,6 +262,11 @@ fn render_loop<S, D, F, R, C>(
 {
     let mut glass: Glass<S> = None;
     while !stop.load(Ordering::Relaxed) {
+        if !lit.is_lit() {
+            glass = None;
+            thread::sleep(config.dark_period.max(MIN_YIELD));
+            continue;
+        }
         let before: Glass<S> = glass;
         let started: Instant = Instant::now();
         glass = render_once(&mut display, &mut source, &mut rotation, clock.now(), glass);
@@ -364,6 +414,7 @@ mod tests {
     use std::sync::mpsc::{channel, Sender};
     use std::sync::Mutex;
 
+    use crate::backlight::BacklightSwitch;
     use crate::clock::Monotonic;
 
     /// Frames advance every this many ms in the test's [`Moving`](TestState::Moving) state.
@@ -859,6 +910,7 @@ mod tests {
         let config: DisplayConfig = DisplayConfig {
             period: Duration::from_millis(1),
             animation_period: Duration::from_millis(1),
+            dark_period: Duration::from_millis(1),
             stack_size: 256 * 1024,
         };
         let source = {
@@ -866,8 +918,15 @@ mod tests {
             move |_now: Tick| *state.lock().expect("state lock")
         };
 
-        let task: DisplayTask = spawn_display(screen, source, landscape(), clock, config)
-            .expect("spawn display thread");
+        let task: DisplayTask = spawn_display(
+            screen,
+            source,
+            landscape(),
+            LitFlag::always(true),
+            clock,
+            config,
+        )
+        .expect("spawn display thread");
 
         rx.recv_timeout(Duration::from_secs(2))
             .expect("the display must paint the first value");
@@ -881,6 +940,77 @@ mod tests {
         assert_eq!(
             shown_states(&shown),
             vec![TestState::Still(45), TestState::Still(50)]
+        );
+    }
+
+    /// A backlight that always succeeds — this test cares about the flag, not the rail.
+    struct OkBacklight;
+
+    impl platform_core::Backlight for OkBacklight {
+        type Error = std::convert::Infallible;
+
+        fn set(&mut self, _lit: bool) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    /// A dark glass is not painted, and lighting it again repaints in full even though the app
+    /// state never changed.
+    ///
+    /// Both halves matter and they are one behaviour. Skipping the paint is the point of the
+    /// toggle — a screen nobody can see must not cost SPI traffic. Repainting on the way back is
+    /// what makes that safe: the panel keeps its framebuffer across a backlight cut, so the
+    /// stale picture would otherwise sit there until the app's state happened to move.
+    #[test]
+    fn a_dark_glass_is_not_painted_and_lighting_it_repaints() {
+        let clock: Monotonic = Monotonic::start();
+        let (tx, rx): (Sender<()>, _) = channel();
+        let (base, shown): (FakeScreen, _) = FakeScreen::new();
+        let screen: FakeScreen = base.pinging(tx);
+        let config: DisplayConfig = DisplayConfig {
+            period: Duration::from_millis(1),
+            animation_period: Duration::from_millis(1),
+            dark_period: Duration::from_millis(1),
+            stack_size: 256 * 1024,
+        };
+        let mut switch: BacklightSwitch<OkBacklight> = BacklightSwitch::new(OkBacklight, true);
+
+        let task: DisplayTask = spawn_display(
+            screen,
+            fixed(TestState::Still(45)),
+            landscape(),
+            switch.flag(),
+            clock,
+            config,
+        )
+        .expect("spawn display thread");
+
+        rx.recv_timeout(Duration::from_secs(2))
+            .expect("the display must paint the first value while lit");
+
+        // Go dark, let any paint already in flight land, then take the silence as the assertion.
+        switch.toggle().expect("darken the glass");
+        thread::sleep(Duration::from_millis(50));
+        while rx.try_recv().is_ok() {}
+        assert!(
+            rx.recv_timeout(Duration::from_millis(200)).is_err(),
+            "a dark glass must not be painted"
+        );
+
+        // Light it again: the state never changed, so only the dropped picture can explain a
+        // repaint — which is exactly the guarantee.
+        switch.toggle().expect("light the glass");
+        rx.recv_timeout(Duration::from_secs(2))
+            .expect("lighting the glass must repaint it");
+
+        task.stop();
+        task.join().expect("the display thread must not panic");
+
+        let painted: Vec<TestState> = shown_states(&shown);
+        assert_eq!(
+            painted,
+            vec![TestState::Still(45), TestState::Still(45)],
+            "exactly two paints: the first, and the one the light coming back forced"
         );
     }
 }

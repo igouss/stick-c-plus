@@ -13,7 +13,8 @@ pub const POWER_DEBOUNCE_MS: Tick = 50;
 /// Turns a raw, potentially chattering VBUS level into a settled one, as a pure function of
 /// time.
 ///
-/// Mirrors [`Debounce`](crate::Debounce)'s stability window, simplified to a bare level — a
+/// Mirrors the button debounce's stability window (`platform_input::Debounce`), simplified to
+/// a bare level — a
 /// power source has no tap/hold gesture policy to layer on top. A level is accepted only
 /// once it has held steady for [`POWER_DEBOUNCE_MS`], so a bounce train settles once.
 ///

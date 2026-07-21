@@ -3,7 +3,7 @@ name = "platform-core"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "The board-generic pure kernel for the M5StickC Plus: the millisecond clock port, the animated-state and Screen render ports, the button-input port with a pure debounce, and the buzzer tone port — framework-free value types and traits every app builds on."
+description = "The board-generic pure kernel for the M5StickC Plus: the millisecond clock port, the animated-state and Screen render ports, the backlight and buzzer tone ports, and the screen-rotation policy — framework-free value types and traits every app builds on. The buttons live next door in platform-input."
 
 [lib]
 name = "platform_core"

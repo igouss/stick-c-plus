@@ -11,9 +11,9 @@
 //!   it; the domain and shells take `now: `[`Tick`] so time is injected, never read.
 //! - [`Screen`] — a driven display that renders a view of some app state `S`. The ST7789
 //!   panel adapter implements it; the app supplies the picture.
-//! - [`Button`] — a momentary button's raw pressed level, debounced by the pure
-//!   [`Debounce`] into [`ButtonEvent`]s (a tap, or a long hold); an app that wants a
-//!   double-tap routes that stream through the pure [`TapCadence`].
+//! - [`Backlight`] — whether the glass is lit, switchable without disturbing the panel
+//!   beneath it (they are separate rails on this board), so a dark screen keeps its
+//!   framebuffer and comes back instantly.
 //! - [`Tone`] — a buzzer that plays a sequence of [`Note`]s. The app owns the melody; the
 //!   adapter only sounds it.
 //! - [`AudioIn`] — a microphone yielding mono PCM samples. The adapter only transfers samples;
@@ -43,10 +43,10 @@
 
 mod animated;
 mod audio;
+mod backlight;
 mod chime;
 mod clock;
 mod imu;
-mod input;
 mod power;
 mod power_debounce;
 mod rotation;
@@ -56,10 +56,10 @@ mod tick;
 
 pub use animated::Animated;
 pub use audio::AudioIn;
+pub use backlight::Backlight;
 pub use chime::{edge, PowerChime};
 pub use clock::Clock;
 pub use imu::{is_at_rest, Acceleration, Imu, ONE_G_MG, REST_TOLERANCE_MG};
-pub use input::{Button, ButtonEvent, Debounce, TapCadence, DEBOUNCE_MS, DOUBLE_TAP_MS, HOLD_MS};
 pub use power::PowerSource;
 pub use power_debounce::{PowerDebounce, POWER_DEBOUNCE_MS};
 pub use rotation::{

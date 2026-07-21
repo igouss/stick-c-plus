@@ -16,6 +16,10 @@
 //!   [`Animated`](platform_core::Animated) app state and [`Screen`](platform_core::Screen)
 //!   adapter: it pulls the freshest state from an injected `source`, repaints only when the
 //!   `(state, frame)` picture changed, and takes its cadence from whether the creature moves.
+//! - [`BacklightSwitch`] / [`LitFlag`] — whether the glass is lit. The switch owns the
+//!   [`Backlight`](platform_core::Backlight) port and is the only writer; every interested
+//!   thread holds a cheap [`LitFlag`] clone instead, so the display loop can skip a paint
+//!   nobody can see without putting an I2C transaction on the render path.
 //! - [`spawn_power_watch`] — the VBUS-watch thread: poll a
 //!   [`PowerSource`](platform_core::PowerSource), debounce it, and sound the
 //!   [`PowerChime`](platform_core::PowerChime) a settled transition decides, on an injected
@@ -29,17 +33,19 @@
 //!   to touch the IMU is that question. An app that already runs a sampler feeds the same cell
 //!   instead of spawning a second owner of one I2C device.
 
+mod backlight;
 mod buzzer;
 mod clock;
 mod display;
 mod power_watch;
 mod rotation;
 
+pub use backlight::{BacklightSwitch, LitFlag};
 pub use buzzer::{spawn_buzzer, BuzzerHandle, BuzzerTask, OwnerGone, BUZZER_STACK_SIZE};
 pub use clock::Monotonic;
 pub use display::{
-    spawn_display, DisplayConfig, DisplayTask, ANIMATION_PERIOD, DISPLAY_STACK_SIZE, MIN_YIELD,
-    RENDER_PERIOD,
+    spawn_display, DisplayConfig, DisplayTask, ANIMATION_PERIOD, DARK_PERIOD, DISPLAY_STACK_SIZE,
+    MIN_YIELD, RENDER_PERIOD,
 };
 pub use power_watch::{
     spawn_power_watch, PowerWatchConfig, PowerWatchTask, POWER_WATCH_PERIOD, POWER_WATCH_STACK_SIZE,
