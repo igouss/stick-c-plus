@@ -161,7 +161,16 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
 - `experiment` [2026-07-21 · Does turning the panel cost paint time? (no — and what does)](experiments/2026-07-21-paint-cost-by-rotation/README.md)
   — **confirmed**: 400 per-cell `Rectangle` fills = ~85 ms/frame; one `fill_contiguous`
   = 0 over-budget paints. Two flashes, same pixels, only the fill strategy changed.
+- `experiment` [2026-07-21 · What blocks the pomodoro paint for 39 ms? (nothing — it was never blocked)](experiments/2026-07-21-what-blocks-the-pomodoro-paint/README.md)
+  — **confirmed**: a subtractive sweep over every app thread found *no* breach in 1000
+  paints and said so, then the missing stage found it — a paint carrying a **turn**
+  costs 59.6 ms against 21.5 ms settled, 19 of 19 real turns over budget. Corrects the
+  previous experiment's *reading* (the paint was doing more work, not waiting).
 - `finding` [mipidsi-rectangle-fill-costs-an-address-window](findings/mipidsi-rectangle-fill-costs-an-address-window.md)
   — `high` · a `Rectangle` fill costs a `CASET`/`RASET`/`RAMWR` window setup, so cost
   scales with the *fill count*, not the pixel count. Payload arithmetic says 5.9 ms and
   is confidently wrong. Invisible to every host test **and** to the eye.
+- `finding` [turning-the-panel-costs-a-full-screen-clear](findings/turning-the-panel-costs-a-full-screen-clear.md)
+  — `high` · a paint that *changes* rotation carries a MADCTL write **and a full-screen
+  clear**, ~38 ms, inside the timed `show`. Hides because `set_rotation` early-returns
+  when unchanged, and only breaches while the picture is animated (50 ms budget, not 1 s).

@@ -5,9 +5,30 @@
 **Prior art:** `kb/experiments/2026-07-21-paint-cost-by-rotation/` — read it before writing code;
 it is the measurement this epic starts from and the method it should imitate.
 
-Nothing is implemented. Both beads are open and unstarted.
+> [!IMPORTANT]
+> **Superseded in its central claim, 2026-07-21.** This document's framing — that the paint is
+> *blocked* for ~39 ms and the job is to name the thread that took the core — is wrong, and the
+> live question it set is answered.
+>
+> Nothing took the core. `Panel::set_rotation` early-returns on an unchanged rotation, but on a
+> real change it writes MADCTL **and clears the whole screen**, inside the same `Screen::show`
+> the render loop times. A paint carrying a turn costs **59.56 ms** against **21.50 ms** settled
+> — 19 of 19 real turns over budget, 0 of 180 settled paints over — which is the missing 38 ms.
+> Pressing start did not cause it: an idle screen is held to a 1 s budget and a running one to
+> 50 ms, so the press *lowered the budget* that reveals a cost that was always there. Confirmed
+> on unmodified production firmware.
+>
+> Read [`kb/experiments/2026-07-21-what-blocks-the-pomodoro-paint/`](../../kb/experiments/2026-07-21-what-blocks-the-pomodoro-paint/README.md)
+> instead of Part 1's "How you will know it worked", and `br show stick-c-plus-grp` before
+> touching that bead — it cannot be built without `unsafe` and its sdkconfig flags cannot be
+> scoped, both verified.
+>
+> **What still stands and is worth reading:** the two rules an instrument must obey (Part 2),
+> the flash-cost baseline table, the house rules, the working relationship, and `stick-c-plus-dx9`
+> (`tracing`), which is unaffected and is now the epic's remaining work.
 
-Last updated 2026-07-21, at the end of the session that closed the screen-rotation epic.
+Last updated 2026-07-21, at the end of the session that closed the screen-rotation epic;
+banner added by the session that answered the live question.
 
 ---
 

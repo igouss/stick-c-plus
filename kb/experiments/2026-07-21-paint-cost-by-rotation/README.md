@@ -10,6 +10,20 @@ findings: [mipidsi-rectangle-fill-costs-an-address-window]
 source: [m5stack-m5stickc-plus, embedded-driver-crates]
 ---
 
+> [!IMPORTANT]
+> **Its measurements stand; one of its conclusions does not.** This experiment inferred that
+> "the 60 ms paints in production are the paint being *blocked*, by roughly 39 ms". That was an
+> inference one step past the measurement, and it is wrong. Nothing blocks the paint — a paint
+> that *changes* rotation carries a full-screen clear inside the timed `show`, and costs 59.6 ms
+> against 21.5 ms settled. This experiment could not see it because it deliberately excluded the
+> turning paint as an untimed warm-up (which is right for the question it was asking).
+> See [2026-07-21-what-blocks-the-pomodoro-paint](../2026-07-21-what-blocks-the-pomodoro-paint/README.md)
+> and [[turning-the-panel-costs-a-full-screen-clear]].
+>
+> Everything else here — 21.3 ms at all four rotations, rotation costing nothing per *frame*,
+> cost tracking address windows rather than pixels — is unaffected and was independently
+> reproduced.
+
 ## Question
 
 The pomodoro timer took the screen-rotation capability (ce1.6/ce1.9). With the timer
