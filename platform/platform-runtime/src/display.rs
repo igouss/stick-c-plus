@@ -42,7 +42,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use log::warn;
+use log::{info, warn};
 use platform_core::{Animated, Clock, Screen, ScreenRotation, Tick};
 
 /// How often the panel is repainted while a state is **still**.
@@ -225,17 +225,78 @@ fn render_loop<S, D, F, R, C>(
         // A paint that outruns its own tick means the creature cannot keep its timing: the
         // panel silently drops frames and the animation drags. Nothing on the glass says so,
         // so the loop says it here. Only an actual repaint is measured; a suppressed tick
-        // costs nothing.
+        // costs nothing — and a paint that carried a turn is reported as the once-per-turn
+        // cost it is rather than as a failure. Both logs sit outside the timed region.
         let painted: bool = glass != before;
         let took: Duration = started.elapsed();
-        if painted && took > budget {
-            warn!("platform-display: paint took {took:?}, over the {budget:?} tick budget");
+        match report_for(painted, turned(before, glass), took, budget) {
+            PaintReport::Quiet => {}
+            PaintReport::OverBudget => {
+                warn!("platform-display: paint took {took:?}, over the {budget:?} tick budget")
+            }
+            PaintReport::TurnCost => info!(
+                "platform-display: paint took {took:?} carrying a turn (budget {budget:?}) — \
+                 the panel clears on a rotation change; expected, once per turn"
+            ),
         }
 
         // The cadence follows what is on the glass: fast while a creature moves, slow once it
         // is still. The paint's own cost is subtracted so the frame rate does not drift, and
         // the sleep never reaches zero — see [`MIN_YIELD`].
         thread::sleep(budget.saturating_sub(took).max(MIN_YIELD));
+    }
+}
+
+/// What the loop has to say about a paint that has just finished.
+///
+/// Three outcomes rather than a bool, because "over the budget" and "over the budget *because
+/// it turned*" are different events that happened to trip the same threshold, and reporting
+/// them the same way is what sent a whole profiling epic looking for a thread that did not
+/// exist. See `kb/findings/turning-the-panel-costs-a-full-screen-clear.md`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PaintReport {
+    /// Nothing worth saying: nothing was painted, or what was painted fit its budget.
+    Quiet,
+    /// The paint outran its tick budget. The creature cannot keep its timing and the
+    /// animation will drag — a real fault, and the reason this alarm exists.
+    OverBudget,
+    /// The paint outran its budget *carrying a rotation change*.
+    ///
+    /// Not a fault. `Panel::set_rotation` early-returns when the rotation is unchanged, but on
+    /// a real change it writes MADCTL **and clears the whole screen**, inside the same
+    /// `Screen::show` this loop is timing — measured at 59.6 ms against 21.5 ms settled. Every
+    /// pixel changes meaning when the glass turns, so that clear is work, not waste.
+    ///
+    /// It is exempt because it is a **once-per-turn** cost being judged by a **per-frame**
+    /// budget. A turn is rare and user-initiated, and one dropped animation frame while the
+    /// board is in someone's hand is invisible. Reported rather than silenced, so the cost
+    /// stays visible in the log and a *regression* in it would still show up.
+    TurnCost,
+}
+
+/// Whether the glass turned between these two paints.
+///
+/// Exactly the condition under which the panel adapter pays for a turn: `set_rotation`
+/// compares against the rotation it is already showing and early-returns when they match.
+///
+/// The very first paint is deliberately **not** treated as a turn. `before` is `None` so there
+/// is no previous rotation to have changed from, and a first paint that genuinely overruns is
+/// worth one honest warning at boot rather than a special case that hides it.
+fn turned<S: Animated>(before: Glass<S>, after: Glass<S>) -> bool {
+    match (before, after) {
+        (Some(before), Some(after)) => before.rotation != after.rotation,
+        _ => false,
+    }
+}
+
+/// Which report a finished paint earns.
+///
+/// Split out from the loop so the rule is exercised without a thread, a clock or a panel.
+fn report_for(painted: bool, turned: bool, took: Duration, budget: Duration) -> PaintReport {
+    match (painted && took > budget, turned) {
+        (false, _) => PaintReport::Quiet,
+        (true, true) => PaintReport::TurnCost,
+        (true, false) => PaintReport::OverBudget,
     }
 }
 
@@ -453,6 +514,95 @@ mod tests {
     /// The states a glass is showing, in order.
     fn shown_states(shown: &Arc<Mutex<Vec<TestState>>>) -> Vec<TestState> {
         shown.lock().expect("shown log lock").clone()
+    }
+
+    /// Zero — nothing was painted, so there is nothing to report however long the tick took.
+    /// A suppressed tick costs nothing and must never raise an alarm.
+    #[test]
+    fn a_tick_that_painted_nothing_is_quiet() {
+        assert_eq!(
+            report_for(false, false, Duration::from_secs(9), ANIMATION_PERIOD),
+            PaintReport::Quiet
+        );
+    }
+
+    /// A paint inside its budget is quiet — including one that turned. The exemption is about
+    /// what to do with an OVERRUN, not a licence to stop measuring turning paints.
+    #[test]
+    fn a_paint_inside_its_budget_is_quiet_whether_or_not_it_turned() {
+        let quick: Duration = Duration::from_millis(21);
+        assert_eq!(
+            report_for(true, false, quick, ANIMATION_PERIOD),
+            PaintReport::Quiet
+        );
+        assert_eq!(
+            report_for(true, true, quick, ANIMATION_PERIOD),
+            PaintReport::Quiet
+        );
+    }
+
+    /// THE fault this alarm exists for: a paint that outran its budget without turning. The
+    /// creature cannot keep its timing, and nothing on the glass says so.
+    #[test]
+    fn a_paint_that_outran_its_budget_without_turning_is_a_fault() {
+        assert_eq!(
+            report_for(true, false, Duration::from_millis(60), ANIMATION_PERIOD),
+            PaintReport::OverBudget
+        );
+    }
+
+    /// THE exemption: the same overrun, carrying a turn, is the once-per-turn full-screen clear
+    /// and not a fault. Measured at 59.6 ms against a 50 ms budget, which is the case that made
+    /// this distinction necessary.
+    #[test]
+    fn a_paint_that_outran_its_budget_carrying_a_turn_is_the_turn_cost() {
+        assert_eq!(
+            report_for(true, true, Duration::from_micros(59_560), ANIMATION_PERIOD),
+            PaintReport::TurnCost
+        );
+    }
+
+    /// A turn is a CHANGE of rotation, which is exactly when the adapter pays for one —
+    /// `set_rotation` early-returns when the rotation it is handed is the one already showing.
+    #[test]
+    fn a_changed_rotation_is_a_turn_and_an_unchanged_one_is_not() {
+        let at = |rotation: ScreenRotation| -> Glass<TestState> {
+            Some(Shown {
+                state: TestState::Moving(0),
+                frame: 0,
+                rotation,
+                since: 0,
+            })
+        };
+
+        assert!(turned(at(ScreenRotation::Deg0), at(ScreenRotation::Deg90)));
+        assert!(!turned(
+            at(ScreenRotation::Deg90),
+            at(ScreenRotation::Deg90)
+        ));
+    }
+
+    /// The first paint is not a turn: there is no previous rotation for it to have changed
+    /// from, and a genuinely slow first paint is worth one honest warning at boot.
+    #[test]
+    fn the_first_paint_is_not_a_turn() {
+        let after: Glass<TestState> = Some(Shown {
+            state: TestState::Moving(0),
+            frame: 0,
+            rotation: ScreenRotation::Deg90,
+            since: 0,
+        });
+
+        assert!(!turned(None, after));
+        assert_eq!(
+            report_for(
+                true,
+                turned(None, after),
+                Duration::from_millis(60),
+                ANIMATION_PERIOD
+            ),
+            PaintReport::OverBudget
+        );
     }
 
     #[test]
