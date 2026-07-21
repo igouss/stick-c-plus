@@ -14,6 +14,9 @@
 //!   as an LEDC PWM square wave.
 //! - [`PdmMic`] — the SPM1423 PDM microphone (G0 / G34) as the [`AudioIn`](platform_core::AudioIn)
 //!   port, decimated to PCM by the I2S peripheral. Used by the chime self-test to hear the buzzer.
+//! - [`Mpu6886Imu`] — the MPU6886 IMU (internal I2C bus) as the [`Imu`](platform_core::Imu)
+//!   port: one burst read of the three accelerometer axes, in milli-g. What the vector
+//!   *means* — the tilt angles, the resting face — is decided inward by an app's domain.
 //! - [`Axp192PowerSource`] — the AXP192 PMIC (internal I2C bus) as the
 //!   [`PowerSource`](platform_core::PowerSource) port: is USB (VBUS) present? Reads one status
 //!   bit; the debounce and the plug/unplug chime decision live inward in `platform-core`.
@@ -23,12 +26,14 @@
 
 mod button;
 mod buzzer;
+mod imu;
 mod panel;
 mod pdm_mic;
 mod power_source;
 
 pub use button::GpioButton;
 pub use buzzer::LedcBuzzer;
+pub use imu::Mpu6886Imu;
 pub use panel::{Panel, PanelScreen, PanelTarget, St7789Error};
 pub use pdm_mic::PdmMic;
 pub use power_source::Axp192PowerSource;

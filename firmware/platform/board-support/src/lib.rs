@@ -10,14 +10,19 @@
 //! - [`axp192`] / [`Axp192`] — the thin AXP192 driver that powers the LCD/TFT rails
 //!   (qhw.20). Generic over `embedded-hal` I2c, so the composition root can share
 //!   the one bus (via `embedded-hal-bus`) across every device that sits on it.
+//! - [`mpu6886`] / [`Mpu6886`] — the thin MPU6886 IMU driver that reads which way the
+//!   board is pointing. Generic over `embedded-hal` I2c in the same way, so it shares
+//!   that one bus with the PMIC.
 //!
 //! The rails must be powered *before* the display: an unpowered LDO2/LDO3 leaves
 //! the TFT dark regardless of a correct ST7789 init. The composition root brings
 //! the bus up, powers the AXP192, then builds the display.
 
 pub mod axp192;
+pub mod mpu6886;
 
 pub use axp192::Axp192;
+pub use mpu6886::{AccelRange, Mpu6886, Mpu6886Error};
 
 use esp_idf_hal::gpio::{Gpio21, Gpio22};
 use esp_idf_hal::i2c::{I2cConfig, I2cDriver, I2C0};
