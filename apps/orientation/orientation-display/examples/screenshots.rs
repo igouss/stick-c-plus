@@ -62,19 +62,19 @@ fn screens() -> Vec<Screen> {
         ),
         Screen::live(
             "orientation-03-upright.png",
-            Acceleration::new(-ONE_G_MG, 0, 0),
-        ),
-        Screen::live(
-            "orientation-04-inverted.png",
             Acceleration::new(ONE_G_MG, 0, 0),
         ),
         Screen::live(
+            "orientation-04-inverted.png",
+            Acceleration::new(-ONE_G_MG, 0, 0),
+        ),
+        Screen::live(
             "orientation-05-left-edge.png",
-            Acceleration::new(0, ONE_G_MG, 0),
+            Acceleration::new(0, -ONE_G_MG, 0),
         ),
         Screen::live(
             "orientation-06-right-edge.png",
-            Acceleration::new(0, -ONE_G_MG, 0),
+            Acceleration::new(0, ONE_G_MG, 0),
         ),
         // Between faces: the amber label, and two bars at rest mid-track.
         Screen::live("orientation-07-tilted.png", Acceleration::new(0, 707, 707)),

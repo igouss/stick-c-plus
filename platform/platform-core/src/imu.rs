@@ -8,20 +8,32 @@
 /// up vector.
 pub const ONE_G_MG: i32 = 1_000;
 
-/// A three-axis proper acceleration, in milli-g.
+/// A three-axis proper acceleration, in milli-g, in the **board's** frame.
 ///
 /// Milli-g as `i32`, not a float: the port stays exact, `Copy`, allocation-free and
 /// `no_std`-friendly, and the ±16 g an MPU6886 can be configured for is four orders of
-/// magnitude inside an `i32`. The axes are the *sensor's own*, as the board mounts it —
-/// deciding which one points at the sky, and what to call that, is the app's job, not the
-/// port's.
+/// magnitude inside an `i32`.
+///
+/// ## Whose axes these are
+///
+/// The board's, not the sensor's. An IMU is soldered down at whatever rotation suited the
+/// layout, and that rotation is a fact about the *board* — so the adapter that knows the part
+/// is also the one that knows how it was mounted, and it rotates each reading into the board
+/// frame before it crosses this port. An app therefore reads axes that mean something about
+/// the object in the user's hand, and a remounted part or a different IMU is an adapter-only
+/// change.
+///
+/// Which board direction each axis points along is the board's own fact, documented by its
+/// adapter and by whatever names the app gives the poses. What the *port* guarantees is only
+/// that they are the board's and not the chip's — and that at rest the vector points along
+/// whichever board axis is up, per [`ONE_G_MG`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Acceleration {
-    /// Acceleration along the sensor's X axis, in milli-g.
+    /// Acceleration along the board's X axis, in milli-g.
     pub x_mg: i32,
-    /// Acceleration along the sensor's Y axis, in milli-g.
+    /// Acceleration along the board's Y axis, in milli-g.
     pub y_mg: i32,
-    /// Acceleration along the sensor's Z axis, in milli-g.
+    /// Acceleration along the board's Z axis, in milli-g.
     pub z_mg: i32,
 }
 
@@ -54,12 +66,18 @@ impl Acceleration {
 ///
 /// The driven port for "which way is the board being pulled?" — sibling to
 /// [`PowerSource`](crate::PowerSource) and [`Button`](crate::Button). The adapter owns its own
-/// failure type and every register, address and bus detail; this port names no hardware.
+/// failure type, every register, address and bus detail, *and* the rotation from however the
+/// part is soldered into the board frame; this port names no hardware.
 pub trait Imu {
     /// The adapter's own read-failure type.
     type Error;
 
-    /// The proper acceleration the board feels right now.
+    /// The proper acceleration the board feels right now, in the board's own axes.
+    ///
+    /// Implementations must return the *board* frame, applying the sensor's mounting rotation
+    /// themselves. Passing the chip's raw axes through unrotated is a contract violation, and
+    /// a quiet one: the numbers stay plausible and only the *names* an app puts on them go
+    /// wrong, which is a bug no amount of host testing can find.
     fn acceleration(&mut self) -> Result<Acceleration, Self::Error>;
 }
 

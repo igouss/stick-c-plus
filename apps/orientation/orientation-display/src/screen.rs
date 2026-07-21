@@ -224,8 +224,8 @@ mod tests {
     #[test]
     fn three_poses_paint_three_distinct_pictures() {
         let back: Framebuffer = painted(view_of(0, 0, ONE_G_MG));
-        let upright: Framebuffer = painted(view_of(-ONE_G_MG, 0, 0));
-        let edge: Framebuffer = painted(view_of(0, ONE_G_MG, 0));
+        let upright: Framebuffer = painted(view_of(ONE_G_MG, 0, 0));
+        let edge: Framebuffer = painted(view_of(0, -ONE_G_MG, 0));
         assert_ne!(back.pixels(), upright.pixels());
         assert_ne!(upright.pixels(), edge.pixels());
         assert_ne!(back.pixels(), edge.pixels());
@@ -256,8 +256,8 @@ mod tests {
     /// angles, and a reading well past the bars' full scale.
     #[test]
     fn no_state_escapes_the_canvas() {
-        // The widest label (RIGHT EDGE) and a full-scale negative reading.
-        assert_eq!(painted(view_of(0, -ONE_G_MG, 0)).escaped(), 0);
+        // The widest label (RIGHT EDGE) and a full-scale reading on its axis.
+        assert_eq!(painted(view_of(0, ONE_G_MG, 0)).escaped(), 0);
         // The widest angles: a half turn of roll reads R-180.
         assert_eq!(painted(view_of(0, 0, -ONE_G_MG)).escaped(), 0);
         // Far past full scale, on every axis at once, in both signs.
@@ -336,8 +336,8 @@ mod tests {
     /// thing the field ever holds after `RIGHT EDGE`.
     #[test]
     fn a_lost_signal_does_not_escape_the_canvas() {
-        assert_eq!(stale_view_of(0, -ONE_G_MG, 0).label(), "NO SIGNAL");
-        assert_eq!(painted(stale_view_of(0, -ONE_G_MG, 0)).escaped(), 0);
+        assert_eq!(stale_view_of(0, ONE_G_MG, 0).label(), "NO SIGNAL");
+        assert_eq!(painted(stale_view_of(0, ONE_G_MG, 0)).escaped(), 0);
         assert_eq!(painted(stale_view_of(-8_000, 8_000, -8_000)).escaped(), 0);
     }
 

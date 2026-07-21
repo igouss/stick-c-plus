@@ -38,9 +38,15 @@ const DEGREES_PER_RADIAN: f32 = 180.0 / core::f32::consts::PI;
 /// - **roll** is `atan2(y, z)`: how the gravity vector is split between the screen normal and
 ///   the board's short axis, over the full `-180..=180` so an upside-down board is
 ///   distinguishable from an upright one.
-/// - **pitch** is `atan2(-x, hypot(y, z))`: how far the long axis has lifted out of the plane
+/// - **pitch** is `atan2(x, hypot(y, z))`: how far the long axis has lifted out of the plane
 ///   the other two span. Measured against the *combined* magnitude of the other axes rather
 ///   than one of them, so a pitch reading does not change as the board is rolled.
+///
+/// Both follow the same sign rule the pose names do: a resting axis reads positive when it
+/// points at the sky, so raising the stick's top raises `x` and raises the pitch. Pitch was
+/// once `atan2(-x, ...)`, which reported a board standing on its USB-C port as `-90°` — a
+/// board tipped nose-up reading nose-down, and the same inverted convention that misnamed
+/// four of the six faces.
 ///
 /// A zero vector — free fall, or a sensor that has stopped reporting — yields a zero attitude
 /// rather than an error: `atan2(0, 0)` is defined as `0`, and the caller already has
@@ -52,7 +58,7 @@ pub fn attitude_of(acceleration: Acceleration) -> Attitude {
     let z: f32 = acceleration.z_mg as f32;
 
     let roll: f32 = libm::atan2f(y, z) * DEGREES_PER_RADIAN;
-    let pitch: f32 = libm::atan2f(-x, libm::sqrtf(y * y + z * z)) * DEGREES_PER_RADIAN;
+    let pitch: f32 = libm::atan2f(x, libm::sqrtf(y * y + z * z)) * DEGREES_PER_RADIAN;
 
     Attitude {
         pitch_deg: round_to_degrees(pitch),
@@ -95,11 +101,21 @@ mod tests {
         assert_eq!(attitude_of(Acceleration::default()), Attitude::default());
     }
 
-    /// One: standing the stick on its USB-C port is a full quarter turn of pitch.
+    /// One: standing the stick on its USB-C port is a full quarter turn of pitch, *upward* —
+    /// the top of the stick is the end in the air, so `+X` carries the gravity and the pitch
+    /// is positive.
     #[test]
     fn an_upright_board_pitches_a_quarter_turn() {
-        let upright: Attitude = attitude_of(Acceleration::new(-ONE_G_MG, 0, 0));
+        let upright: Attitude = attitude_of(Acceleration::new(ONE_G_MG, 0, 0));
         assert_eq!(upright.pitch_deg, RIGHT_ANGLE_DEG);
+    }
+
+    /// ...and standing it on its top edge pitches the other way by the same quarter turn. The
+    /// pair is what pins the sign: a formula with the sign inverted passes either one alone.
+    #[test]
+    fn an_inverted_board_pitches_the_other_way() {
+        let inverted: Attitude = attitude_of(Acceleration::new(-ONE_G_MG, 0, 0));
+        assert_eq!(inverted.pitch_deg, -RIGHT_ANGLE_DEG);
     }
 
     /// One: rolling the stick onto an edge is a quarter turn of roll, and the sign follows
@@ -131,7 +147,7 @@ mod tests {
     fn a_diagonal_reads_forty_five_degrees() {
         // 707 mg on two axes is a unit vector at 45°.
         assert_eq!(attitude_of(Acceleration::new(0, 707, 707)).roll_deg, 45);
-        assert_eq!(attitude_of(Acceleration::new(-707, 0, 707)).pitch_deg, 45);
+        assert_eq!(attitude_of(Acceleration::new(707, 0, 707)).pitch_deg, 45);
     }
 
     /// Pitch is measured against the other two axes combined, so rolling the board does not
@@ -140,9 +156,9 @@ mod tests {
     #[test]
     fn rolling_the_board_does_not_change_its_pitch() {
         // The same 30° pitch (500 mg on X), with the remaining 866 mg split three ways.
-        let unrolled: Attitude = attitude_of(Acceleration::new(-500, 0, 866));
-        let rolled: Attitude = attitude_of(Acceleration::new(-500, 866, 0));
-        let half_rolled: Attitude = attitude_of(Acceleration::new(-500, 612, 612));
+        let unrolled: Attitude = attitude_of(Acceleration::new(500, 0, 866));
+        let rolled: Attitude = attitude_of(Acceleration::new(500, 866, 0));
+        let half_rolled: Attitude = attitude_of(Acceleration::new(500, 612, 612));
         assert_eq!(unrolled.pitch_deg, 30);
         assert_eq!(rolled.pitch_deg, 30);
         assert_eq!(half_rolled.pitch_deg, 30);

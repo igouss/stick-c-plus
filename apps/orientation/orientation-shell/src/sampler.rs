@@ -315,7 +315,7 @@ mod tests {
         sample_once(&mut imu, &mut smoother, &shared, 0);
         assert_eq!(shared.last_known().facing, Facing::ScreenUp);
 
-        cell.set(Acceleration::new(-ONE_G_MG, 0, 0));
+        cell.set(Acceleration::new(ONE_G_MG, 0, 0));
         (0..20).for_each(|_| {
             sample_once(&mut imu, &mut smoother, &shared, 0);
         });
@@ -418,7 +418,7 @@ mod tests {
         assert_eq!(shared.last_known().facing, Facing::ScreenUp);
 
         // Turn the board, then let the smoother settle over plenty of real cycles.
-        *reading.lock().expect("reading lock") = Acceleration::new(-ONE_G_MG, 0, 0);
+        *reading.lock().expect("reading lock") = Acceleration::new(ONE_G_MG, 0, 0);
         await_cycles(&rx, 40);
         assert_eq!(shared.last_known().facing, Facing::Upright);
 

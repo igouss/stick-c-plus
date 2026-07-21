@@ -23,17 +23,30 @@ pub const REST_TOLERANCE_MG: i32 = 250;
 ///
 /// ## The axis convention
 ///
-/// These names assume the M5StickC Plus mounts its MPU6886 so that, with the stick held
-/// screen-toward-you and the USB-C port at the bottom:
+/// These names read the *board* frame the [`Imu`](platform_core::Imu) port promises — with the
+/// stick held screen-toward-you and the USB-C port at the bottom:
 ///
-/// - **+Z** points out of the screen — so a board lying on its back reads `+1 g` on Z.
+/// - **+Z** points out of the screen.
 /// - **+X** points along the stick toward the top (away from the USB-C port).
 /// - **+Y** points out of the stick's left edge.
 ///
-/// The mapping is a fact about how the part is soldered, not about the driver, so it lives
-/// here in one place: if the board disagrees, [`facing_of`] is the single function to correct
-/// and every label follows. The screen shows the raw signed X/Y/Z alongside the name for
-/// exactly this reason — the numbers are checkable against the name by eye.
+/// How the MPU6886 is actually soldered is *not* a fact about this crate: the part sits a
+/// quarter turn about Z from these axes, and the adapter rotates every reading before it
+/// crosses the port. That is why this file names no chip and needs no correction if the part
+/// is ever remounted.
+///
+/// ## Which way a resting axis reads
+///
+/// An accelerometer measures proper acceleration, so at rest it reads `+1 g` along whichever
+/// axis points **up**, away from the earth — not along the one pointing down. A board lying on
+/// its back therefore reads `z = +1 g`, and a board standing on its USB-C port has its top in
+/// the air and reads `x = +1 g`.
+///
+/// This is the half of the convention that is easy to get backwards, and getting it backwards
+/// is invisible in isolation: every pose still produces a confident name, just the *opposite*
+/// one, and only two of the six faces look wrong at a glance. The screen shows the raw signed
+/// X/Y/Z alongside the name for exactly this reason — the numbers are checkable against the
+/// name by eye, which is how the six faces were verified on the metal.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Facing {
     /// Lying on its back, screen at the sky.
@@ -118,7 +131,8 @@ pub fn facing_of(acceleration: Acceleration) -> Facing {
     }
 
     // One `if` chain over the three axes, ordered by which carries the dominant magnitude.
-    // See the type docs for the board's axis convention.
+    // Each arm names the face whose *up* direction that axis points along, because a resting
+    // axis reads positive when it points at the sky. See the type docs.
     if z_mg.abs() == dominant {
         if z_mg > 0 {
             Facing::ScreenUp
@@ -127,14 +141,14 @@ pub fn facing_of(acceleration: Acceleration) -> Facing {
         }
     } else if x_mg.abs() == dominant {
         if x_mg > 0 {
-            Facing::Inverted
-        } else {
             Facing::Upright
+        } else {
+            Facing::Inverted
         }
     } else if y_mg > 0 {
-        Facing::LeftEdge
-    } else {
         Facing::RightEdge
+    } else {
+        Facing::LeftEdge
     }
 }
 
@@ -160,14 +174,59 @@ mod tests {
     }
 
     /// Many: every axis and sign names its own distinct face — six poses, six answers.
+    ///
+    /// Each line reads "the axis pointing up names the face resting down". All six were
+    /// checked against the board itself; the adapter's rotation is what makes these the same
+    /// numbers the metal produces.
     #[test]
     fn every_axis_and_sign_names_its_own_face() {
         assert_eq!(facing_of(resting(0, 0, ONE_G_MG)), Facing::ScreenUp);
         assert_eq!(facing_of(resting(0, 0, -ONE_G_MG)), Facing::ScreenDown);
-        assert_eq!(facing_of(resting(-ONE_G_MG, 0, 0)), Facing::Upright);
-        assert_eq!(facing_of(resting(ONE_G_MG, 0, 0)), Facing::Inverted);
-        assert_eq!(facing_of(resting(0, ONE_G_MG, 0)), Facing::LeftEdge);
-        assert_eq!(facing_of(resting(0, -ONE_G_MG, 0)), Facing::RightEdge);
+        assert_eq!(facing_of(resting(ONE_G_MG, 0, 0)), Facing::Upright);
+        assert_eq!(facing_of(resting(-ONE_G_MG, 0, 0)), Facing::Inverted);
+        assert_eq!(facing_of(resting(0, -ONE_G_MG, 0)), Facing::LeftEdge);
+        assert_eq!(facing_of(resting(0, ONE_G_MG, 0)), Facing::RightEdge);
+    }
+
+    /// The sign convention itself, stated once as a test: a resting axis reads *positive*
+    /// when it points at the sky. Getting this backwards names every face its opposite, which
+    /// is exactly what shipped before the six faces were checked on the board.
+    #[test]
+    fn a_resting_axis_reads_positive_when_it_points_up() {
+        // The board on its back has its screen — and so +Z — pointing at the sky.
+        assert_eq!(facing_of(resting(0, 0, ONE_G_MG)), Facing::ScreenUp);
+        // Standing on the USB-C port puts the stick's top — and so +X — in the air.
+        assert_eq!(facing_of(resting(ONE_G_MG, 0, 0)), Facing::Upright);
+        // Resting on the left edge puts the *right* edge up, and +Y points out of the left.
+        assert_eq!(facing_of(resting(0, -ONE_G_MG, 0)), Facing::LeftEdge);
+    }
+
+    /// Opposite readings name opposite faces, on every axis. A convention that drifted on one
+    /// axis only would still pass a per-face check that happened to test the other sign.
+    #[test]
+    fn opposite_readings_name_opposing_faces() {
+        let opposites: [(Facing, Facing); 3] = [
+            (
+                facing_of(resting(0, 0, ONE_G_MG)),
+                facing_of(resting(0, 0, -ONE_G_MG)),
+            ),
+            (
+                facing_of(resting(ONE_G_MG, 0, 0)),
+                facing_of(resting(-ONE_G_MG, 0, 0)),
+            ),
+            (
+                facing_of(resting(0, ONE_G_MG, 0)),
+                facing_of(resting(0, -ONE_G_MG, 0)),
+            ),
+        ];
+        assert_eq!(
+            opposites,
+            [
+                (Facing::ScreenUp, Facing::ScreenDown),
+                (Facing::Upright, Facing::Inverted),
+                (Facing::RightEdge, Facing::LeftEdge),
+            ]
+        );
     }
 
     /// A board held at a true 45° corner names no face: both axes carry ~707 mg, under the

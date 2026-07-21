@@ -66,8 +66,8 @@ mod tests {
     #[test]
     fn three_poses_read_as_three_distinct_orientations() {
         let back: Orientation = Orientation::of(Acceleration::new(0, 0, ONE_G_MG));
-        let upright: Orientation = Orientation::of(Acceleration::new(-ONE_G_MG, 0, 0));
-        let edge: Orientation = Orientation::of(Acceleration::new(0, ONE_G_MG, 0));
+        let upright: Orientation = Orientation::of(Acceleration::new(ONE_G_MG, 0, 0));
+        let edge: Orientation = Orientation::of(Acceleration::new(0, -ONE_G_MG, 0));
 
         assert_ne!(back, upright);
         assert_ne!(upright, edge);

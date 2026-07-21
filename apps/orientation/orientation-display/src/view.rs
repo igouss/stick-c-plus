@@ -198,7 +198,7 @@ mod tests {
     /// cannot overflow its line or fail to erase a longer predecessor.
     #[test]
     fn the_no_signal_label_fits_the_screens_field() {
-        assert!(stale_view_of(0, -ONE_G_MG, 0).label().len() <= 10);
+        assert!(stale_view_of(0, ONE_G_MG, 0).label().len() <= 10);
     }
 
     /// Losing the signal is a different view even when the numbers are identical — otherwise
