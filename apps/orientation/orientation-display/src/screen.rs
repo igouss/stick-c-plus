@@ -11,7 +11,7 @@
 
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
-use orientation_core::Facing;
+use orientation_core::{Facing, Signal};
 use platform_display::{signed_bar, text_line, RenderError};
 
 use crate::layout::{
@@ -28,14 +28,46 @@ const AXIS_COLOURS: [Rgb565; 3] = [Rgb565::RED, Rgb565::GREEN, Rgb565::BLUE];
 /// bar that grows from it.
 const AXIS_LINE_COLOUR: Rgb565 = Rgb565::new(8, 16, 8);
 
-/// The colour of the face label: white once the board is settled on a face, amber while it is
-/// being moved or held between faces. A glance tells you whether the name is a fact or an
-/// apology before you read the word.
-const fn facing_colour(facing: Facing) -> Rgb565 {
-    if facing.is_resting() {
-        Rgb565::WHITE
+/// How far a colour is knocked down when the reading behind it is no longer being confirmed.
+///
+/// A quarter brightness: still legible, plainly not live. The numbers stay on the glass
+/// because the last thing the sensor said is genuinely useful — it is the *claim* that they
+/// are current which has to go.
+const STALE_DIMMING: u8 = 4;
+
+/// `colour` at a quarter brightness, for a reading that is a memory rather than a measurement.
+///
+/// Not `const`: `RgbColor`'s channel accessors are trait methods, and const traits are not on
+/// stable. It folds at the call sites that matter anyway.
+fn dimmed(colour: Rgb565) -> Rgb565 {
+    Rgb565::new(
+        colour.r() / STALE_DIMMING,
+        colour.g() / STALE_DIMMING,
+        colour.b() / STALE_DIMMING,
+    )
+}
+
+/// `colour` as it should be drawn under `signal` — full strength while the sensor answers,
+/// dimmed once it has stopped.
+fn under(signal: Signal, colour: Rgb565) -> Rgb565 {
+    if signal.is_live() {
+        colour
     } else {
-        Rgb565::new(31, 40, 0)
+        dimmed(colour)
+    }
+}
+
+/// The colour of the label field, in three steps of decreasing confidence.
+///
+/// White once the board is settled on a face; amber while it is being moved or held between
+/// faces — the name is an apology rather than a fact; red when the sensor has stopped
+/// answering altogether, where there is no name at all, only the last one. A glance tells you
+/// which of the three you are looking at before you read the word.
+const fn label_colour(facing: Facing, signal: Signal) -> Rgb565 {
+    match signal {
+        Signal::Lost => Rgb565::RED,
+        Signal::Live if facing.is_resting() => Rgb565::WHITE,
+        Signal::Live => Rgb565::new(31, 40, 0),
     }
 }
 
@@ -57,7 +89,7 @@ where
     axis_rows(target, view)
 }
 
-/// Paint the resting-face name.
+/// Paint the label field: the resting-face name, or that the sensor has gone quiet.
 fn facing_label<D>(target: &mut D, view: OrientationView) -> Result<(), RenderError<D::Error>>
 where
     D: DrawTarget<Color = Rgb565>,
@@ -65,9 +97,9 @@ where
     text_line(
         target,
         FACING_ORIGIN,
-        facing_colour(view.facing),
+        label_colour(view.facing, view.signal),
         FACING_WIDTH,
-        format_args!("{}", view.facing.label()),
+        format_args!("{}", view.label()),
     )
 }
 
@@ -84,7 +116,7 @@ where
     text_line(
         target,
         ANGLES_ORIGIN,
-        Rgb565::CYAN,
+        under(view.signal, Rgb565::CYAN),
         ANGLES_WIDTH,
         format_args!("P{:+03} R{:+04}", view.pitch_deg, view.roll_deg),
     )
@@ -97,22 +129,26 @@ where
 {
     view.axes().iter().enumerate().try_for_each(
         |(index, (name, value_mg)): (usize, &(&'static str, i32))| {
-            axis_row(target, index as i32, name, *value_mg)
+            axis_row(target, index as i32, name, *value_mg, view.signal)
         },
     )
 }
 
 /// Paint one axis row: its one-letter name, its centre-zero bar, and its milli-g value.
+///
+/// The whole row is drawn under `signal`, so a readout nothing is feeding fades together
+/// rather than leaving three confident bars beneath a red label.
 fn axis_row<D>(
     target: &mut D,
     index: i32,
     name: &str,
     value_mg: i32,
+    signal: Signal,
 ) -> Result<(), RenderError<D::Error>>
 where
     D: DrawTarget<Color = Rgb565>,
 {
-    let colour: Rgb565 = AXIS_COLOURS[index as usize];
+    let colour: Rgb565 = under(signal, AXIS_COLOURS[index as usize]);
 
     text_line(
         target,
@@ -135,7 +171,7 @@ where
     text_line(
         target,
         row_value_origin(index),
-        Rgb565::WHITE,
+        under(signal, Rgb565::WHITE),
         VALUE_WIDTH,
         format_args!("{value_mg:>+width$}", width = VALUE_WIDTH),
     )
@@ -144,12 +180,24 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orientation_core::Orientation;
+    use orientation_core::{Orientation, Reading, SIGNAL_TIMEOUT_MS};
     use platform_core::{Acceleration, ONE_G_MG};
     use platform_display::testing::Framebuffer;
 
+    /// A live view of the board reading these axes.
     fn view_of(x_mg: i32, y_mg: i32, z_mg: i32) -> OrientationView {
-        OrientationView::of(&Orientation::of(Acceleration::new(x_mg, y_mg, z_mg)))
+        OrientationView::of(&Reading::aged(
+            Orientation::of(Acceleration::new(x_mg, y_mg, z_mg)),
+            0,
+        ))
+    }
+
+    /// The same board, aged past the point where the readout still vouches for it.
+    fn stale_view_of(x_mg: i32, y_mg: i32, z_mg: i32) -> OrientationView {
+        OrientationView::of(&Reading::aged(
+            Orientation::of(Acceleration::new(x_mg, y_mg, z_mg)),
+            SIGNAL_TIMEOUT_MS,
+        ))
     }
 
     /// Paint `view` into a fresh framebuffer and hand it back for inspection.
@@ -252,5 +300,71 @@ mod tests {
         let settled: Framebuffer = painted(view_of(0, 0, ONE_G_MG));
         let moving: Framebuffer = painted(view_of(0, 0, 3 * ONE_G_MG));
         assert_ne!(settled.pixels(), moving.pixels());
+    }
+
+    /// The honesty gap this screen exists to close: identical numbers, one still being
+    /// confirmed and one not, must not paint the same picture. A screen that failed this
+    /// would show a dead sensor as a perfectly calm readout.
+    #[test]
+    fn a_lost_signal_does_not_look_like_a_live_one() {
+        assert_ne!(
+            painted(view_of(0, 0, ONE_G_MG)).pixels(),
+            painted(stale_view_of(0, 0, ONE_G_MG)).pixels()
+        );
+    }
+
+    /// The three steps of the label vocabulary are three distinct pictures: a named face, a
+    /// face it cannot name, and no signal at all.
+    #[test]
+    fn the_three_degrees_of_confidence_are_three_distinct_pictures() {
+        let settled: Framebuffer = painted(view_of(0, 0, ONE_G_MG));
+        let unsettled: Framebuffer = painted(view_of(0, 707, 707));
+        let lost: Framebuffer = painted(stale_view_of(0, 0, ONE_G_MG));
+        assert_ne!(settled.pixels(), unsettled.pixels());
+        assert_ne!(unsettled.pixels(), lost.pixels());
+        assert_ne!(settled.pixels(), lost.pixels());
+    }
+
+    /// A lost signal still paints — it dims and relabels the readout rather than blanking it,
+    /// because the last thing the sensor said remains worth seeing.
+    #[test]
+    fn a_lost_signal_still_paints_the_last_reading() {
+        assert!(painted(stale_view_of(0, 0, ONE_G_MG)).lit_pixels() > 0);
+    }
+
+    /// Nothing escapes the canvas with the `NO SIGNAL` label up either — it is the widest
+    /// thing the field ever holds after `RIGHT EDGE`.
+    #[test]
+    fn a_lost_signal_does_not_escape_the_canvas() {
+        assert_eq!(stale_view_of(0, -ONE_G_MG, 0).label(), "NO SIGNAL");
+        assert_eq!(painted(stale_view_of(0, -ONE_G_MG, 0)).escaped(), 0);
+        assert_eq!(painted(stale_view_of(-8_000, 8_000, -8_000)).escaped(), 0);
+    }
+
+    /// Erase-in-place holds across a signal change too: a readout that goes stale and
+    /// recovers must land back on exactly the live picture, not a smear of the dimmed one.
+    #[test]
+    fn recovering_the_signal_fully_replaces_the_stale_picture() {
+        let live: OrientationView = view_of(0, 0, ONE_G_MG);
+
+        let mut reused: Framebuffer = Framebuffer::new();
+        render(&mut reused, stale_view_of(0, 0, ONE_G_MG), 0).expect("the stale reading");
+        render(&mut reused, live, 0).expect("the live reading over it");
+
+        assert_eq!(
+            reused.pixels(),
+            painted(live).pixels(),
+            "a recovered signal left the stale picture smeared underneath"
+        );
+    }
+
+    /// Dimming darkens without erasing: a stale colour is neither the live one nor black,
+    /// which is what keeps the numbers legible while plainly not current.
+    #[test]
+    fn dimming_darkens_without_erasing() {
+        let dim: Rgb565 = dimmed(Rgb565::WHITE);
+        assert_ne!(dim, Rgb565::WHITE);
+        assert_ne!(dim, Rgb565::BLACK);
+        assert_eq!(dimmed(Rgb565::BLACK), Rgb565::BLACK);
     }
 }

@@ -1,6 +1,6 @@
 //! `OrientationView` — a snapshot of the board's pose as an [`Animated`] view the loop shows.
 
-use orientation_core::{Facing, Orientation};
+use orientation_core::{Facing, Reading, Signal};
 use platform_core::{Acceleration, Animated, Tick};
 
 /// What the orientation glass shows at one instant.
@@ -20,16 +20,32 @@ pub struct OrientationView {
     pub roll_deg: i32,
     /// The face it is resting on, if any.
     pub facing: Facing,
+    /// Whether these numbers are still being confirmed by a sensor that answers.
+    pub signal: Signal,
 }
 
 impl OrientationView {
-    /// The view of `orientation`.
-    pub const fn of(orientation: &Orientation) -> Self {
+    /// The view of `reading`.
+    pub const fn of(reading: &Reading) -> Self {
         OrientationView {
-            acceleration: orientation.acceleration,
-            pitch_deg: orientation.attitude.pitch_deg,
-            roll_deg: orientation.attitude.roll_deg,
-            facing: orientation.facing,
+            acceleration: reading.orientation.acceleration,
+            pitch_deg: reading.orientation.attitude.pitch_deg,
+            roll_deg: reading.orientation.attitude.roll_deg,
+            facing: reading.orientation.facing,
+            signal: reading.signal,
+        }
+    }
+
+    /// What the label field says: the face name, or that the readout has stopped being fed.
+    ///
+    /// A lost signal takes the label rather than sitting beside it, because the face name is
+    /// exactly the thing that has stopped being true — leaving `SCREEN UP` on the glass with a
+    /// warning next to it asks the reader to notice a modifier before believing a word they
+    /// have already read. Nine characters, inside the ten the field reserves.
+    pub const fn label(&self) -> &'static str {
+        match self.signal {
+            Signal::Live => self.facing.label(),
+            Signal::Lost => "NO SIGNAL",
         }
     }
 
@@ -47,13 +63,15 @@ impl OrientationView {
 }
 
 impl Animated for OrientationView {
-    /// The face. Nothing on this screen animates, but the anchor is still the *coarse* fact
-    /// rather than the whole view: it is what the render loop measures a state's age from, and
-    /// a live milli-g readout would otherwise reset that age on essentially every frame.
-    type Anchor = Facing;
+    /// The face and the signal. Nothing on this screen animates, but the anchor is still the
+    /// *coarse* fact rather than the whole view: it is what the render loop measures a state's
+    /// age from, and a live milli-g readout would otherwise reset that age on essentially
+    /// every frame. Losing or regaining the signal is a genuine change of state — the label
+    /// changes word and colour — so it belongs in the anchor beside the face.
+    type Anchor = (Facing, Signal);
 
-    fn anchor(&self) -> Facing {
-        self.facing
+    fn anchor(&self) -> (Facing, Signal) {
+        (self.facing, self.signal)
     }
 
     /// Never. This screen is an instrument, not a scene — it carries no creature, and every
@@ -72,18 +90,33 @@ impl Animated for OrientationView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orientation_core::Orientation;
     use platform_core::ONE_G_MG;
 
+    /// A live view of the board reading these axes.
     fn view_of(x_mg: i32, y_mg: i32, z_mg: i32) -> OrientationView {
-        OrientationView::of(&Orientation::of(Acceleration::new(x_mg, y_mg, z_mg)))
+        OrientationView::of(&Reading::aged(
+            Orientation::of(Acceleration::new(x_mg, y_mg, z_mg)),
+            0,
+        ))
     }
 
-    /// Zero: a default view names no pose and shows a level, weightless board.
+    /// The same board, but nothing has refreshed the reading for long enough to say so.
+    fn stale_view_of(x_mg: i32, y_mg: i32, z_mg: i32) -> OrientationView {
+        OrientationView::of(&Reading::aged(
+            Orientation::of(Acceleration::new(x_mg, y_mg, z_mg)),
+            orientation_core::SIGNAL_TIMEOUT_MS,
+        ))
+    }
+
+    /// Zero: a default view names no pose, shows a level weightless board, and vouches for
+    /// nothing — a view nothing was read into must not claim a live sensor.
     #[test]
     fn a_default_view_shows_nothing_and_names_no_pose() {
         let blank: OrientationView = OrientationView::default();
         assert_eq!(blank.acceleration, Acceleration::default());
         assert_eq!(blank.facing, Facing::Moving);
+        assert_eq!(blank.signal, Signal::Lost);
     }
 
     /// One: the view carries the orientation's own conclusions, unchanged.
@@ -141,5 +174,46 @@ mod tests {
         assert!(!view.is_animated());
         assert_eq!(view.frame_index(0), 0);
         assert_eq!(view.frame_index(Tick::MAX), 0);
+    }
+
+    /// A live view labels itself with the face it read.
+    #[test]
+    fn a_live_view_is_labelled_with_its_face() {
+        assert_eq!(view_of(0, 0, ONE_G_MG).label(), Facing::ScreenUp.label());
+    }
+
+    /// A lost signal takes over the label, so the face name cannot be read as current.
+    #[test]
+    fn a_lost_signal_replaces_the_face_name() {
+        let stale: OrientationView = stale_view_of(0, 0, ONE_G_MG);
+        assert_eq!(stale.label(), "NO SIGNAL");
+        assert_eq!(
+            stale.facing,
+            Facing::ScreenUp,
+            "the last known face is still carried, it is just not what the label says"
+        );
+    }
+
+    /// The `NO SIGNAL` label fits the same ten-character field every face name does, so it
+    /// cannot overflow its line or fail to erase a longer predecessor.
+    #[test]
+    fn the_no_signal_label_fits_the_screens_field() {
+        assert!(stale_view_of(0, -ONE_G_MG, 0).label().len() <= 10);
+    }
+
+    /// Losing the signal is a different view even when the numbers are identical — otherwise
+    /// the render loop's change suppression would keep a stale readout on the glass forever.
+    #[test]
+    fn losing_the_signal_is_a_different_view() {
+        assert_ne!(view_of(0, 0, ONE_G_MG), stale_view_of(0, 0, ONE_G_MG));
+    }
+
+    /// ...and it resets the state clock, because the label really did change.
+    #[test]
+    fn losing_the_signal_moves_the_anchor() {
+        assert_ne!(
+            view_of(0, 0, ONE_G_MG).anchor(),
+            stale_view_of(0, 0, ONE_G_MG).anchor()
+        );
     }
 }

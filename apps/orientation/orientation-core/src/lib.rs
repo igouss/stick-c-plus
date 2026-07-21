@@ -18,6 +18,9 @@
 //!   [`Acceleration`](platform_core::Acceleration).
 //! - **Entities / policy**: [`Smoother`] — the exponential moving average that turns a noisy
 //!   sample stream into a readout that can be read, tuned for responsiveness over stillness.
+//! - **Entities / policy**: [`Signal`] — whether a reading is fresh enough to still be true,
+//!   and [`Reading`], the pose paired with that verdict. Liveness is decided from an age in
+//!   milliseconds handed in, never from a clock read here.
 //!
 //! The [`Imu`](platform_core::Imu) port itself lives in the shared kernel beside every other
 //! driven port; this crate only decides what its readings *mean*.
@@ -34,9 +37,11 @@
 mod attitude;
 mod facing;
 mod orientation;
+mod signal;
 mod smooth;
 
 pub use attitude::{attitude_of, Attitude, RIGHT_ANGLE_DEG, STRAIGHT_ANGLE_DEG};
 pub use facing::{facing_of, Facing, FACE_THRESHOLD_MG, REST_TOLERANCE_MG};
 pub use orientation::Orientation;
+pub use signal::{Reading, Signal, SIGNAL_TIMEOUT_MS};
 pub use smooth::{Smoother, RESPONSIVE_WEIGHT};

@@ -74,3 +74,32 @@ Feature: The board reads its own orientation from gravity
     And the accelerometer reads 0, 0, 1000 milli-g 7 times
     Then the facing is ScreenUp
     And the pitch is 0 degrees
+
+  Scenario: A reading that just arrived is one the readout stands behind
+    When the accelerometer reads 0, 0, 1000 milli-g
+    Then the facing is ScreenUp
+    And the readout is live
+
+  Scenario: A brief gap in the readings is a glitch, not a lost sensor
+    When the accelerometer reads 0, 0, 1000 milli-g
+    And the accelerometer does not answer for 100 milliseconds
+    Then the readout is live
+    And the facing is ScreenUp
+
+  Scenario: A sensor that stops answering stops being believed
+    When the accelerometer reads 0, 0, 1000 milli-g
+    And the accelerometer does not answer for 500 milliseconds
+    Then the readout reports no signal
+
+  Scenario: A lost signal keeps the last pose rather than erasing it
+    When the accelerometer reads 0, 1000, 0 milli-g
+    And the accelerometer does not answer for 5000 milliseconds
+    Then the readout reports no signal
+    And the facing is LeftEdge
+    And the reading is still 0, 1000, 0 milli-g
+
+  Scenario: A sensor that comes back is believed again
+    When the accelerometer reads 0, 0, 1000 milli-g
+    And the accelerometer does not answer for 5000 milliseconds
+    And the accelerometer reads 0, 0, 1000 milli-g
+    Then the readout is live

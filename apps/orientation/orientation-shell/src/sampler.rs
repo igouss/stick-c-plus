@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use log::warn;
 use orientation_core::{Orientation, Smoother};
-use platform_core::{Acceleration, Imu};
+use platform_core::{Acceleration, Clock, Imu, Tick};
 
 use crate::shared::SharedOrientation;
 
@@ -83,17 +83,28 @@ impl SamplerTask {
     }
 }
 
-/// One sampler cycle: read the IMU, smooth it, publish the pose.
+/// One sampler cycle: read the IMU, smooth it, publish the pose stamped at `now`.
 ///
 /// A failed read is logged and skipped, never fatal, matching `spawn_display`'s fail-visible
 /// renders and the power-watch's fail-visible polls: a flaky I2C transaction must not take the
-/// readout down, and the next poll is five milliseconds away. The previously published pose
-/// stands until then — which is the right call for a transient glitch, and is why a
-/// *persistently* dead sensor has to be found in the log rather than on the glass.
+/// readout down, and the next poll is ten milliseconds away. The previously published pose
+/// stands until then, which is the right call for a transient glitch.
+///
+/// What a skip does *not* do is refresh the stamp. That is the whole mechanism: a glitch or
+/// two costs a couple of missed refreshes and nothing more, while a sensor that stops
+/// answering lets the published pose age past [`SIGNAL_TIMEOUT_MS`] until the reader marks it
+/// lost. The sampler needs no dead-sensor logic of its own — it simply stops vouching.
 ///
 /// Returns whether this cycle published, so a test can tell "read and published" from
 /// "skipped a bad read" without inspecting the cache.
-fn sample_once<I>(imu: &mut I, smoother: &mut Smoother, shared: &SharedOrientation) -> bool
+///
+/// [`SIGNAL_TIMEOUT_MS`]: orientation_core::SIGNAL_TIMEOUT_MS
+fn sample_once<I>(
+    imu: &mut I,
+    smoother: &mut Smoother,
+    shared: &SharedOrientation,
+    now: Tick,
+) -> bool
 where
     I: Imu,
     I::Error: Display,
@@ -106,47 +117,56 @@ where
         }
     };
 
-    shared.publish(Orientation::of(smoother.update(raw)));
+    shared.publish(Orientation::of(smoother.update(raw)), now);
     true
 }
 
 /// Spawn the sampler thread: poll `imu` every `config.period`, smooth each reading, and
-/// publish the pose it implies into `shared`.
+/// publish the pose it implies into `shared`, stamped from `clock`.
 ///
-/// `imu` moves into the thread, so it must be [`Send`] + `'static`, and its error must be
-/// [`Display`] so a failure can be logged. Returns the [`SamplerTask`] handle, or the
-/// [`io::Error`] from failing to spawn the OS/RTOS thread.
-pub fn spawn_sampler<I>(
+/// `imu` and `clock` move into the thread, so both must be [`Send`] + `'static`, and the IMU's
+/// error must be [`Display`] so a failure can be logged. `clock` is the same monotonic clock
+/// the render loop reads, which is what makes the two ends of the staleness measurement
+/// comparable at all. Returns the [`SamplerTask`] handle, or the [`io::Error`] from failing to
+/// spawn the OS/RTOS thread.
+pub fn spawn_sampler<I, C>(
     imu: I,
     shared: SharedOrientation,
+    clock: C,
     config: SamplerConfig,
 ) -> io::Result<SamplerTask>
 where
     I: Imu + Send + 'static,
     I::Error: Display,
+    C: Clock + Send + 'static,
 {
     let stop: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     let stop_in_thread: Arc<AtomicBool> = Arc::clone(&stop);
     let handle: JoinHandle<()> = thread::Builder::new()
         .name("orientation-sampler".to_string())
         .stack_size(config.stack_size)
-        .spawn(move || sample_loop(imu, shared, config, stop_in_thread))?;
+        .spawn(move || sample_loop(imu, shared, clock, config, stop_in_thread))?;
     Ok(SamplerTask { handle, stop })
 }
 
 /// The thread body: read → smooth → publish, every `config.period`, until stopped.
-fn sample_loop<I>(
+fn sample_loop<I, C>(
     mut imu: I,
     shared: SharedOrientation,
+    clock: C,
     config: SamplerConfig,
     stop: Arc<AtomicBool>,
 ) where
     I: Imu,
     I::Error: Display,
+    C: Clock,
 {
     let mut smoother: Smoother = config.smoother;
     while !stop.load(Ordering::Relaxed) {
-        sample_once(&mut imu, &mut smoother, &shared);
+        // Read the clock before the IMU, so the stamp dates the reading rather than the
+        // transaction that fetched it — a slow bus must not make a sample look fresher.
+        let now: Tick = clock.now();
+        sample_once(&mut imu, &mut smoother, &shared, now);
         thread::sleep(config.period);
     }
 }
@@ -159,8 +179,33 @@ mod tests {
     use std::sync::mpsc::{channel, Sender};
     use std::sync::Mutex;
 
-    use orientation_core::Facing;
+    use orientation_core::{Facing, Reading, Signal, SIGNAL_TIMEOUT_MS};
     use platform_core::ONE_G_MG;
+
+    /// A clock a test advances by hand, so a staleness rule is proven by choosing ticks
+    /// rather than by sleeping.
+    #[derive(Clone)]
+    struct FakeClock {
+        now: Arc<Mutex<Tick>>,
+    }
+
+    impl FakeClock {
+        fn new() -> Self {
+            FakeClock {
+                now: Arc::new(Mutex::new(0)),
+            }
+        }
+
+        fn advance(&self, by_ms: Tick) {
+            *self.now.lock().expect("clock lock") += by_ms;
+        }
+    }
+
+    impl Clock for FakeClock {
+        fn now(&self) -> Tick {
+            *self.now.lock().expect("clock lock")
+        }
+    }
 
     /// An [`Imu`] a single-threaded test drives by hand through a shared cell.
     struct FakeImu<'a> {
@@ -226,9 +271,9 @@ mod tests {
         let mut smoother: Smoother = Smoother::default();
         let shared: SharedOrientation = SharedOrientation::new();
         (0..cycles).for_each(|_| {
-            sample_once(&mut imu, &mut smoother, &shared);
+            sample_once(&mut imu, &mut smoother, &shared, 0);
         });
-        shared.snapshot()
+        shared.last_known()
     }
 
     /// Zero: before any cycle runs, the cache names no pose.
@@ -267,14 +312,14 @@ mod tests {
         let mut smoother: Smoother = Smoother::default();
         let shared: SharedOrientation = SharedOrientation::new();
 
-        sample_once(&mut imu, &mut smoother, &shared);
-        assert_eq!(shared.snapshot().facing, Facing::ScreenUp);
+        sample_once(&mut imu, &mut smoother, &shared, 0);
+        assert_eq!(shared.last_known().facing, Facing::ScreenUp);
 
         cell.set(Acceleration::new(-ONE_G_MG, 0, 0));
         (0..20).for_each(|_| {
-            sample_once(&mut imu, &mut smoother, &shared);
+            sample_once(&mut imu, &mut smoother, &shared, 0);
         });
-        assert_eq!(shared.snapshot().facing, Facing::Upright);
+        assert_eq!(shared.last_known().facing, Facing::Upright);
     }
 
     /// A failed read is survivable and reports itself as a skip, leaving the last good pose
@@ -286,17 +331,47 @@ mod tests {
 
         let cell: Cell<Acceleration> = Cell::new(Acceleration::new(0, 0, ONE_G_MG));
         let mut good: FakeImu = FakeImu { reading: &cell };
-        assert!(sample_once(&mut good, &mut smoother, &shared));
+        assert!(sample_once(&mut good, &mut smoother, &shared, 0));
 
         let mut dead: DeadImu = DeadImu;
         assert!(
-            !sample_once(&mut dead, &mut smoother, &shared),
+            !sample_once(&mut dead, &mut smoother, &shared, 10),
             "a failed read must report that it did not publish"
         );
         assert_eq!(
-            shared.snapshot().facing,
+            shared.reading(10).orientation.facing,
             Facing::ScreenUp,
             "a single failed read must not blank the readout"
+        );
+        assert_eq!(
+            shared.reading(10).signal,
+            Signal::Live,
+            "one glitch must not be reported as a lost sensor"
+        );
+    }
+
+    /// A sensor that keeps failing lets the last pose age out: the skip that survives a
+    /// glitch is the same mechanism that surfaces a death, because a skip never restamps.
+    #[test]
+    fn a_persistently_failing_sensor_lets_the_readout_go_stale() {
+        let shared: SharedOrientation = SharedOrientation::new();
+        let mut smoother: Smoother = Smoother::default();
+
+        let cell: Cell<Acceleration> = Cell::new(Acceleration::new(0, 0, ONE_G_MG));
+        let mut good: FakeImu = FakeImu { reading: &cell };
+        sample_once(&mut good, &mut smoother, &shared, 0);
+
+        let mut dead: DeadImu = DeadImu;
+        (0..50).for_each(|cycle: usize| {
+            sample_once(&mut dead, &mut smoother, &shared, cycle as Tick * 10);
+        });
+
+        let stale: Reading = shared.reading(SIGNAL_TIMEOUT_MS);
+        assert_eq!(stale.signal, Signal::Lost);
+        assert_eq!(
+            stale.orientation.facing,
+            Facing::ScreenUp,
+            "the last known pose must survive, it just stops being vouched for"
         );
     }
 
@@ -308,9 +383,9 @@ mod tests {
         let mut smoother: Smoother = Smoother::default();
         let shared: SharedOrientation = SharedOrientation::new();
         (0..10).for_each(|_| {
-            sample_once(&mut dead, &mut smoother, &shared);
+            sample_once(&mut dead, &mut smoother, &shared, 0);
         });
-        assert_eq!(shared.snapshot(), Orientation::default());
+        assert_eq!(shared.last_known(), Orientation::default());
     }
 
     /// The one integration test: spawn the real thread, watch it track a turn through the
@@ -325,28 +400,37 @@ mod tests {
             ping: tx,
         };
         let shared: SharedOrientation = SharedOrientation::new();
+        let clock: FakeClock = FakeClock::new();
         let config: SamplerConfig = SamplerConfig {
             period: Duration::from_millis(1),
             stack_size: 64 * 1024,
             ..SamplerConfig::default()
         };
 
-        let task: SamplerTask =
-            spawn_sampler(imu, shared.clone(), config).expect("spawn the sampler thread");
+        let task: SamplerTask = spawn_sampler(imu, shared.clone(), clock.clone(), config)
+            .expect("spawn the sampler thread");
 
         // The ping fires *inside* the read, before the publish that follows it, so seeing one
         // ping only proves a cycle started. Awaiting the next one proves the previous cycle
         // ran to completion — which is what makes this assertion about the cache sound
         // rather than a race that happens to pass.
         await_cycles(&rx, 2);
-        assert_eq!(shared.snapshot().facing, Facing::ScreenUp);
+        assert_eq!(shared.last_known().facing, Facing::ScreenUp);
 
         // Turn the board, then let the smoother settle over plenty of real cycles.
         *reading.lock().expect("reading lock") = Acceleration::new(-ONE_G_MG, 0, 0);
         await_cycles(&rx, 40);
-        assert_eq!(shared.snapshot().facing, Facing::Upright);
+        assert_eq!(shared.last_known().facing, Facing::Upright);
 
+        // The running thread stamps what it publishes, so a reader on the same clock sees a
+        // live signal — the plumbing from clock through sampler to reader, proven end to end.
+        assert_eq!(shared.reading(clock.now()).signal, Signal::Live);
+
+        // Stop the sampler and let the clock run past the timeout: a readout nothing is
+        // feeding any more reports itself lost, without a single sleep in this test.
         task.stop();
         task.join().expect("the sampler thread must not panic");
+        clock.advance(SIGNAL_TIMEOUT_MS);
+        assert_eq!(shared.reading(clock.now()).signal, Signal::Lost);
     }
 }

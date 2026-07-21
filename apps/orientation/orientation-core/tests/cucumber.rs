@@ -4,26 +4,36 @@
 //! to the code.
 
 use cucumber::{given, then, when, World};
-use orientation_core::{Facing, Orientation, Smoother};
-use platform_core::Acceleration;
+use orientation_core::{Facing, Orientation, Reading, Signal, Smoother};
+use platform_core::{Acceleration, Tick};
 
-/// The scenario's latest orientation, and the smoother it was read through (if any).
+/// The scenario's latest orientation, the smoother it was read through (if any), and how long
+/// ago the sensor last answered.
 #[derive(Debug, Default, World)]
 struct BoardWorld {
     /// `Some` once a scenario asks for a smoothed readout; `None` reads samples raw.
     smoother: Option<Smoother>,
     /// The orientation the last reading produced.
     orientation: Orientation,
+    /// Milliseconds since the last successful read — what the staleness rule judges.
+    age_ms: Tick,
 }
 
 impl BoardWorld {
-    /// Take one accelerometer reading, through the smoother if this scenario has one.
+    /// Take one accelerometer reading, through the smoother if this scenario has one. A
+    /// successful read is what resets the age, exactly as a publication does on the board.
     fn read(&mut self, sample: Acceleration) {
         let effective: Acceleration = match &mut self.smoother {
             Some(smoother) => smoother.update(sample),
             None => sample,
         };
         self.orientation = Orientation::of(effective);
+        self.age_ms = 0;
+    }
+
+    /// What the glass is handed: the pose, and whether it is still being confirmed.
+    fn reading(&self) -> Reading {
+        Reading::aged(self.orientation, self.age_ms)
     }
 }
 
@@ -63,9 +73,26 @@ fn the_accelerometer_reads_repeatedly(
     (0..times).for_each(|_| world.read(sample));
 }
 
+#[when(regex = r"^the accelerometer does not answer for (\d+) milliseconds$")]
+fn the_accelerometer_does_not_answer(world: &mut BoardWorld, silent_ms: Tick) {
+    // A failed read publishes nothing, so the last pose simply ages — the same mechanism the
+    // sampler relies on, with no dead-sensor branch anywhere.
+    world.age_ms += silent_ms;
+}
+
 #[then(regex = r"^the facing is (\w+)$")]
 fn the_facing_is(world: &mut BoardWorld, name: String) {
     assert_eq!(world.orientation.facing, parse_facing(&name));
+}
+
+#[then("the readout is live")]
+fn the_readout_is_live(world: &mut BoardWorld) {
+    assert_eq!(world.reading().signal, Signal::Live);
+}
+
+#[then("the readout reports no signal")]
+fn the_readout_reports_no_signal(world: &mut BoardWorld) {
+    assert_eq!(world.reading().signal, Signal::Lost);
 }
 
 #[then(regex = r"^the pitch is (-?\d+) degrees$")]

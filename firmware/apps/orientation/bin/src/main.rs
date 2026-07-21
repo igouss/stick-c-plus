@@ -41,7 +41,7 @@ use esp_idf_hal::i2c::I2cDriver;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::EspLogger;
 use log::info;
-use orientation_core::Orientation;
+use orientation_core::{Orientation, Reading};
 use orientation_display::OrientationView;
 use orientation_shell::{spawn_sampler, SamplerConfig, SharedOrientation};
 use platform_adapters::{Axp192PowerSource, LedcBuzzer, Mpu6886Imu, Panel, PanelScreen};
@@ -142,15 +142,17 @@ fn main() {
 
     // Sampler: poll the IMU, smooth it, publish the pose. Held for the life of main —
     // dropping it would only detach the thread, which already runs forever.
-    let _sampler = spawn_sampler(imu, shared.clone(), SamplerConfig::default())
+    let _sampler = spawn_sampler(imu, shared.clone(), clock, SamplerConfig::default())
         .expect("spawn orientation-sampler");
     info!("sampler thread up: MPU6886 polled at 100 Hz, smoothed, published");
 
     // Display: render the readout whenever it changed, through the same generic loop the
     // pomodoro timer uses — but at the instrument cadence, not the countdown one.
+    // The loop hands the source the current tick, which is exactly what the staleness verdict
+    // needs — so the same clock stamps a publication and judges its age.
     let source = {
         let shared: SharedOrientation = shared.clone();
-        move |_now: Tick| OrientationView::of(&shared.snapshot())
+        move |now: Tick| OrientationView::of(&shared.reading(now))
     };
     let config: DisplayConfig = DisplayConfig {
         period: READOUT_PERIOD,
@@ -172,15 +174,23 @@ fn main() {
     // rather than by eye on the glass.
     loop {
         FreeRtos::delay_ms(2_000);
-        let orientation: Orientation = shared.snapshot();
+        // Read through the same `reading` the glass does, so the log and the screen can never
+        // disagree about whether the sensor is still answering.
+        let reading: Reading = shared.reading(clock.now());
+        let orientation: Orientation = reading.orientation;
         info!(
-            "orientation: {:<10} x={:>6} y={:>6} z={:>6} mg  pitch={:>4}° roll={:>4}°",
+            "orientation: {:<10} x={:>6} y={:>6} z={:>6} mg  pitch={:>4}° roll={:>4}°{}",
             orientation.facing.label(),
             orientation.acceleration.x_mg,
             orientation.acceleration.y_mg,
             orientation.acceleration.z_mg,
             orientation.attitude.pitch_deg,
             orientation.attitude.roll_deg,
+            if reading.signal.is_live() {
+                ""
+            } else {
+                "  [NO SIGNAL — the numbers above are the last the IMU gave]"
+            },
         );
     }
 }
