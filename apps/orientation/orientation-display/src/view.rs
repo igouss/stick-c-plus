@@ -1,6 +1,6 @@
 //! `OrientationView` — a snapshot of the board's pose as an [`Animated`] view the loop shows.
 
-use orientation_core::{Facing, Reading, Signal};
+use orientation_core::{Facing, Reading, ScreenRotation, Signal};
 use platform_core::{Acceleration, Animated, Tick};
 
 /// What the orientation glass shows at one instant.
@@ -22,10 +22,17 @@ pub struct OrientationView {
     pub facing: Facing,
     /// Whether these numbers are still being confirmed by a sensor that answers.
     pub signal: Signal,
+    /// Which way up the picture is drawn, and therefore which layout it is drawn through.
+    ///
+    /// Part of the view rather than a separate argument to the renderer, because the render
+    /// loop repaints on a *changed view*: a rotation that reached the panel any other way
+    /// would turn the glass and leave the previous quadrant's pixels on it until the sensor
+    /// happened to move.
+    pub rotation: ScreenRotation,
 }
 
 impl OrientationView {
-    /// The view of `reading`.
+    /// The view of `reading`, drawn at the panel's native landscape.
     pub const fn of(reading: &Reading) -> Self {
         OrientationView {
             acceleration: reading.orientation.acceleration,
@@ -33,7 +40,13 @@ impl OrientationView {
             roll_deg: reading.orientation.attitude.roll_deg,
             facing: reading.orientation.facing,
             signal: reading.signal,
+            rotation: ScreenRotation::Deg0,
         }
+    }
+
+    /// The same view, drawn at `rotation`.
+    pub const fn rotated(self, rotation: ScreenRotation) -> Self {
+        OrientationView { rotation, ..self }
     }
 
     /// What the label field says: the face name, or that the readout has stopped being fed.
@@ -63,15 +76,16 @@ impl OrientationView {
 }
 
 impl Animated for OrientationView {
-    /// The face and the signal. Nothing on this screen animates, but the anchor is still the
-    /// *coarse* fact rather than the whole view: it is what the render loop measures a state's
-    /// age from, and a live milli-g readout would otherwise reset that age on essentially
-    /// every frame. Losing or regaining the signal is a genuine change of state — the label
-    /// changes word and colour — so it belongs in the anchor beside the face.
-    type Anchor = (Facing, Signal);
+    /// The face, the signal and the rotation. Nothing on this screen animates, but the anchor
+    /// is still the *coarse* fact rather than the whole view: it is what the render loop
+    /// measures a state's age from, and a live milli-g readout would otherwise reset that age
+    /// on essentially every frame. Losing or regaining the signal is a genuine change of state
+    /// — the label changes word and colour — and so is turning the picture, which redraws
+    /// every pixel through a different layout. Both belong in the anchor beside the face.
+    type Anchor = (Facing, Signal, ScreenRotation);
 
-    fn anchor(&self) -> (Facing, Signal) {
-        (self.facing, self.signal)
+    fn anchor(&self) -> (Facing, Signal, ScreenRotation) {
+        (self.facing, self.signal, self.rotation)
     }
 
     /// Never. This screen is an instrument, not a scene — it carries no creature, and every
@@ -117,6 +131,30 @@ mod tests {
         assert_eq!(blank.acceleration, Acceleration::default());
         assert_eq!(blank.facing, Facing::Moving);
         assert_eq!(blank.signal, Signal::Lost);
+        assert_eq!(blank.rotation, ScreenRotation::Deg0);
+    }
+
+    /// A view reads at the panel's native landscape until something says otherwise, and says
+    /// otherwise without disturbing a single number.
+    #[test]
+    fn turning_the_picture_changes_nothing_but_the_rotation() {
+        let flat: OrientationView = view_of(0, 0, ONE_G_MG);
+        let turned: OrientationView = flat.rotated(ScreenRotation::Deg90);
+
+        assert_eq!(flat.rotation, ScreenRotation::Deg0);
+        assert_eq!(turned.rotation, ScreenRotation::Deg90);
+        assert_eq!(turned.acceleration, flat.acceleration);
+        assert_eq!(turned.facing, flat.facing);
+        assert_eq!(turned.label(), flat.label());
+    }
+
+    /// Turning the picture is a different view, so the render loop's change suppression
+    /// repaints for it. Without this the glass would turn and keep the old quadrant's pixels.
+    #[test]
+    fn turning_the_picture_is_a_different_view() {
+        let flat: OrientationView = view_of(0, 0, ONE_G_MG);
+        assert_ne!(flat, flat.rotated(ScreenRotation::Deg90));
+        assert_ne!(flat.anchor(), flat.rotated(ScreenRotation::Deg90).anchor());
     }
 
     /// One: the view carries the orientation's own conclusions, unchanged.

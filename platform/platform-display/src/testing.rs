@@ -22,17 +22,30 @@ use embedded_graphics::prelude::*;
 
 use crate::SCREEN_SIZE;
 
-/// A [`SCREEN_SIZE`] canvas of `Rgb565`, plus a count of writes that fell outside it.
+/// A canvas of `Rgb565`, plus a count of writes that fell outside it.
+///
+/// The canvas is [`SCREEN_SIZE`] by default and any size on request. A screen drawn at a
+/// quarter turn paints into a canvas with the panel's dimensions swapped, and its
+/// [`escaped`](Framebuffer::escaped) count only means "nothing was clipped" if the canvas it
+/// is counted against is the one that screen is actually drawn on.
 pub struct Framebuffer {
+    size: Size,
     pixels: Vec<Rgb565>,
     escaped: usize,
 }
 
 impl Framebuffer {
-    /// A blank canvas, black as the panel is after its bring-up clear.
+    /// A blank [`SCREEN_SIZE`] canvas, black as the panel is after its bring-up clear.
     pub fn new() -> Self {
-        let area: usize = (SCREEN_SIZE.width * SCREEN_SIZE.height) as usize;
+        Self::sized(SCREEN_SIZE)
+    }
+
+    /// A blank canvas of `size` — for a screen drawn on something other than the panel's
+    /// native landscape.
+    pub fn sized(size: Size) -> Self {
+        let area: usize = (size.width * size.height) as usize;
         Framebuffer {
+            size,
             pixels: vec![Rgb565::BLACK; area],
             escaped: 0,
         }
@@ -61,13 +74,13 @@ impl Framebuffer {
     fn put(&mut self, at: Point, colour: Rgb565) {
         let inside: bool = at.x >= 0
             && at.y >= 0
-            && (at.x as u32) < SCREEN_SIZE.width
-            && (at.y as u32) < SCREEN_SIZE.height;
+            && (at.x as u32) < self.size.width
+            && (at.y as u32) < self.size.height;
         if !inside {
             self.escaped += 1;
             return;
         }
-        let index: usize = at.y as usize * SCREEN_SIZE.width as usize + at.x as usize;
+        let index: usize = at.y as usize * self.size.width as usize + at.x as usize;
         self.pixels[index] = colour;
     }
 }
@@ -80,7 +93,7 @@ impl Default for Framebuffer {
 
 impl OriginDimensions for Framebuffer {
     fn size(&self) -> Size {
-        SCREEN_SIZE
+        self.size
     }
 }
 
@@ -138,5 +151,34 @@ mod tests {
     #[test]
     fn a_blank_canvas_carries_no_ink() {
         assert_eq!(Framebuffer::new().lit_pixels(), 0);
+    }
+
+    /// The default canvas is the panel's.
+    #[test]
+    fn a_default_canvas_is_the_panels_size() {
+        assert_eq!(Framebuffer::new().size(), SCREEN_SIZE);
+    }
+
+    /// A turned canvas counts escapes against *its own* edges, not the panel's. Without this
+    /// the escape counter would call a correctly-placed portrait pixel an escape, and — worse
+    /// — would silently accept one that ran off the narrow edge.
+    #[test]
+    fn a_turned_canvas_counts_escapes_against_its_own_edges() {
+        let turned: Size = Size::new(SCREEN_SIZE.height, SCREEN_SIZE.width);
+        let mut fb: Framebuffer = Framebuffer::sized(turned);
+
+        // Inside the turned canvas, past the panel's landscape bottom edge.
+        fb.draw_iter([Pixel(
+            Point::new(0, SCREEN_SIZE.height as i32),
+            Rgb565::WHITE,
+        )])
+        .expect("memory writes cannot fail");
+        // Outside the turned canvas, inside the panel's landscape width.
+        fb.draw_iter([Pixel(Point::new(turned.width as i32, 0), Rgb565::WHITE)])
+            .expect("memory writes cannot fail");
+
+        assert_eq!(fb.size(), turned);
+        assert_eq!(fb.lit_pixels(), 1);
+        assert_eq!(fb.escaped(), 1);
     }
 }

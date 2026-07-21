@@ -20,7 +20,8 @@ so a new experiment is a new directory under `apps/`, not a new firmware:
    client.*
 4. **orientation** — a live readout of **which way the board is pointing**: the MPU6886
    IMU's gravity vector as three signed X/Y/Z bars, the pitch and roll in degrees, and the
-   face it is resting on. *Screen + IMU, no network, no buttons — turn it and watch.*
+   face it is resting on — laid out for whichever way up the board is being held. *Screen +
+   IMU, no network, no buttons — turn it and watch.*
 5. **led-driver** — a NightDriverStrip-style **WS2812** animation driver (the repo's
    original purpose; the `led-core` effects domain lives on). *Future.*
 6. **rover** — a controllable robot. *Future; diverges in hardware.*
@@ -98,7 +99,8 @@ its Xtensa target never touches `cargo test`; firmware crates reach the host cra
 ### Looking at the screen without a board
 
 `just screens` renders every state each app's TFT can show — the pomodoro's ready / focus /
-break / paused / finished screens and the plant monitor's four `Observation` states — to
+break / paused / finished screens, the plant monitor's four `Observation` states, and the
+orientation readout's poses in both the landscape and the portrait layout — to
 `target/screens/*.png`. The pixels come from each app's `render`, the *same* function the
 ST7789 adapter calls on the board, drawn into a host framebuffer instead of down an SPI bus.
 It is the layout, not a picture of it — proven against real pixels by a shared test
