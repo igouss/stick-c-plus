@@ -25,13 +25,15 @@
 //! moisture *percent* is not yet trustworthy: it rides a provisional calibration
 //! ([`PROVISIONAL_CAL`]) until qhw.29 captures the probe's real dry/wet endpoints.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use adapters::adc::{EarthUnit, SAMPLES};
 use adapters::probe_power::AlwaysOn;
-use board_support::{internal_i2c, Axp192};
+use board_support::{internal_i2c, AccelRange, Axp192, Mpu6886};
+use embedded_hal_bus::i2c::MutexDevice;
 use esp_idf_hal::delay::FreeRtos;
+use esp_idf_hal::i2c::I2cDriver;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::log::EspLogger;
@@ -47,11 +49,20 @@ use plant_core::ports::MAX_READING;
 use plant_core::{Observation, Tick};
 use plant_display::Glass;
 use plant_shell::{spawn_sampler, SamplerConfig, SharedMoisture};
-use platform_adapters::{Axp192PowerSource, LedcBuzzer, Panel, PanelScreen};
+use platform_adapters::{Axp192PowerSource, LedcBuzzer, Mpu6886Imu, Panel, PanelScreen, Turning};
 use platform_core::ScreenRotation;
 use platform_runtime::{
-    spawn_buzzer, spawn_display, spawn_power_watch, DisplayConfig, Monotonic, PowerWatchConfig,
+    spawn_buzzer, spawn_display, spawn_power_watch, spawn_rotation, DisplayConfig, Monotonic,
+    PowerWatchConfig, RotationConfig, SharedRotation,
 };
+use static_cell::StaticCell;
+
+/// The internal I2C bus' `'static` home, shared by the PMIC and the IMU.
+///
+/// A `StaticCell` rather than a leaked `Box`: both give the bus a lifetime that outlives every
+/// thread that borrows it, but this one is checked -- a second `init` panics instead of
+/// quietly handing out a second bus.
+static I2C_BUS: StaticCell<Mutex<I2cDriver<'static>>> = StaticCell::new();
 
 /// Provisional soil calibration — placeholder dry/wet endpoints, *not* measured.
 ///
@@ -152,18 +163,29 @@ fn main() {
     // a correct ST7789 init and still shows nothing (qhw.20). The AXP192 latches its
     // LDO enables, but this root now *retains* the PMIC past power-on rather than
     // dropping it: the power-watch thread reads VBUS from this same device for the life
-    // of the app. The internal bus has no other live runtime consumer (the MPU6886/RTC
-    // are unused), so the watcher owns the `Axp192<I2cDriver>` outright — `I2cDriver`
-    // is `Send`, unlike the `RefCellDevice` a shared bus would need. Fatal on failure:
-    // a dark screen is a broken monitor.
-    let i2c = internal_i2c(
+    // of the app. The bus gained a second consumer when this app took the rotation
+    // capability -- the MPU6886 is no longer unused -- so the single `I2cDriver` now gets
+    // a `'static` home and each device its own `MutexDevice` handle over it. A
+    // `RefCellDevice` could not cross into either thread. Fatal on failure: a dark
+    // screen is a broken monitor.
+    let i2c: I2cDriver<'static> = internal_i2c(
         peripherals.i2c0,
         peripherals.pins.gpio21,
         peripherals.pins.gpio22,
     )
     .expect("internal I2C bring-up");
-    let mut axp: Axp192<_> = Axp192::new(i2c);
+    let bus: &'static Mutex<I2cDriver<'static>> = I2C_BUS.init(Mutex::new(i2c));
+    let mut axp: Axp192<MutexDevice<'static, I2cDriver<'static>>> =
+        Axp192::new(MutexDevice::new(bus));
     axp.power_on().expect("AXP192 LCD/TFT rail power-on");
+
+    // The IMU, on its own handle over the same bus — the rotation source and nothing else.
+    // `init` checks WHO_AM_I before it writes anything, so this panics on a mis-wired or
+    // unpowered sensor rather than going on to report a rotation read from a floating bus.
+    let mut imu: Mpu6886<MutexDevice<'static, I2cDriver<'static>>> =
+        Mpu6886::new(MutexDevice::new(bus), AccelRange::G4);
+    imu.init(&mut FreeRtos).expect("MPU6886 IMU bring-up");
+    let imu: Mpu6886Imu<_> = Mpu6886Imu::new(imu);
     match axp.display_rails_enabled() {
         Ok(true) => info!("axp192: LCD/TFT rails enabled (reg 0x12 read back)"),
         Ok(false) => warn!("axp192: rails did not read back as enabled"),
@@ -221,7 +243,10 @@ fn main() {
     // Wrap the panel as a generic Screen with the plant render function: unwrap the Glass and
     // hand the Observation to plant_display::render. The panel adapter knows nothing about the
     // plant; the picture is injected here.
-    let screen: PanelScreen<Glass, _> = PanelScreen::new(
+    // `turning`, not `new`: this app opts into the rotation capability, so the panel is told to
+    // scan the way the board is being held before each render. An app that stays landscape takes
+    // `PanelScreen::new` and links none of this -- the choice is the type, not a flag.
+    let screen: PanelScreen<Glass, _, Turning> = PanelScreen::turning(
         panel,
         |target: &mut _, Glass(observation): Glass, elapsed: Tick, rotation: ScreenRotation| {
             plant_display::render(target, observation, elapsed, rotation)
@@ -238,13 +263,22 @@ fn main() {
         let shared: SharedMoisture = shared.clone();
         move |now: Tick| Glass(shared.observe(now, max_age))
     };
-    // Which way up to draw. Fixed at the panel's native landscape for now: this app has no
-    // rotation source yet, and its screen has only a landscape layout to be drawn in. The
-    // platform supplies the capability regardless, so wiring one in later is a change here
-    // and nowhere else.
-    let landscape = |_now: Tick| ScreenRotation::Deg0;
-    let _display = spawn_display(screen, display_source, landscape, clock, display_config)
-        .expect("spawn plant-display");
+    // Which way up to draw. This app has no IMU thread of its own, so the sensor moves into the
+    // rotation thread outright -- the simple half of the capability. That thread polls at 50 ms
+    // against a 250 ms settle window; the display loop only reads the answer it has settled on.
+    let rotation: SharedRotation = SharedRotation::new();
+    let _rotation = spawn_rotation(imu, rotation.clone(), clock, RotationConfig::default())
+        .expect("spawn plant-monitor-rotation");
+    info!("rotation thread up: MPU6886 polled at 50 Hz, settled, published");
+
+    let _display = spawn_display(
+        screen,
+        display_source,
+        rotation.source(),
+        clock,
+        display_config,
+    )
+    .expect("spawn plant-display");
     info!("display thread up: ST7789 rendering raw + percent every {display_period:?}");
 
     // The on-board passive buzzer (LEDC on G2), behind one owner thread so the power-watch chime

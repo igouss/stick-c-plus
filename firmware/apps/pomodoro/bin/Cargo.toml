@@ -31,10 +31,17 @@ esp-idf-svc = "0.52"
 esp-idf-hal = "0.46"
 esp-idf-sys = "0.37"
 log = "0.4"
-# Firmware crates (same workspace): the BSP that powers the LCD rails, and the board-generic
-# panel/button/buzzer adapters.
+# Firmware crates (same workspace): the BSP that powers the LCD rails and drives the MPU6886,
+# and the board-generic panel/button/buzzer/IMU adapters.
 board-support = { path = "../../../platform/board-support" }
 platform-adapters = { path = "../../../platform/adapters" }
+# Shares the one internal I2C bus across bus devices: the AXP192 PMIC and the MPU6886 IMU sit
+# on the same two pins and are read from two different threads, so each gets its own
+# `MutexDevice` handle over the single controller.
+embedded-hal-bus = { version = "0.3", features = ["std"] }
+# Gives the shared bus a `'static` home without leaking it, the same way the panel adapter
+# homes its pixel buffer.
+static_cell = "2"
 # Host crates, referenced by path across the two workspaces. platform-runtime is the generic
 # render loop + Monotonic clock; platform-core the Tick; the pomodoro-* crates are the FSM, the
 # picture, and the input shell — all no_std/std and cross-compile to xtensa cleanly.

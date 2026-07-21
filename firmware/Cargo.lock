@@ -1289,6 +1289,7 @@ dependencies = [
  "platform-adapters",
  "platform-core",
  "platform-runtime",
+ "static_cell",
 ]
 
 [[package]]
@@ -1347,6 +1348,7 @@ name = "pomodoro"
 version = "0.1.0"
 dependencies = [
  "board-support",
+ "embedded-hal-bus",
  "embuild",
  "esp-idf-hal",
  "esp-idf-svc",
@@ -1359,6 +1361,7 @@ dependencies = [
  "pomodoro-core",
  "pomodoro-display",
  "pomodoro-shell",
+ "static_cell",
 ]
 
 [[package]]

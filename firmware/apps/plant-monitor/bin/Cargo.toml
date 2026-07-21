@@ -90,6 +90,9 @@ adapters = { path = "../adapters" }
 # composition root wraps with the plant render function, the G2 LedcBuzzer the shared USB
 # power chime sounds through, and the Axp192PowerSource the power-watch reads VBUS from.
 platform-adapters = { path = "../../../platform/adapters" }
+# Gives the shared bus a `'static` home without leaking it, the same way the panel adapter
+# homes its pixel buffer.
+static_cell = "2"
 # The board-support package: brings up the internal I2C bus and powers the AXP192
 # LCD/TFT rails (qhw.20) — load-bearing for the display, which is dark otherwise.
 board-support = { path = "../../../platform/board-support" }
@@ -97,9 +100,11 @@ board-support = { path = "../../../platform/board-support" }
 # `oversampled_mean` the EarthUnit adapter uses, so the raw counts it prints are
 # directly comparable with the ones the monitor logs and renders.
 firmware-core = { path = "../../../../platform/firmware-core" }
-# Shares the one internal I2C bus across bus devices; here it hands the AXP192 a
-# RefCellDevice so the MPU6886/RTC can join the same bus later without rewiring.
-embedded-hal-bus = "0.3"
+# Shares the one internal I2C bus across bus devices. The MPU6886 has now joined it —
+# the rotation thread reads the IMU while the power-watch reads the PMIC — so each holds
+# a `MutexDevice`, which unlike a `RefCellDevice` can cross into a thread. That is what
+# the "std" feature is for.
+embedded-hal-bus = { version = "0.3", features = ["std"] }
 # Shared firmware networking (firmware/platform): WiFi STA bring-up (qhw.7). The
 # composition root takes the modem + system event loop + NVS and hands them to
 # `net::wifi::WifiStation` so the board joins the network before the native-API
