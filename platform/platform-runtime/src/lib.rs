@@ -23,11 +23,17 @@
 //! - [`spawn_buzzer`] — the buzzer's one owner thread: serialises every melody submitted
 //!   through its [`BuzzerHandle`] so a chime and a jingle never interleave or truncate one
 //!   another.
+//! - [`SharedRotation`] / [`spawn_rotation`] — which way up the picture is drawn. The shared
+//!   cell owns the [`RotationSettler`](platform_core::RotationSettler) and hands
+//!   [`spawn_display`] the source closure it wants; the thread is for an app whose only reason
+//!   to touch the IMU is that question. An app that already runs a sampler feeds the same cell
+//!   instead of spawning a second owner of one I2C device.
 
 mod buzzer;
 mod clock;
 mod display;
 mod power_watch;
+mod rotation;
 
 pub use buzzer::{spawn_buzzer, BuzzerHandle, BuzzerTask, OwnerGone, BUZZER_STACK_SIZE};
 pub use clock::Monotonic;
@@ -37,4 +43,8 @@ pub use display::{
 };
 pub use power_watch::{
     spawn_power_watch, PowerWatchConfig, PowerWatchTask, POWER_WATCH_PERIOD, POWER_WATCH_STACK_SIZE,
+};
+pub use rotation::{
+    spawn_rotation, RotationConfig, RotationTask, SharedRotation, ROTATION_PERIOD,
+    ROTATION_STACK_SIZE,
 };
