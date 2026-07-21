@@ -1310,9 +1310,11 @@ dependencies = [
  "embedded-hal 1.0.0",
  "esp-idf-hal",
  "esp-idf-sys",
+ "log",
  "mipidsi",
  "platform-core",
  "platform-display",
+ "platform-input",
  "static_cell",
 ]
 
@@ -1340,6 +1342,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "platform-input"
+version = "0.1.0"
+dependencies = [
+ "platform-core",
+]
+
+[[package]]
 name = "platform-runtime"
 version = "0.1.0"
 dependencies = [
@@ -1362,6 +1371,7 @@ dependencies = [
  "platform-audio",
  "platform-bench",
  "platform-core",
+ "platform-input",
  "platform-runtime",
  "pomodoro-core",
  "pomodoro-display",
@@ -1392,6 +1402,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "platform-core",
+ "platform-input",
  "pomodoro-core",
 ]
 

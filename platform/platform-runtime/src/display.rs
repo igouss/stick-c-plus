@@ -416,6 +416,7 @@ mod tests {
 
     use crate::backlight::BacklightSwitch;
     use crate::clock::Monotonic;
+    use platform_core::Backlight;
 
     /// Frames advance every this many ms in the test's [`Moving`](TestState::Moving) state.
     const FRAME_HOLD: Tick = 100;
@@ -944,12 +945,19 @@ mod tests {
     }
 
     /// A backlight that always succeeds — this test cares about the flag, not the rail.
-    struct OkBacklight;
+    struct OkBacklight {
+        lit: bool,
+    }
 
     impl platform_core::Backlight for OkBacklight {
         type Error = std::convert::Infallible;
 
-        fn set(&mut self, _lit: bool) -> Result<(), Self::Error> {
+        fn is_lit(&self) -> bool {
+            self.lit
+        }
+
+        fn set(&mut self, lit: bool) -> Result<(), Self::Error> {
+            self.lit = lit;
             Ok(())
         }
     }
@@ -973,7 +981,8 @@ mod tests {
             dark_period: Duration::from_millis(1),
             stack_size: 256 * 1024,
         };
-        let mut switch: BacklightSwitch<OkBacklight> = BacklightSwitch::new(OkBacklight, true);
+        let mut switch: BacklightSwitch<OkBacklight> =
+            BacklightSwitch::new(OkBacklight { lit: true });
 
         let task: DisplayTask = spawn_display(
             screen,

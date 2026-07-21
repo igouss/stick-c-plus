@@ -43,15 +43,19 @@ through the same ST7789 panel adapter — each app supplies only its own *pictur
 ```
 stick-c-plus/
 ├─ platform/          # the reusable, app-agnostic foundation (context = "shared")
-│  ├─ platform-core/       #   domain          — Tick, the Clock/Screen/Button/Tone/AudioIn ports,
-│  │                       #                      the Animated contract, the pure button Debounce
+│  ├─ platform-core/       #   domain          — Tick, the Clock/Screen/Backlight/Tone/AudioIn
+│  │                       #                      ports, the Animated contract, the rotation policy
+│  ├─ platform-input/      #   domain           — the board's three buttons as one event source:
+│  │                       #                      the levelled + latched ports, and the pure
+│  │                       #                      click / double-click / long-hold recognizer
 │  ├─ platform-audio/      #   domain           — the acoustic level (DC-removed RMS) + sound-present
 │  │                       #                      verdict (the chime self-test's ears, host-tested)
 │  ├─ platform-display/    #   port-and-adapter — the ClaudePix sprite library, the fixed-width
 │  │                       #                      text primitives, the sparkline, the signed axis
 │  │                       #                      bar, the colour self-test
-│  ├─ platform-runtime/    #   driving-adapter  — the Monotonic clock + the generic, change-
-│  │                       #                      suppressing render loop (over any Animated state)
+│  ├─ platform-runtime/    #   driving-adapter  — the Monotonic clock, the generic change-
+│  │                       #                      suppressing render loop (over any Animated state),
+│  │                       #                      and the backlight switch it skips a dark paint on
 │  ├─ firmware-core/       #   domain           — pure shared kernel (ADC oversampling, gating)
 │  ├─ esphome-api/         #   domain           — ESPHome native-API framework (prost + std::net)
 │  └─ esphome-server/      #   driving-adapter  — the native-API server host (accept loop → FSM)
@@ -63,8 +67,8 @@ stick-c-plus/
 │  └─ led-driver/          #   led-core (WS2812 effects)
 ├─ firmware/          # the Xtensa boundary — a detached std/ESP-IDF workspace
 │  ├─ platform/            #   board-support (BSP: AXP192, MPU6886, I2C) · adapters (ST7789 panel +
-│  │                       #     generic PanelScreen, G37/G39 buttons, G2 LEDC buzzer, G0/G34 PDM mic,
-│  │                       #     MPU6886 IMU) ·
+│  │                       #     generic PanelScreen, G37/G39 buttons + the AXP192 PEK power button,
+│  │                       #     the LDO2 backlight, G2 LEDC buzzer, G0/G34 PDM mic, MPU6886 IMU) ·
 │  │                       #     net (shared WiFi STA + DNS resolve)
 │  └─ apps/                #   plant-monitor/{adapters, firmware-infra, bin} · host-monitor/{adapters, bin}
 │                          #     · pomodoro/bin (+ the chime-selftest bench tool) · orientation/bin
@@ -160,9 +164,13 @@ frame every ~20 s and simply replaces its buffers — no on-device parsing or ra
 draws one row of CPU/memory sparklines per host, keeping the last good frame if the endpoint
 faults or goes stale.
 
-The pomodoro controls: **front button (G37) tap** = start / pause / resume, **front
-double-tap** = restart the whole session, **front hold** = reset the current phase, **side
-button (G39) tap** = skip to the next phase. Durations are the classic 25 / 5 / 15 min (long
+The pomodoro controls: **front button (G37) click** = start / pause / resume, **front
+double-click** = restart the whole session, **front long hold** = reset the current phase, **side
+button (G39) click** = skip to the next phase, **power button click** = light the glass or darken
+it (a dark screen is not painted at all, so it costs no SPI traffic). Only the front button
+reports double-clicks, and it is the only one that pays for them: telling a double-click from a
+single one means waiting out a 300 ms window, so the side button's skip and the power button's
+toggle stay immediate. Durations are the classic 25 / 5 / 15 min (long
 break every 4th focus) — one constant in `pomodoro-core` to change, or shrink for a bench
 test. The transition jingles are melodies in intent, but the tiny passive buzzer is not a
 speaker: measured on-device it is loud across ~2–9 kHz yet radiates almost none of its energy at

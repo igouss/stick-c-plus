@@ -36,16 +36,18 @@ use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::EspLogger;
 use log::info;
 use platform_adapters::{
-    Axp192PowerSource, GpioButton, LedcBuzzer, Mpu6886Imu, Panel, PanelScreen, Turning,
+    Axp192Backlight, Axp192PowerSource, GpioButton, LedcBuzzer, Mpu6886Imu, Panel, PanelScreen,
+    PekButton, Turning,
 };
 use platform_core::{ScreenRotation, Tick};
+use platform_input::Buttons;
 use platform_runtime::{
-    spawn_buzzer, spawn_display, spawn_power_watch, spawn_rotation, DisplayConfig, Monotonic,
-    PowerWatchConfig, RotationConfig, SharedRotation,
+    spawn_buzzer, spawn_display, spawn_power_watch, spawn_rotation, BacklightSwitch, DisplayConfig,
+    LitFlag, Monotonic, PowerWatchConfig, RotationConfig, SharedRotation,
 };
 use pomodoro_core::CLASSIC;
 use pomodoro_display::PomodoroView;
-use pomodoro_shell::{spawn_input, SharedTimer};
+use pomodoro_shell::{spawn_input, SharedTimer, INPUT_CONFIG};
 use static_cell::StaticCell;
 
 /// The internal I2C bus' `'static` home, shared by the PMIC and the IMU.
@@ -115,9 +117,25 @@ fn main() {
         },
     );
 
-    // The two buttons (active-low, no internal pull) and the passive buzzer (LEDC on G2).
+    // The two levelled buttons (active-low, no internal pull) and the passive buzzer (LEDC on G2).
     let front: GpioButton = GpioButton::new(peripherals.pins.gpio37).expect("front button G37");
     let side: GpioButton = GpioButton::new(peripherals.pins.gpio39).expect("side button G39");
+    // The third button is not on a pin at all: it hangs off the PMIC's PEK input, which does its
+    // own debouncing and press timing, so it arrives already classified through its own handle on
+    // the shared bus.
+    let power_button: PekButton<MutexDevice<'static, I2cDriver<'static>>> =
+        PekButton::new(Axp192::new(MutexDevice::new(bus)));
+    let buttons: Buttons<_, _, _> = Buttons::new(front, side, power_button, INPUT_CONFIG);
+
+    // The backlight (PMIC rail LDO2), wrapped so the display thread can see it. `power_on` has
+    // already lit the glass, hence `true` — the wrapper publishes that rather than writing it.
+    // The switch goes to the input thread (the only writer); the flag to the render loop, which
+    // skips the paint entirely while the glass is dark.
+    let backlight: BacklightSwitch<_> = BacklightSwitch::new(Axp192Backlight::new(
+        Axp192::new(MutexDevice::new(bus)),
+        true,
+    ));
+    let lit: LitFlag = backlight.flag();
     let buzzer = LedcBuzzer::new(
         peripherals.ledc.timer0,
         peripherals.ledc.channel0,
@@ -139,11 +157,18 @@ fn main() {
     // Input: poll the buttons, step the FSM, sound the jingles on a clone of the one buzzer
     // handle. Held for the life of main — dropping it would only detach the thread, which
     // already runs forever.
-    let _input = spawn_input(front, side, tone.clone(), shared.clone(), clock, CLASSIC)
-        .expect("spawn pomodoro-input");
+    let _input = spawn_input(
+        buttons,
+        backlight,
+        tone.clone(),
+        shared.clone(),
+        clock,
+        CLASSIC,
+    )
+    .expect("spawn pomodoro-input");
     info!(
-        "input thread up: front tap = start/pause, front double-tap = restart session, \
-         front hold = reset phase, side tap = skip"
+        "input thread up: front click = start/pause, front double-click = restart session, \
+         front hold = reset phase, side click = skip, power click = backlight"
     );
 
     // Display: render the timer view every tick, through the same generic loop the plant
@@ -165,6 +190,7 @@ fn main() {
         screen,
         source,
         rotation.source(),
+        lit,
         clock,
         DisplayConfig::default(),
     )

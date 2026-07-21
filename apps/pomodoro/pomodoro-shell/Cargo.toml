@@ -20,7 +20,9 @@ context = "pomodoro"
 [dependencies]
 # The pure FSM: the Timer, the `step` use case, and the Jingle the shell sounds.
 pomodoro-core = { path = "../pomodoro-core" }
-# The board-generic ports the loop drives: Button (+ the pure Debounce), Clock, Tone.
+# The board-generic ports the loop drives: Clock, Tone, Backlight.
 platform-core = { path = "../../../platform/platform-core" }
+# The buttons: the two ports, the gesture recognizer, and the event stream the loop folds.
+platform-input = { path = "../../../platform/platform-input" }
 # The shell logs a buzzer failure so a dead speaker is observable; inert without a logger.
 log = "0.4"

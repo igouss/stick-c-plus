@@ -1,15 +1,18 @@
-//! The front/side push-buttons (G37 / G39) as the platform [`Button`] port.
+//! The front/side push-buttons (G37 / G39) as the platform [`ButtonLevel`] port.
 
 use esp_idf_hal::gpio::{Input, InputPin, PinDriver, Pull};
 use esp_idf_sys::EspError;
-use platform_core::Button;
+use platform_input::ButtonLevel;
 
 /// A momentary push-button on an input GPIO, read active-low.
 ///
 /// The M5StickC Plus front (G37) and side (G39) buttons are input-only pins (GPIO34–39 have no
 /// internal pull resistors) with external pull-ups on the board, so a press reads LOW. All
-/// timing and bounce rejection live in the pure `platform_core::Debounce`; this adapter is a
+/// timing and bounce rejection live in the pure `platform_input::Debounce`; this adapter is a
 /// one-line level read, so nothing about a gesture is decided on the metal.
+///
+/// The board's third button, the power button, is *not* one of these: it hangs off the PMIC and
+/// offers a latch rather than a level, so it has its own adapter — [`PekButton`](crate::PekButton).
 pub struct GpioButton<'d> {
     pin: PinDriver<'d, Input>,
 }
@@ -24,9 +27,9 @@ impl<'d> GpioButton<'d> {
     }
 }
 
-impl Button for GpioButton<'_> {
+impl ButtonLevel for GpioButton<'_> {
     /// `true` while the button is pressed — the active-low pin reads LOW.
-    fn poll(&mut self) -> bool {
+    fn pressed(&mut self) -> bool {
         self.pin.is_low()
     }
 }

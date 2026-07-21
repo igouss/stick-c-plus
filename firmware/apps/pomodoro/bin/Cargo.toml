@@ -62,6 +62,8 @@ static_cell = "2"
 # render loop + Monotonic clock; platform-core the Tick; the pomodoro-* crates are the FSM, the
 # picture, and the input shell — all no_std/std and cross-compile to xtensa cleanly.
 platform-core = { path = "../../../../platform/platform-core" }
+# The Buttons aggregate the composition root assembles from the three button adapters.
+platform-input = { path = "../../../../platform/platform-input" }
 platform-runtime = { path = "../../../../platform/platform-runtime" }
 # The pure acoustic analysis for the chime self-test: the acoustic-level (RMS) measure + verdict.
 platform-audio = { path = "../../../../platform/platform-audio" }

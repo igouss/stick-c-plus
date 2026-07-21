@@ -44,8 +44,44 @@ const EXTEN: u8 = 0x40;
 /// preserved — this is the write that actually turns the LCD on.
 const RAILS_ON: u8 = DISPLAY_RAILS | EXTEN;
 
+/// The [`REG_POWER_OUTPUT`] LDO2 bit (bit 2) — the **TFT backlight**, and only the
+/// backlight.
+///
+/// Deliberately separate from LDO3 (the panel itself), because that separation is
+/// what makes a backlight toggle cheap: cutting this leaves the ST7789 powered and
+/// holding its framebuffer, so the glass goes dark and comes back instantly with no
+/// re-initialisation. Cutting LDO3 as well would save a little more and cost a full
+/// panel bring-up on every wake.
+const LDO2: u8 = 0x04;
+
 /// Register 0x00 — the input-power status byte (which sources are present/usable).
 const REG_POWER_STATUS: u8 = 0x00;
+
+/// Register 0x46 — the PEK (power button) press-status latch.
+///
+/// The power button is not on a GPIO: it is wired to the PMIC, which does its own
+/// debouncing and its own press-duration timing against the thresholds written to
+/// `0x36` in [`Axp192::power_on`]. All the firmware can see is this latch, which
+/// records *that* a press of a given kind happened since it was last cleared.
+///
+/// The factory `begin()` never enables the IRQ registers (`0x40`–`0x44`) and yet
+/// `GetBtnPress` works, so these bits latch unconditionally — confirmed against the
+/// pinned `kb/sources/m5stack-m5stickc-plus/src/AXP192.cpp`, not assumed.
+const REG_PEK_STATUS: u8 = 0x46;
+
+/// The [`REG_PEK_STATUS`] short-press bit (bit 1).
+const PEK_SHORT_PRESS: u8 = 0x02;
+
+/// The [`REG_PEK_STATUS`] long-press bit (bit 0).
+///
+/// Read only so that it can be *cleared*. A long press is not the firmware's to act
+/// on: `0x36` sets the power-off press at four seconds, at which point the PMIC cuts
+/// the rails and the ESP32 is gone. Leaving the bit set would make the next short
+/// press read as stale.
+const PEK_LONG_PRESS: u8 = 0x01;
+
+/// Every [`REG_PEK_STATUS`] bit, written back to clear the latch (write-1-to-clear).
+const PEK_ALL: u8 = PEK_SHORT_PRESS | PEK_LONG_PRESS;
 
 /// The [`REG_POWER_STATUS`] VBUS-present bit (bit 5) — set while USB 5 V (VBUS) is
 /// present at the PMIC, so it tracks the USB cable being plugged in or pulled out,
@@ -133,6 +169,36 @@ impl<I2C: I2c> Axp192<I2C> {
         let power: u8 = self.read(REG_POWER_OUTPUT)?;
         let next: u8 = if on { power | EXTEN } else { power & !EXTEN };
         self.write(REG_POWER_OUTPUT, next)
+    }
+
+    /// Light the TFT backlight ([`LDO2`]) or cut it, preserving every other rail.
+    ///
+    /// A read-modify-write, like [`set_exten`](Self::set_exten), so it can never disturb
+    /// DCDC1 (the rail the ESP32 runs on) or LDO3 (the panel). Cutting only the
+    /// backlight is what makes the toggle instant in both directions — see [`LDO2`].
+    pub fn set_backlight(&mut self, lit: bool) -> Result<(), I2C::Error> {
+        let power: u8 = self.read(REG_POWER_OUTPUT)?;
+        let next: u8 = if lit { power | LDO2 } else { power & !LDO2 };
+        self.write(REG_POWER_OUTPUT, next)
+    }
+
+    /// Drain the power button's press latch ([`REG_PEK_STATUS`]): was there a short press
+    /// since the last call?
+    ///
+    /// Destructive, and deliberately so — the latch records *that* a press happened, not
+    /// how many, so a press is reported exactly once and a caller must poll on a steady
+    /// cadence or presses will queue behind one another.
+    ///
+    /// Clears the long-press bit too without reporting it. A long press ends with the PMIC
+    /// cutting the rails, so there is nothing to act on; leaving the bit set would only make
+    /// the next short press read as stale. The register is write-1-to-clear, and it is
+    /// written only when something was actually latched, so a quiet poll costs one read.
+    pub fn take_power_button_press(&mut self) -> Result<bool, I2C::Error> {
+        let status: u8 = self.read(REG_PEK_STATUS)?;
+        if status & PEK_ALL != 0 {
+            self.write(REG_PEK_STATUS, PEK_ALL)?;
+        }
+        Ok(status & PEK_SHORT_PRESS == PEK_SHORT_PRESS)
     }
 
     /// Whether the external 5 V boost ([`EXTEN`]) reads back as enabled.

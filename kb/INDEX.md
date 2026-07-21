@@ -34,6 +34,8 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
   — **confirmed**: clearing reg `0x12` bit 6 drops the Earth Unit's node from a
   saturated 4095 to a hard 0 in 500 ms, three for three. Measured with the ADC, not
   a multimeter: an open-electrode probe reports its own rail.
+- `finding` [board-has-three-buttons-two-acquisition-paths](findings/board-has-three-buttons-two-acquisition-paths.md)
+  — `high` · the power button is on the PMIC, not a pin, so it needs its own port
 - `finding` [axp192-exten-gates-grove-5v](findings/axp192-exten-gates-grove-5v.md)
   — `high` · **EXTEN** (reg `0x12` bit 6) is the Grove 5 V pin's enable, so probe
   power-gating (qhw.31) is firmware-only. Corrects the aside above. The settle delay

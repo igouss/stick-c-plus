@@ -3,14 +3,14 @@ name = "platform-adapters"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "M5StickC Plus board-generic driven adapters: the ST7789 panel with a generic PanelScreen, the G37/G39 buttons, and the G2 LEDC buzzer — implementing the platform-core ports (Screen, Button, Tone) against real esp-idf-hal peripherals, shared by every app."
+description = "M5StickC Plus board-generic driven adapters: the ST7789 panel with a generic PanelScreen, the G37/G39 buttons and the AXP192 power button, the LDO2 backlight, and the G2 LEDC buzzer — implementing the platform-core and platform-input ports against real esp-idf-hal peripherals, shared by every app."
 
 [lib]
 name = "platform_adapters"
 path = "src/lib.rs"
 
-# Driven adapters: each implements a platform-core port (Screen, Button, Tone) against real
-# esp-idf-hal peripherals. Shared by plant-monitor and pomodoro; the composition root injects
+# Driven adapters: each implements a platform-core or platform-input port (Screen, Backlight,
+# Tone, ButtonLevel, LatchedGesture) against real esp-idf-hal peripherals. Shared by plant-monitor and pomodoro; the composition root injects
 # the concrete peripherals. Firmware crates carry a role only (the context axis is off here).
 [package.metadata.hex-arch]
 role = "driven-adapter"
@@ -18,6 +18,9 @@ role = "driven-adapter"
 [dependencies]
 # The ports these adapters implement, and the value types they carry (Tick, Note).
 platform-core = { path = "../../../platform/platform-core" }
+# The two button ports: ButtonLevel for the G37/G39 pins, LatchedGesture for the PMIC's PEK,
+# plus the Gesture the latter reports.
+platform-input = { path = "../../../platform/platform-input" }
 # The panel maps the render function's RenderError into its own; SCREEN_SIZE fixes geometry.
 platform-display = { path = "../../../platform/platform-display" }
 # The BSP (infra): Axp192PowerSource wraps the board-support AXP192 driver to read the VBUS
@@ -32,3 +35,6 @@ static_cell = "2"
 # The ESP-IDF HAL supplies the SPI, GPIO, and LEDC drivers; esp-idf-sys the EspError.
 esp-idf-hal = "0.46"
 esp-idf-sys = "0.37"
+# The PEK adapter logs a failed latch read rather than propagating it (the port has no error
+# channel); inert without a logger.
+log = "0.4"

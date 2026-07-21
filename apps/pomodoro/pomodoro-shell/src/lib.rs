@@ -22,5 +22,5 @@
 mod input;
 mod shared;
 
-pub use input::{spawn_input, InputTask, INPUT_STACK_SIZE, POLL_PERIOD};
+pub use input::{spawn_input, Command, InputTask, INPUT_CONFIG, INPUT_STACK_SIZE, POLL_PERIOD};
 pub use shared::SharedTimer;

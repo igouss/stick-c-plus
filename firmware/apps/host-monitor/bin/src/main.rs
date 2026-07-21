@@ -35,7 +35,8 @@ use net::wifi::WifiStation;
 use platform_adapters::{Axp192PowerSource, LedcBuzzer, Panel, PanelScreen};
 use platform_core::ScreenRotation;
 use platform_runtime::{
-    spawn_buzzer, spawn_display, spawn_power_watch, DisplayConfig, Monotonic, PowerWatchConfig,
+    spawn_buzzer, spawn_display, spawn_power_watch, DisplayConfig, LitFlag, Monotonic,
+    PowerWatchConfig,
 };
 
 /// The hostpulse endpoint (`host:port`), baked in at build time from `firmware/secrets.toml`'s
@@ -169,8 +170,15 @@ fn main() {
     // platform supplies the capability regardless, so wiring one in later is a change here
     // and nowhere else.
     let landscape = |_now: Tick| ScreenRotation::Deg0;
-    let _display = spawn_display(screen, display_source, landscape, clock, display_config)
-        .expect("spawn host-monitor display");
+    let _display = spawn_display(
+        screen,
+        display_source,
+        landscape,
+        LitFlag::always(true),
+        clock,
+        display_config,
+    )
+    .expect("spawn host-monitor display");
     info!("display thread up: ST7789 rendering three host rows every {display_period:?}");
 
     // The on-board passive buzzer (LEDC on G2), behind one owner thread so the power-watch chime

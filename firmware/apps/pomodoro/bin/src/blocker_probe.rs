@@ -100,17 +100,20 @@ use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::EspLogger;
 use log::{info, warn};
 use platform_adapters::{
-    Axp192PowerSource, GpioButton, LedcBuzzer, Mpu6886Imu, Panel, PanelScreen, Turning,
+    Axp192Backlight, Axp192PowerSource, GpioButton, LedcBuzzer, Mpu6886Imu, Panel, PanelScreen,
+    PekButton, Turning,
 };
 use platform_bench::{Evidence, Sample, Split, Summary};
 use platform_core::{Screen, ScreenRotation, Tick, Tone};
+use platform_input::Buttons;
 use platform_runtime::{
-    spawn_buzzer, spawn_power_watch, spawn_rotation, BuzzerHandle, Monotonic, PowerWatchConfig,
-    PowerWatchTask, RotationConfig, RotationTask, SharedRotation, ANIMATION_PERIOD, MIN_YIELD,
+    spawn_buzzer, spawn_power_watch, spawn_rotation, BacklightSwitch, BuzzerHandle, Monotonic,
+    PowerWatchConfig, PowerWatchTask, RotationConfig, RotationTask, SharedRotation,
+    ANIMATION_PERIOD, MIN_YIELD,
 };
 use pomodoro_core::{Jingle, Phase, Status, CLASSIC};
 use pomodoro_display::PomodoroView;
-use pomodoro_shell::{spawn_input, InputTask, SharedTimer};
+use pomodoro_shell::{spawn_input, InputTask, SharedTimer, INPUT_CONFIG};
 
 /// Paints timed per stage.
 ///
@@ -562,6 +565,16 @@ fn main() {
 
     let front: GpioButton = GpioButton::new(peripherals.pins.gpio37).expect("front button G37");
     let side: GpioButton = GpioButton::new(peripherals.pins.gpio39).expect("side button G39");
+    let power_button: PekButton<MutexDevice<'static, I2cDriver<'static>>> =
+        PekButton::new(Axp192::new(MutexDevice::new(bus)));
+    let buttons: Buttons<_, _, _> = Buttons::new(front, side, power_button, INPUT_CONFIG);
+    // Wired exactly as production wires it, so the input thread under measurement is the real
+    // one. The probe drives its own render loop (it is timing the paint), so no flag is read
+    // here — and it never clicks the power button, so the glass stays lit for the whole sweep.
+    let backlight: BacklightSwitch<_> = BacklightSwitch::new(Axp192Backlight::new(
+        Axp192::new(MutexDevice::new(bus)),
+        true,
+    ));
     let buzzer = LedcBuzzer::new(
         peripherals.ledc.timer0,
         peripherals.ledc.channel0,
@@ -577,8 +590,15 @@ fn main() {
     // Every thread the timer runs, plus the deliberate jingle standing in for the button press
     // that the production overruns clustered behind.
     let threads: Threads = Threads {
-        input: spawn_input(front, side, tone.clone(), shared.clone(), clock, CLASSIC)
-            .expect("spawn pomodoro-input"),
+        input: spawn_input(
+            buttons,
+            backlight,
+            tone.clone(),
+            shared.clone(),
+            clock,
+            CLASSIC,
+        )
+        .expect("spawn pomodoro-input"),
         power_watch: spawn_power_watch(
             power_source,
             tone.clone(),

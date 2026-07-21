@@ -52,8 +52,8 @@ use plant_shell::{spawn_sampler, SamplerConfig, SharedMoisture};
 use platform_adapters::{Axp192PowerSource, LedcBuzzer, Mpu6886Imu, Panel, PanelScreen, Turning};
 use platform_core::ScreenRotation;
 use platform_runtime::{
-    spawn_buzzer, spawn_display, spawn_power_watch, spawn_rotation, DisplayConfig, Monotonic,
-    PowerWatchConfig, RotationConfig, SharedRotation,
+    spawn_buzzer, spawn_display, spawn_power_watch, spawn_rotation, DisplayConfig, LitFlag,
+    Monotonic, PowerWatchConfig, RotationConfig, SharedRotation,
 };
 use static_cell::StaticCell;
 
@@ -275,6 +275,7 @@ fn main() {
         screen,
         display_source,
         rotation.source(),
+        LitFlag::always(true),
         clock,
         display_config,
     )

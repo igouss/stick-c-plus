@@ -57,8 +57,8 @@ use orientation_shell::{spawn_sampler, SamplerConfig, SharedOrientation};
 use platform_adapters::{Axp192PowerSource, LedcBuzzer, Mpu6886Imu, Panel, PanelScreen, Turning};
 use platform_core::{ScreenRotation, Tick};
 use platform_runtime::{
-    spawn_buzzer, spawn_display, spawn_power_watch, DisplayConfig, Monotonic, PowerWatchConfig,
-    SharedRotation,
+    spawn_buzzer, spawn_display, spawn_power_watch, DisplayConfig, LitFlag, Monotonic,
+    PowerWatchConfig, SharedRotation,
 };
 use static_cell::StaticCell;
 use std::time::Duration;
@@ -193,8 +193,15 @@ fn main() {
             turned.current()
         }
     };
-    let _display = spawn_display(screen, source, rotation_source, clock, config)
-        .expect("spawn orientation-display");
+    let _display = spawn_display(
+        screen,
+        source,
+        rotation_source,
+        LitFlag::always(true),
+        clock,
+        config,
+    )
+    .expect("spawn orientation-display");
     info!("display thread up: ST7789 rendering the X/Y/Z bars at 25 Hz");
 
     // Power-watch: poll VBUS on the retained AXP192, debounce it, and chime a settled USB plug

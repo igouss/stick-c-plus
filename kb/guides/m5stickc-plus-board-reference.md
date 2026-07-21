@@ -20,6 +20,7 @@ because the tempting alternatives are already taken (buzzer, mic).
 | LCD ST7789V2 | G15 MOSI, G13 CLK, G23 DC, G18 RST, G5 CS | SPI; backlight via AXP192 LDO2 |
 | Button A | G37 | front |
 | Button B | G39 | side |
+| ~~Power button~~ | *not a GPIO* | on the AXP192 **PEK** pin — see below |
 | Red LED | G10 | plain GPIO, active-low |
 | IR transmitter | G9 | |
 | Passive buzzer | G2 | **avoid for the strip — reserved** |
@@ -30,6 +31,16 @@ Provenance: every number is stated by M5Stack's official
 [PinMap](../sources/m5stickc-plus-pinout.md) and independently compiled into the
 factory library — `utility/Config.h` (IR/LED/buttons/buzzer),
 `utility/In_eSPI_Setup.h` (TFT SPI), and `Wire1.begin(21, 22)` (I2C).
+
+## The third button is not on this table
+
+The board has **three** buttons; only two are on pins. The power button is wired to the
+AXP192's PEK input, so firmware reads it over I2C as a write-1-to-clear latch (reg
+`0x46`, bit 1 = short press) rather than as a level — and its long press is the PMIC's
+own power-off, which the firmware never gets to observe. This is why the official PinMap
+lists two buttons and the product page says "Custom button x 2" while the device plainly
+has three: both count only the *assignable* ones. See
+[board-has-three-buttons-two-acquisition-paths](../findings/board-has-three-buttons-two-acquisition-paths.md).
 
 ## Externally exposed GPIO (free for your own use)
 
