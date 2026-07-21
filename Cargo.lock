@@ -1035,6 +1035,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "platform-health"
+version = "0.1.0"
+dependencies = [
+ "cucumber",
+ "platform-core",
+ "proptest",
+ "tokio",
+]
+
+[[package]]
 name = "platform-input"
 version = "0.1.0"
 dependencies = [

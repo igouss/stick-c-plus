@@ -1,0 +1,35 @@
+[package]
+name = "platform-health"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The board's fault vocabulary, verdict fold and buzzer alarm FSM: given what every registered component last did and when, is anything broken, and should the buzzer be making noise right now. Pure decision-making, framework-free and host-tested."
+
+[lib]
+name = "platform_health"
+path = "src/lib.rs"
+
+# Pure health-judgement domain: a fold from evidence to a verdict, and a small FSM from a
+# verdict to an alarm decision. No clock, no I/O, no notion of a thread or a driver — every
+# rule is a pure function of its inputs, so it is verified on the host with no board attached.
+# context = "shared": the one context any crate may depend on.
+[package.metadata.hex-arch]
+role = "domain"
+context = "shared"
+
+[dependencies]
+# Tick, Note — the millisecond time base every fault's age is measured against, and the note
+# vocabulary the siren is built from. No port or logic is taken from it.
+platform-core = { path = "../platform-core" }
+
+# Host-only. These link std and never reach the Xtensa build (a dependent excludes them).
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin verdict + alarm suite needs its own harness; unit + property tests run under the
+# default harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false
