@@ -1,0 +1,21 @@
+[package]
+name = "platform-bench"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Pure, host-testable distribution statistics for the M5StickC Plus bench instruments: the min/median/max of a set of timings, how many broke a budget, and the split of a set into the samples taken while a suspect was active and those taken between — framework-free and no_std."
+
+[lib]
+name = "platform_bench"
+path = "src/lib.rs"
+
+# A pure domain core like the other platform kernels: arithmetic over timings, no HAL, no
+# effects, no allocation — so the whole reading of a measurement is host-tested even though the
+# measuring happens on the metal. context = "shared" so any app's bench tool may depend on it.
+[package.metadata.hex-arch]
+role = "domain"
+context = "shared"
+
+# Host-only; never reaches the Xtensa build (a dependent excludes dev-deps).
+[dev-dependencies]
+proptest = "1"

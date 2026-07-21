@@ -1324,6 +1324,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "platform-bench"
+version = "0.1.0"
+
+[[package]]
 name = "platform-core"
 version = "0.1.0"
 
@@ -1356,6 +1360,7 @@ dependencies = [
  "log",
  "platform-adapters",
  "platform-audio",
+ "platform-bench",
  "platform-core",
  "platform-runtime",
  "pomodoro-core",
