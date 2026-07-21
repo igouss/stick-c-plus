@@ -21,6 +21,9 @@
 //! - [`PowerSource`] — whether the board is on USB or battery, debounced by the pure
 //!   [`PowerDebounce`] into a settled level; [`edge`] then decides the [`PowerChime`] (if
 //!   any) a transition plays.
+//! - [`Imu`] — a three-axis accelerometer reporting an [`Acceleration`] in milli-g. The
+//!   adapter only reads the registers; what a vector *means* — which way is up, how steeply
+//!   the board is tilted — is decided inward by an app's own domain.
 //!
 //! ## The animation contract
 //! - [`Animated`] — an app state that knows its own animation policy: a coarse
@@ -33,6 +36,7 @@ mod animated;
 mod audio;
 mod chime;
 mod clock;
+mod imu;
 mod input;
 mod power;
 mod power_debounce;
@@ -44,6 +48,7 @@ pub use animated::Animated;
 pub use audio::AudioIn;
 pub use chime::{edge, PowerChime};
 pub use clock::Clock;
+pub use imu::{Acceleration, Imu, ONE_G_MG};
 pub use input::{Button, ButtonEvent, Debounce, TapCadence, DEBOUNCE_MS, DOUBLE_TAP_MS, HOLD_MS};
 pub use power::PowerSource;
 pub use power_debounce::{PowerDebounce, POWER_DEBOUNCE_MS};
