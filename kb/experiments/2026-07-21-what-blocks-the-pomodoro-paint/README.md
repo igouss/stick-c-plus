@@ -144,11 +144,22 @@ The unmodified timer, monitored while the board was handled:
 60.666  60.471  60.886  60.373  60.403  60.43  60.959  60.42  60.551  60.43  60.336  ...
 ```
 
-Twenty warnings, every one between 60.33 and 60.99 ms, arriving in bursts while the board was
-being turned and stopping completely when it was set down — including a 15-second silence in the
-middle of a run. The exact turn-to-warning correspondence was **not** established by hand (the
-turns were not counted); it was established on the bench, where the turn count is commanded
-rather than estimated, at 19 of 19.
+Twenty-five warnings, every one between 60.33 and 60.99 ms, arriving in bursts while the board
+was being handled and stopping completely when it was set down. The exact turn-to-warning
+correspondence was **not** established by hand (the turns were not counted); it was established
+on the bench, where the turn count is commanded rather than estimated, at 19 of 19.
+
+**The decisive half is the silence.** The last warning arrived at `t=265131`; the timer went on
+running, animating and heartbeating until `t=590961` with the board flat on the desk. That is
+**326 seconds — about 6,500 animated paints at the 50 ms cadence — with every thread alive, the
+timer `Running`, and not one breach.**
+
+This is what falsifies the thread hypothesis on production firmware rather than only on the
+bench. A blocker that lives in the input, buzzer, rotation, power-watch or heartbeat threads is
+present in that window exactly as it was in the bursts: the threads all run, the timer animates,
+the budget is 50 ms. At the originally-observed rate of 0.8% of frames it predicts roughly
+**52 breaches** across those 6,500 paints. Observed: **zero**. The one variable that changed is
+whether a hand was touching the board.
 
 ## Consequences
 
