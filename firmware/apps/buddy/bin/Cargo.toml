@@ -1,0 +1,40 @@
+[package]
+name = "claude-buddy"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "M5StickC Plus desk pet that lives off Claude Code approvals — a bonded BLE Nordic UART link, an ASCII buddy, and approve/deny on the two buttons."
+
+# A spike, not the buddy: the smallest firmware that proves the BLE transport this app is
+# built on actually works — advertise as Claude-XXXX, bond over LE Secure Connections, and
+# echo newline-delimited lines back over the Nordic UART Service at the negotiated MTU.
+# Everything else in the epic assumes this link exists, so it is written and flashed first.
+# It reports its own flash and heap cost on the serial console, because the planning estimate
+# (~250 KB flash, ~60-75 KB heap) is the number the rest of the design rests on.
+[[bin]]
+name = "ble-spike"
+path = "src/ble_spike.rs"
+
+# The imperative shell's outermost layer: it composes adapters and owns effects, so it is the
+# one crate the effect-audit `domain` gate must never tag.
+[package.metadata.hex-arch]
+role = "composition-root"
+
+[dependencies]
+# The std/ESP-IDF stack. esp-idf-svc re-exports -hal and -sys, but all three are named so the
+# version floor shows.
+esp-idf-svc = "0.52"
+esp-idf-hal = "0.46"
+esp-idf-sys = "0.37"
+log = "0.4"
+# The BLE peripheral. A safe wrapper over the NimBLE host ESP-IDF already bundles, so the GATT
+# server, LE Secure Connections bonding, and the passkey callback are reachable without `unsafe`
+# in this crate. Pairs with esp-idf-svc 0.52, which is what the rest of this workspace is on.
+esp32-nimble = "0.12"
+# Heap readings. The spike's whole job is to report what BLE costs, and these counters exist
+# only as ESP-IDF C functions — so they are read through the one crate that owns that `unsafe`.
+esp-metrics = { path = "../../../platform/esp-metrics" }
+
+[build-dependencies]
+# Emits the ESP-IDF sysenv link/search flags for the final link (via ldproxy).
+embuild = "0.33"

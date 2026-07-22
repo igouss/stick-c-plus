@@ -8,6 +8,7 @@
 #                                              PanelScreen, buttons, buzzer); every app.
 #   platform/board-support/   infra          — M5StickC Plus BSP (AXP192, I2C); every app.
 #   platform/net/             infra          — shared WiFi STA + DNS resolve; every networked app.
+#   platform/esp-metrics/     infra          — heap counters; the ONE crate allowed `unsafe`.
 #   apps/plant-monitor/adapters/     driven-adapter — the plant adc + probe-power adapters.
 #   apps/plant-monitor/firmware-infra/ infra        — ESPHome mDNS advertiser (plant only).
 #   apps/plant-monitor/bin/   composition-root — the plant-monitor (crate name "plant-monitor").
@@ -15,6 +16,7 @@
 #   apps/host-monitor/bin/    composition-root — the host monitor (crate name "host-monitor").
 #   apps/pomodoro/bin/        composition-root — the standalone pomodoro timer.
 #   apps/orientation/bin/     composition-root — the live IMU orientation readout.
+#   apps/buddy/bin/           composition-root — the Claude Code desk pet (BLE Nordic UART).
 #
 # Detached (own `[workspace]`, `exclude`d up top) so its Xtensa target and `esp`
 # toolchain (rust-toolchain.toml) never touch the host `cargo test`.
@@ -24,6 +26,7 @@ members = [
     "platform/adapters",
     "platform/board-support",
     "platform/net",
+    "platform/esp-metrics",
     "apps/plant-monitor/adapters",
     "apps/plant-monitor/firmware-infra",
     "apps/plant-monitor/bin",
@@ -31,6 +34,7 @@ members = [
     "apps/host-monitor/bin",
     "apps/pomodoro/bin",
     "apps/orientation/bin",
+    "apps/buddy/bin",
 ]
 
 # Profiles live at the (virtual) workspace root; members may not set their own.

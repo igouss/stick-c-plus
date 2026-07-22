@@ -144,8 +144,13 @@ hex-lint:
 # ---- Firmware (Xtensa, std/ESP-IDF) ----
 
 # Build the firmware (release).
+#
+# Excludes claude-buddy deliberately: it is the one app whose ESP-IDF has Bluetooth enabled
+# (sdkconfig.buddy.defaults), and esp32-nimble does not compile at all against a BT-disabled
+# IDF — 655 unresolved NimBLE symbols, not a warning. `just build-buddy` builds it with the
+# right config; `just ci` runs both.
 build:
-    cd firmware && PATH="{{pyshim}}:$PATH" cargo build --release
+    cd firmware && PATH="{{pyshim}}:$PATH" cargo build --release --workspace --exclude claude-buddy
 
 # Build just the standalone pomodoro timer (Xtensa release). It links the shared ESP-IDF the
 # workspace builds (root crate = plant-monitor); the pomodoro ELF drops the unused mdns
@@ -167,13 +172,26 @@ build-orientation:
 build-host-monitor:
     cd firmware && PATH="{{pyshim}}:$PATH" ESP_IDF_SYS_ROOT_CRATE=host-monitor cargo build --release -p host-monitor
 
-# Type-check the firmware without linking (fast).
-check:
-    cd firmware && PATH="{{pyshim}}:$PATH" cargo check --release
+# Build the Claude buddy (Xtensa release) with the Bluetooth stack linked in. The BT Kconfig
+# lives in its own sdkconfig.buddy.defaults, layered here rather than in the shared
+# sdkconfig.defaults, so the other four apps do not carry ~250 KB of controller and host they
+# never use. ESP_IDF_SDKCONFIG_DEFAULTS is semicolon-separated and later files win.
+build-buddy:
+    cd firmware && PATH="{{pyshim}}:$PATH" ESP_IDF_SYS_ROOT_CRATE=claude-buddy ESP_IDF_SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.buddy.defaults" cargo build --release -p claude-buddy
 
-# Lint the firmware, warnings as errors.
+# Type-check the firmware without linking (fast). Excludes claude-buddy — see `build`.
+check:
+    cd firmware && PATH="{{pyshim}}:$PATH" cargo check --release --workspace --exclude claude-buddy
+
+# Lint the firmware, warnings as errors. Excludes claude-buddy — see `build`.
 lint-fw:
-    cd firmware && PATH="{{pyshim}}:$PATH" cargo clippy --release -- -D warnings
+    cd firmware && PATH="{{pyshim}}:$PATH" cargo clippy --release --workspace --exclude claude-buddy -- -D warnings
+
+# Lint the Claude buddy against its own BT-enabled ESP-IDF, warnings as errors. Split from
+# `lint-fw` because the two need different IDF builds, not because the buddy is held to a
+# looser standard — `just ci` runs both and neither may warn.
+lint-buddy:
+    cd firmware && PATH="{{pyshim}}:$PATH" ESP_IDF_SYS_ROOT_CRATE=claude-buddy ESP_IDF_SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.buddy.defaults" cargo clippy --release -p claude-buddy -- -D warnings
 
 # Report the firmware binary's section sizes (text/data/bss).
 size: build
@@ -206,6 +224,14 @@ run-bin bin:
 # paint can be located rather than only noticed. `just run-pomodoro` puts the timer back.
 run-bin-pomodoro bin:
     cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p pomodoro --bin {{bin}}'
+
+# Flash and monitor one named bin of the Claude buddy package. `just run-bin-buddy ble-spike`
+# brings up the Nordic UART peripheral on its own — it advertises as Claude-XXXX, demands LE
+# Secure Connections bonding, echoes newline-delimited lines back, and prints what the BLE
+# stack cost in heap. Pair it from the other side with `bluetoothctl` (scan on, pair <addr>,
+# then type the passkey the serial log shows). `just run` puts the plant monitor back.
+run-bin-buddy bin:
+    cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}" ESP_IDF_SYS_ROOT_CRATE=claude-buddy ESP_IDF_SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.buddy.defaults"; cargo run --release -p claude-buddy --bin {{bin}}'
 
 # Build, flash, and monitor the standalone pomodoro timer. `just run` puts the plant monitor
 # back. Front click = start/pause, front double-click = restart session, front long hold =
@@ -282,7 +308,7 @@ setup-hooks:
 
 # Everything CI checks: format, architecture (hex-lint), lint both worlds, test,
 # build. hex-lint runs early — an architecture breach fails fast, before builds.
-ci: (fmt "check") hex-lint sprites-check lint lint-fw test build
+ci: (fmt "check") hex-lint sprites-check lint lint-fw lint-buddy test build build-buddy
 
 # Remove build artifacts (host + firmware).
 clean:

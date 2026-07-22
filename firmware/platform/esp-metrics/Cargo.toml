@@ -1,0 +1,21 @@
+[package]
+name = "esp-metrics"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Safe readings of the ESP-IDF runtime resource counters (heap free, heap low-water mark, largest contiguous block) — the one crate in this workspace allowed to speak C."
+
+[lib]
+name = "esp_metrics"
+path = "src/lib.rs"
+
+# `infra` — it wraps a vendor C API and nothing else. Per the hex-lint matrix `infra` may
+# depend only on `infra`, which is exactly the containment wanted: nothing domain-shaped can
+# leak in here, and the `unsafe` cannot leak out.
+[package.metadata.hex-arch]
+role = "infra"
+
+[dependencies]
+# The generated ESP-IDF bindings. This is the only crate in the workspace that names them for
+# their raw C functions rather than for a safe wrapper someone else already wrote.
+esp-idf-sys = "0.37"

@@ -1,0 +1,54 @@
+# ESP-IDF overrides for the Claude buddy ONLY — layered on top of sdkconfig.defaults.
+#
+# Deliberately a separate file: sdkconfig.defaults is shared by every app in this workspace,
+# and enabling the Bluetooth stack there would link ~250 KB of controller and host into
+# pomodoro, orientation, plant-monitor and host-monitor, none of which speak BLE. The buddy's
+# just recipes layer this file via ESP_IDF_SDKCONFIG_DEFAULTS (semicolon-separated, later
+# files win), the same way build-host-monitor already sets ESP_IDF_SYS_ROOT_CRATE for a lean
+# mdns-free IDF.
+#
+# Acceptance note, inherited from qhw.1: a MISTYPED key is SILENTLY IGNORED. The proof that
+# any of this took effect is the GENERATED sdkconfig, not the presence of a line here.
+
+# --- The stack: NimBLE, not Bluedroid -----------------------------------------------------
+# NimBLE is the smaller of the two hosts by a wide margin on flash. (It is NOT reliably
+# smaller on heap — field reports put it a few KB worse — so the win claimed here is image
+# size only.)
+CONFIG_BT_ENABLED=y
+CONFIG_BT_BLUEDROID_ENABLED=n
+CONFIG_BT_NIMBLE_ENABLED=y
+# (No CONFIG_BT_BLE_ENABLED here: it is a Bluedroid-only symbol and does not exist under
+# NimBLE, which is BLE-only by construction. Setting it was silently ignored — verified in the
+# generated sdkconfig, which is the only place that check can be made.)
+
+# --- Security: LE Secure Connections, and only that ----------------------------------------
+# REFERENCE.md is explicit that transcript snippets and tool-call hints cross this link, so an
+# unencrypted device is sniffable by anyone in radio range with a cheap nRF dongle. Bonding
+# with SC + MITM is the floor, not a nicety.
+CONFIG_BT_NIMBLE_SM_SC=y
+# Legacy pairing off: it is the downgrade path an attacker would aim for, and dropping it
+# also drops its code from the image.
+CONFIG_BT_NIMBLE_SM_LEGACY=n
+# Bonds must survive a reboot or the user re-pairs every power cycle.
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+CONFIG_BT_NIMBLE_MAX_BONDS=3
+
+# --- Roles: peripheral only ----------------------------------------------------------------
+# The stick is never the central and never scans; compiling out those roles is free image.
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
+# One host at a time. Also bounds the per-connection RAM the host reserves.
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+
+# --- Throughput ----------------------------------------------------------------------------
+# Notifications fragment at the MTU boundary and the firmware chunks at MTU-3, so a larger
+# MTU means fewer round trips for a heartbeat snapshot. 247 is the usual practical ceiling.
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=247
+
+# --- Stacks and logging --------------------------------------------------------------------
+# The crate's README warns the default host task stack is too small once Rust closures run on
+# it — and a blown stack here presents as a boot loop, not an error.
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=7000
+# Host logging off: a real size lever, and the interesting events are already surfaced through
+# the server callbacks in Rust.
+CONFIG_BT_NIMBLE_LOG_LEVEL_NONE=y
