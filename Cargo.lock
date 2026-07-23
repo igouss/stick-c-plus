@@ -123,6 +123,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "buddy-core"
+version = "0.1.0"
+dependencies = [
+ "cucumber",
+ "platform-core",
+ "platform-input",
+ "proptest",
+ "tokio",
+]
+
+[[package]]
+name = "buddy-wire"
+version = "0.1.0"
+dependencies = [
+ "cucumber",
+ "proptest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "bytecount"
 version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

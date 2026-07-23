@@ -1,0 +1,38 @@
+[package]
+name = "buddy-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Framework-free desk-pet domain for the M5StickC Plus: the persona state machine (derive + one-shot overrides + wake window), the shake and face-down-nap sensors, the stats math (mood/energy/level/token-latch), the charging-clock schedule, the menu tree, and the selected species index — pure no_std, host-tested, time injected as a Tick."
+
+[lib]
+name = "buddy_core"
+path = "src/lib.rs"
+
+# The pure heart of the desk pet: the persona FSM, the sensors, the stats math, the
+# charging-clock schedule, the menu tree, and the species index — no framework, no I/O.
+# context = "buddy" scopes it to the buddy bounded context; it depends only on the shared
+# kernel (platform-core, context = "shared") and the pure input crate (platform-input).
+[package.metadata.hex-arch]
+role = "domain"
+context = "buddy"
+
+[dependencies]
+# The shared kernel: the Tick millisecond unit the one-shots and clock speak, and the
+# Acceleration vector the sensors read. no_std, zero-dep.
+platform-core = { path = "../../../platform/platform-core" }
+# The pure button event source: ButtonEvent / ButtonId / Gesture, the alphabet the menu
+# dispatch table folds over. no_std, zero-dep.
+platform-input = { path = "../../../platform/platform-input" }
+
+# Host-only. These link std and never reach the Xtensa build (a dependent excludes them).
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run under the
+# default harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false

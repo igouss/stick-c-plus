@@ -1,0 +1,36 @@
+[package]
+name = "buddy-wire"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The NUS JSON wire contract for the desk pet, shared by both the firmware and the Linux bridge: line framing with typed truncation errors, the exhaustive inbound classification (snapshot / time / command / event) with its asymmetric merge, command dispatch with a negative-ack default, and permission responses. std but device-independent — host-tested against the wire contract."
+
+[lib]
+name = "buddy_wire"
+path = "src/lib.rs"
+
+# The JSON boundary of the buddy: it turns a NUS line into a typed Inbound, merges snapshots,
+# and builds acks and permission responses. Like host-wire (also port-and-adapter), it holds
+# adapters that speak domain types and stay host-testable; both the firmware and the Linux
+# bridge link it, so the wire contract has a single, tested source of truth.
+[package.metadata.hex-arch]
+role = "port-and-adapter"
+context = "buddy"
+
+[dependencies]
+# The wire format. serde derives the DTOs; serde_json parses the line and builds the acks.
+# Both are std/alloc, which esp-idf std provides, so the firmware adapter links it unchanged.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Host-only; never reaches the Xtensa build (a dependent excludes dev-deps).
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run under the
+# default harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false
