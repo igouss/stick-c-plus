@@ -63,12 +63,26 @@ impl LinkPeer for DaemonPeer {
             .duration_since(UNIX_EPOCH)
             .map(|since: Duration| since.as_secs() as i64)
             .unwrap_or(0);
+        // Make bonding OBSERVABLE. Without this line the daemon prints nothing after "found …;
+        // connecting" and the passkey prompt, so a successful bond looks identical to a hang stuck
+        // at the prompt — the footgun that wastes an operator's time on every fresh pairing.
+        log::info!(
+            "link up: bonded — handshake sent (time+owner+snapshot) as owner '{owner}'; \
+             hooks now ask the stick",
+            owner = self.owner
+        );
         self.daemon.link_up(epoch, self.tz_offset_s, &self.owner)
     }
     fn on_line(&self, line: Vec<u8>) {
         self.daemon.device_line(line);
     }
     fn on_down(&self) {
+        // The complement of the on_up line: a dropped link is why hooks start degrading to the
+        // terminal prompt, so it must be visible rather than inferred from silence.
+        log::warn!(
+            "link down: stick disconnected — pending approvals drain to Unbonded, \
+             hooks fall back to the terminal prompt until it reconnects"
+        );
         self.daemon.link_down();
     }
 }
