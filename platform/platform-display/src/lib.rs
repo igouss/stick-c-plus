@@ -38,6 +38,7 @@ extern crate alloc;
 
 mod colour_check;
 mod error;
+mod magnify;
 mod rotation_check;
 mod signed_bar;
 mod sparkline;
@@ -49,6 +50,7 @@ pub mod testing;
 
 pub use colour_check::colour_bands;
 pub use error::RenderError;
+pub use magnify::Magnified;
 pub use rotation_check::rotation_frame;
 pub use signed_bar::signed_bar;
 pub use sparkline::sparkline;
