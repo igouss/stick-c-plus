@@ -40,12 +40,17 @@
 //!   transition, whether it [`is_animated`](Animated::is_animated), and which
 //!   [`frame_index`](Animated::frame_index) shows after a given elapsed time. The generic
 //!   render loop (in `platform-runtime`) reads exactly this.
+//! - [`FixedStr`] — the `Copy`, fixed-capacity string a view carries its *text* in. The render
+//!   loop needs its state `Copy + Eq + Send + 'static`, which rules out both a borrowed `&str`
+//!   and a `String`; an app with changing text on the glass (a transcript line, a tool name)
+//!   needs a string that is a plain value.
 
 mod animated;
 mod audio;
 mod backlight;
 mod chime;
 mod clock;
+mod fixed_str;
 mod imu;
 mod power;
 mod power_debounce;
@@ -59,6 +64,7 @@ pub use audio::AudioIn;
 pub use backlight::Backlight;
 pub use chime::{edge, PowerChime};
 pub use clock::Clock;
+pub use fixed_str::FixedStr;
 pub use imu::{is_at_rest, Acceleration, Imu, ONE_G_MG, REST_TOLERANCE_MG};
 pub use power::PowerSource;
 pub use power_debounce::{PowerDebounce, POWER_DEBOUNCE_MS};
