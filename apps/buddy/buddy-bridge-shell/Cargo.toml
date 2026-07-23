@@ -20,6 +20,10 @@ role = "driving-adapter"
 context = "buddy"
 
 [dependencies]
+# The Linux BlueZ client. btleplug cannot bond on any platform; bluer (the BlueZ project's
+# own crate) offers Device::pair/remove_device. The `bluetoothd` feature is NOT a default —
+# without it Device, the pairing agent, and the GATT client do not exist.
+bluer = { version = "0.17.4", features = ["bluetoothd"] }
 # The pure decision this shell runs: the FSM, the mtu-3 chunker, the backoff schedule.
 buddy-bridge-core = { path = "../buddy-bridge-core" }
 # The NUS wire contract: the Ring + Framer the RxReassembler reuses to turn fragmented TX

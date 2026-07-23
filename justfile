@@ -106,6 +106,31 @@ oracle:
 lint:
     cargo clippy --workspace -- -D warnings
 
+# ---- Bridge (the Linux BLE central — needs BlueZ; the device test needs the stick) ----
+
+# Run the bridge daemon: scan for the Claude-XXXX stick, bond (type the passkey the glass
+# shows when prompted), subscribe, and reconnect across reboots. Needs a BlueZ adapter; no
+# root on this box. Flash the peer first with `just run-bin-buddy ble-spike`. RUST_LOG=debug
+# for more. Ctrl-C to exit.
+bridge:
+    cargo run -p buddy-bridge
+
+# The device-in-the-loop proof for the bridge: the #[ignore]d test that drives the REAL
+# BluerCentral against a flashed Claude-XXXX stick — bond, heartbeat, chunked round-trip,
+# reconnect-across-reboot, and the Just-Works-downgrade regression (the passkey callback must
+# fire). Like `oracle`, it is #[ignore]d so a plain `cargo test` shows it *ignored*, never a
+# false green, and it is deliberately NOT in `just ci` (a bond needs the physical device).
+# Preflight asserts a BlueZ adapter is present; STICK_PASSKEY overrides the spike's 123456.
+bridge-device:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! ls /sys/class/bluetooth/hci* >/dev/null 2>&1; then
+      echo "❌ no BlueZ adapter under /sys/class/bluetooth — is Bluetooth up?"; exit 2
+    fi
+    echo "▶ bridge device test — flash the peer first: just run-bin-buddy ble-spike"
+    echo "  you will be asked to enter the passkey shown on the glass, and to power-cycle the stick."
+    cargo test -p buddy-bridge-shell --test device_bridge -- --ignored --nocapture
+
 # Enforce the functional-core / imperative-shell split on every crate marked
 # `[package.metadata.hex-arch] role = "domain"` (led-core, plant-core, esphome-api).
 # Fails if a concrete effect — socket, file, thread, clock — leaks into a domain

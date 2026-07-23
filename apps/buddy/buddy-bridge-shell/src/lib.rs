@@ -14,14 +14,21 @@
 //!   notifications (and the device's separate-`\n` quirk) back into whole JSON lines.
 //! - [`Sleeper`] — the injected async sleep, so the backoff schedule runs instantly under test.
 //!
-//! The concrete `BluerCentral` over bluer 0.17.4 and the `#[ignore]`d device-in-the-loop test
-//! land alongside these once the bluer API is pinned.
+//! - [`build_agent`] — the pairing agent wired so KeyboardOnly and the passkey handler are one
+//!   act; the concrete [`BluerCentral`] over bluer 0.17.4 is device-tested (`tests/device_bridge.rs`).
 
+pub mod agent;
+pub mod bluer_central;
 pub mod central;
 pub mod drive_loop;
 pub mod reassembler;
 pub mod sleeper;
 
+pub use agent::{build_agent, PasskeyProvider};
+// Re-exported so the composition root names the security posture without a direct dep on the
+// pure core.
+pub use bluer_central::{discover, BluerCentral, NUS_RX, NUS_SERVICE, NUS_TX};
+pub use buddy_bridge_core::{chunk, IoCapability};
 pub use central::{Central, CentralError, Connected};
 pub use drive_loop::{DriveLoop, Step};
 pub use reassembler::RxReassembler;
