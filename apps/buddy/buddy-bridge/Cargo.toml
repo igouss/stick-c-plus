@@ -20,8 +20,20 @@ context = "buddy"
 [dependencies]
 # The bridge adapter: the DriveLoop, the BluerCentral, the pairing-agent builder, discovery.
 buddy-bridge-shell = { path = "../buddy-bridge-shell" }
-# The runtime, and stdin for the passkey the operator reads off the glass.
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "sync"] }
+# The permission daemon's async shell: the actor (Daemon), the unix-socket server, and the
+# keepalive tick this root spawns and wires behind the DriveLoop's LinkPeer.
+buddy-daemon-shell = { path = "../buddy-daemon-shell" }
+# The socket-path contract (SOCK_ENV / DEFAULT_SOCK_FILENAME) the daemon and the hook both agree on.
+buddy-permission = { path = "../buddy-permission" }
+# The runtime, stdin for the passkey, the unix socket the hooks connect on, and the keepalive timer.
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "io-std",
+    "sync",
+    "net",
+    "time",
+] }
 # The BLE session + agent registration live here (the composition root), over the same bluer.
 bluer = { version = "0.17.4", features = ["bluetoothd"] }
 # Async trait impl for the stdin passkey provider.
