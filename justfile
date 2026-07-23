@@ -115,6 +115,38 @@ lint:
 bridge:
     cargo run -p buddy-bridge
 
+# Bring the bridge up against a flashed `ble-spike` stick and AUTO-ENTER its fixed passkey
+# (123456), so a cold pairing needs no hand-typing. Sets BUDDY_BRIDGE_SOCK and prints where the
+# hook socket lands. Watch the log for `link up: bonded` — that (not the passkey prompt) is the
+# success signal; the daemon used to print nothing on success and looked hung at the prompt.
+# NOTE: do NOT run `bluetoothctl scan` while this runs — a second discovery session steals the
+# daemon's and it silently never finds the stick. Spike-only: the real firmware shows a
+# per-pairing passkey, so use plain `just bridge` and type it. Ctrl-C to stop.
+bridge-spike-pair passkey="123456":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! ls /sys/class/bluetooth/hci* >/dev/null 2>&1; then
+      echo "❌ no BlueZ adapter under /sys/class/bluetooth — is Bluetooth up?"; exit 2
+    fi
+    sock="${BUDDY_BRIDGE_SOCK:-/tmp/buddy-bridge.sock}"
+    echo "▶ bridge ↔ ble-spike, auto-passkey {{passkey}}, hook socket $sock"
+    echo "  watch for 'link up: bonded'; do NOT 'bluetoothctl scan' alongside this. Ctrl-C to stop."
+    yes {{passkey}} | RUST_LOG=info BUDDY_BRIDGE_SOCK="$sock" cargo run --release -p buddy-bridge
+
+# Forget the HOST half of an out-of-sync bond to the Claude-XXXX stick (the recurring first step
+# when pairing loops on a stale LTK). The DEVICE half lives in the stick's NVS and survives a
+# reflash — this prints the erase command to clear it too. See kb/guides/buddy-permission-hook.md.
+bridge-forget:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mapfile -t addrs < <(bluetoothctl devices 2>/dev/null | awk '/Claude-/{print $2}')
+    if [ "${#addrs[@]}" -eq 0 ]; then echo "no Claude- bond on the host to forget"; else
+      for a in "${addrs[@]}"; do echo "forgetting $a"; bluetoothctl remove "$a" >/dev/null || true; done
+      echo "✅ host bond(s) cleared."
+    fi
+    echo "the DEVICE half persists across reflash — erase the stick's NVS to fully reset the bond:"
+    echo "  {{sg}} 'espflash erase-region -p {{port}} -c esp32 0x9000 0x6000'"
+
 # The device-in-the-loop proof for the bridge: the #[ignore]d test that drives the REAL
 # BluerCentral against a flashed Claude-XXXX stick — bond, heartbeat, chunked round-trip,
 # reconnect-across-reboot, and the Just-Works-downgrade regression (the passkey callback must

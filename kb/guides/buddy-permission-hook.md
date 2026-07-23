@@ -70,6 +70,14 @@ Connections bonding with passkey entry.
 Leave `buddy-bridge` running (a `systemd --user` service or a `tmux` pane). It is
 the process every hook talks to.
 
+> **Bonding looks silent — that is expected only up to a point.** The success signal
+> is the `link up: bonded` log line, not the passkey prompt. If the daemon sits in
+> `scanning …` forever, you almost certainly have a `bluetoothctl scan` running that
+> stole its discovery session — stop it. For a flashed `ble-spike` stick, `just
+> bridge-spike-pair` brings the daemon up and auto-enters the fixed passkey `123456`.
+> The four bring-up traps are catalogued in
+> [buddy-bridge-bonding-gotchas](../findings/buddy-bridge-bonding-gotchas.md).
+
 ## Installing the hook into settings.json
 
 The hook is a `PreToolUse` command hook. Point it at the **built binary** (an
