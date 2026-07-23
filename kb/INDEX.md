@@ -152,6 +152,19 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
   git" sync discipline, the `--json` / `br schema` contract, and why the cycle
   gate reads `br dep cycles` — not bv's lazily-`null` `Cycles` (a false red).
 
+## The Claude buddy — the ported desk pet
+
+- `source` [claude-desktop-buddy-domain-model](sources/claude-desktop-buddy-domain-model.md)
+  — the **behaviour + wire model of `anthropics/claude-desktop-buddy`**, read out of the
+  C++ with `file:line` for every claim, because the port is specified by the code and it
+  disagrees with upstream's own `REFERENCE.md` in **thirteen** places. Most consequential:
+  an unhandled `{"evt":"turn"}` **destroys a pending permission prompt** (`data.h:122-124`),
+  and unknown commands are swallowed with no ack. Pins the persona FSM, the three-case
+  token latch, and the clock schedule's `millis()` flicker (and its dead `h == 0` branch).
+  **Behaviour is ported; the render is not** — the buddy draws the existing ClaudePix pixel
+  sprites, so the note's 795 text-art poses are upstream history, not the render path (see
+  its scope banner).
+
 ## Display — assets
 
 - `source` [claudepix](sources/claudepix.md) — the vendored **ClaudePix** 20×20
