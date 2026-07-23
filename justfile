@@ -128,7 +128,10 @@ bridge-spike-pair passkey="123456":
     if ! ls /sys/class/bluetooth/hci* >/dev/null 2>&1; then
       echo "❌ no BlueZ adapter under /sys/class/bluetooth — is Bluetooth up?"; exit 2
     fi
-    sock="${BUDDY_BRIDGE_SOCK:-/tmp/buddy-bridge.sock}"
+    # Default to the SAME path the hook binary resolves when Claude Code spawns it with no
+    # BUDDY_BRIDGE_SOCK: $XDG_RUNTIME_DIR/buddy-bridge.sock (temp dir only if that is unset). A
+    # /tmp default here would silently miss the hook — daemon and hook must agree on the path.
+    sock="${BUDDY_BRIDGE_SOCK:-${XDG_RUNTIME_DIR:-/tmp}/buddy-bridge.sock}"
     echo "▶ bridge ↔ ble-spike, auto-passkey {{passkey}}, hook socket $sock"
     echo "  watch for 'link up: bonded'; do NOT 'bluetoothctl scan' alongside this. Ctrl-C to stop."
     yes {{passkey}} | RUST_LOG=info BUDDY_BRIDGE_SOCK="$sock" cargo run --release -p buddy-bridge
