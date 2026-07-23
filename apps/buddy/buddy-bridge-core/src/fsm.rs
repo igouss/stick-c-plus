@@ -6,14 +6,35 @@
 //! performs next. No async, no bluer, no clock — so every edge is proven on the host, and the
 //! adapter is left with nothing but "call the method the action names".
 //!
-//! ## The stale-LTK recovery is a first-class transition
+//! ## Every attempt begins by locating the device
+//!
+//! [`State::Disconnected`] does not connect — it *locates*. BlueZ can only connect to a device
+//! it currently knows, and the two ways it forgets are routine: a cold daemon whose adapter has
+//! never seen the stick, and `remove_device` (which the stale-bond recovery below performs by
+//! definition). Routing every attempt — first, reconnect, and post-recovery — through
+//! [`Action::Locate`] means there is exactly one way the address is acquired and no path that
+//! can connect to a handle BlueZ has evicted.
+//!
+//! ## The stale-LTK recovery is a first-class transition, and a LAST resort
 //!
 //! The sharpest real-world edge (Handoff 1): when the *device* clears its bonds, BlueZ still
 //! believes it is paired and offers a stale LTK, the device rejects encryption, and the link
-//! drops. [`Event::EncryptionFailed`] and [`Event::PairRejectedAlreadyPaired`] both route to
-//! [`State::Repairing`] with [`Action::RemoveDeviceThenReacquire`] — `remove_device` then a
-//! fresh handle — rather than a mystery hang. A plain device *reboot* keeps the LTK valid, so
-//! it surfaces as [`Event::Disconnected`] and reconnects with no re-pairing.
+//! drops. That routes to [`State::Repairing`] with [`Action::RemoveDeviceThenReacquire`] —
+//! `remove_device` then a fresh handle — rather than a mystery hang. A plain device *reboot*
+//! keeps the LTK valid, so it surfaces as [`Event::Disconnected`] and reconnects with no
+//! re-pairing.
+//!
+//! But `remove_device` **destroys the bond**, and re-bonding is the one act that needs a human
+//! at the glass inside BlueZ's 30-second window. The adapter cannot tell a stale LTK from a
+//! stick that is merely switched off — both surface as "already paired, yet the link failed" —
+//! so a hair-trigger recovery throws away a perfectly good bond every time the device is out of
+//! range. The machine therefore *counts*: [`Event::EncryptionFailed`] backs off and retries, and
+//! only after [`REBOND_AFTER_ENCRYPTION_FAILURES`] consecutive failures is the bond given up.
+//! A genuine stale LTK fails deterministically and reaches the threshold in seconds; an absent
+//! device reconnects the moment it returns, with its bond intact. Bond once, and forever.
+//!
+//! [`Event::PairRejectedAlreadyPaired`] is exempt: "connect said unpaired, then pair said
+//! already paired" is a contradiction no absent device can produce, so it recovers at once.
 //!
 //! ## Backoff is driven by an elapsed-timer event
 //!
@@ -29,8 +50,10 @@ use crate::backoff::backoff;
 /// operation, so only that operation's outcome events are expected in it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum State {
-    /// No link. Waiting out a backoff before the next connect attempt.
+    /// No link. Waiting out a backoff before the next attempt.
     Disconnected,
+    /// A discovery is in flight, resolving the advertising stick to an address BlueZ knows.
+    Locating,
     /// A connect is in flight (and, on success, the paired/not-paired check).
     Connecting,
     /// A pair is in flight — the agent is (or is about to be) prompting for the passkey.
@@ -47,8 +70,12 @@ pub enum State {
 /// driving-adapter maps each `Central` outcome onto one of them.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Event {
-    /// A backoff timer elapsed — time to (re)connect.
+    /// A backoff timer elapsed — time to look for the device again.
     BackoffElapsed,
+    /// The device was found advertising (or is already known to BlueZ) at a usable address.
+    Located,
+    /// The scan window closed without the device appearing — it is off, asleep, or out of range.
+    NotFound,
     /// Connected, and the device is NOT yet paired — pairing is required.
     ConnectedFresh,
     /// Connected, and the device is ALREADY paired — go straight to subscribing.
@@ -74,6 +101,8 @@ pub enum Event {
 /// do not name a `Central` method: the loop sleeps, or exits.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Action {
+    /// `Central::locate` — discover the advertising stick, so BlueZ has a device to connect to.
+    Locate,
     /// `Central::connect` (then the paired check).
     Connect,
     /// `Central::pair`.
@@ -90,12 +119,24 @@ pub enum Action {
     FailFast(&'static str),
 }
 
+/// How many consecutive encryption failures are tolerated before the bond is given up and
+/// re-pairing (which needs a human at the glass) is forced.
+///
+/// The discriminator this threshold buys is *time*: a genuine stale LTK is rejected immediately
+/// and deterministically, so it burns through the count in seconds, while a stick that is off or
+/// out of range spends a growing backoff between each attempt and gets its bond back intact the
+/// moment it returns. Three is enough to be sure and short enough to recover quickly.
+pub const REBOND_AFTER_ENCRYPTION_FAILURES: u32 = 3;
+
 /// The connection decision machine. `attempt` counts consecutive failures for the backoff
-/// schedule and resets the moment the steady [`State::Subscribed`] is reached.
+/// schedule and resets the moment the steady [`State::Subscribed`] is reached;
+/// `encryption_failures` separately counts the consecutive failures that *look* like a stale
+/// bond, so destroying one takes evidence rather than a single bad attempt.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Fsm {
     state: State,
     attempt: u32,
+    encryption_failures: u32,
 }
 
 impl Default for Fsm {
@@ -103,6 +144,7 @@ impl Default for Fsm {
         Fsm {
             state: State::Disconnected,
             attempt: 0,
+            encryption_failures: 0,
         }
     }
 }
@@ -123,7 +165,12 @@ impl Fsm {
         self.attempt
     }
 
-    /// Kick the machine off: the first connect attempt.
+    /// The consecutive stale-bond-looking failures counted so far (for observability/tests).
+    pub fn encryption_failures(&self) -> u32 {
+        self.encryption_failures
+    }
+
+    /// Kick the machine off: the first attempt to locate the device.
     pub fn start(&mut self) -> Action {
         self.on(Event::BackoffElapsed)
     }
@@ -142,45 +189,61 @@ impl Fsm {
             return Action::FailFast("no pairing agent registered");
         }
         match (self.state, event) {
-            // ---- Disconnected: wait out the backoff, then connect --------------------------
+            // ---- Disconnected: wait out the backoff, then go find the device ---------------
             (State::Disconnected, Event::BackoffElapsed) => {
-                self.enter(State::Connecting, Action::Connect)
+                self.enter(State::Locating, Action::Locate)
             }
+
+            // ---- Locating: the discovery result --------------------------------------------
+            (State::Locating, Event::Located) => self.enter(State::Connecting, Action::Connect),
 
             // ---- Connecting: the connect result + the paired check -------------------------
             (State::Connecting, Event::ConnectedFresh) => self.enter(State::Pairing, Action::Pair),
             (State::Connecting, Event::ConnectedPaired) => {
                 self.enter(State::Encrypted, Action::Subscribe)
             }
-            (State::Connecting, Event::EncryptionFailed) => {
-                self.enter(State::Repairing, Action::RemoveDeviceThenReacquire)
-            }
+            (State::Connecting, Event::EncryptionFailed) => self.on_encryption_failure(),
 
             // ---- Pairing: the pair result --------------------------------------------------
             (State::Pairing, Event::LinkEncrypted) => {
                 self.enter(State::Encrypted, Action::Subscribe)
             }
-            (State::Pairing, Event::PairRejectedAlreadyPaired)
-            | (State::Pairing, Event::EncryptionFailed) => {
+            // A contradiction, not a transient: connect reported unpaired and pair reported
+            // paired. No absent device produces it, so recover the bond immediately.
+            (State::Pairing, Event::PairRejectedAlreadyPaired) => {
                 self.enter(State::Repairing, Action::RemoveDeviceThenReacquire)
             }
+            (State::Pairing, Event::EncryptionFailed) => self.on_encryption_failure(),
 
             // ---- Repairing: the re-acquire result ------------------------------------------
-            (State::Repairing, Event::Reacquired) => self.enter(State::Connecting, Action::Connect),
+            // `remove_device` evicted the device from BlueZ, so the address must be discovered
+            // again before anything can connect to it.
+            (State::Repairing, Event::Reacquired) => self.enter(State::Locating, Action::Locate),
 
             // ---- Encrypted: the subscribe result -------------------------------------------
             (State::Encrypted, Event::NotifySubscribed) => {
-                // The one success milestone: reset the failure counter, then pump.
+                // The one success milestone: both failure counters reset, then pump.
                 self.attempt = 0;
+                self.encryption_failures = 0;
                 self.enter(State::Subscribed, Action::Run)
             }
-            (State::Encrypted, Event::EncryptionFailed) => {
-                self.enter(State::Repairing, Action::RemoveDeviceThenReacquire)
-            }
+            (State::Encrypted, Event::EncryptionFailed) => self.on_encryption_failure(),
 
-            // ---- Any drop, or an unexpected event: backed-off reconnect --------------------
+            // ---- A failed scan, any drop, or an unexpected event: backed-off retry ---------
             _ => self.fail_to_backoff(),
         }
+    }
+
+    /// Absorb a failure that *looks* like a stale bond. Below the threshold this is just another
+    /// backed-off retry — the device may simply be away, and its bond must survive that. At the
+    /// threshold the evidence is conclusive, so the bond is given up and the counter cleared.
+    fn on_encryption_failure(&mut self) -> Action {
+        self.encryption_failures = self.encryption_failures.saturating_add(1);
+        if self.encryption_failures < REBOND_AFTER_ENCRYPTION_FAILURES {
+            return self.fail_to_backoff();
+        }
+        self.encryption_failures = 0;
+        self.enter(State::Repairing, Action::RemoveDeviceThenReacquire)
     }
 
     /// Move to `state` and return `action` unchanged.
@@ -203,20 +266,50 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
+    /// Drive a fresh machine to the steady [`State::Subscribed`] over an already-bonded link —
+    /// the routine path, and the precondition for every "once we are running" test below.
+    fn subscribed() -> Fsm {
+        let mut fsm: Fsm = Fsm::new();
+        fsm.start();
+        fsm.on(Event::Located);
+        fsm.on(Event::ConnectedPaired);
+        fsm.on(Event::NotifySubscribed);
+        fsm
+    }
+
     // ---- The happy path, one transition per test (cyclomatic complexity 1) ----------------
 
     #[test]
-    fn start_connects() {
+    fn start_locates() {
         let mut fsm: Fsm = Fsm::new();
         let action: Action = fsm.start();
+        assert_eq!(action, Action::Locate);
+        assert_eq!(fsm.state(), State::Locating);
+    }
+
+    #[test]
+    fn a_located_device_is_connected_to() {
+        let mut fsm: Fsm = Fsm::new();
+        fsm.start();
+        let action: Action = fsm.on(Event::Located);
         assert_eq!(action, Action::Connect);
         assert_eq!(fsm.state(), State::Connecting);
+    }
+
+    #[test]
+    fn a_scan_that_finds_nothing_backs_off_and_scans_again() {
+        let mut fsm: Fsm = Fsm::new();
+        fsm.start();
+        let action: Action = fsm.on(Event::NotFound);
+        assert!(matches!(action, Action::Backoff(_)));
+        assert_eq!(fsm.on(Event::BackoffElapsed), Action::Locate);
     }
 
     #[test]
     fn a_fresh_connection_pairs() {
         let mut fsm: Fsm = Fsm::new();
         fsm.start();
+        fsm.on(Event::Located);
         let action: Action = fsm.on(Event::ConnectedFresh);
         assert_eq!(action, Action::Pair);
         assert_eq!(fsm.state(), State::Pairing);
@@ -226,6 +319,7 @@ mod tests {
     fn an_already_paired_connection_subscribes_without_pairing() {
         let mut fsm: Fsm = Fsm::new();
         fsm.start();
+        fsm.on(Event::Located);
         let action: Action = fsm.on(Event::ConnectedPaired);
         assert_eq!(action, Action::Subscribe);
         assert_eq!(fsm.state(), State::Encrypted);
@@ -235,6 +329,7 @@ mod tests {
     fn a_successful_pair_subscribes() {
         let mut fsm: Fsm = Fsm::new();
         fsm.start();
+        fsm.on(Event::Located);
         fsm.on(Event::ConnectedFresh);
         let action: Action = fsm.on(Event::LinkEncrypted);
         assert_eq!(action, Action::Subscribe);
@@ -245,27 +340,82 @@ mod tests {
     fn a_successful_subscribe_runs() {
         let mut fsm: Fsm = Fsm::new();
         fsm.start();
+        fsm.on(Event::Located);
         fsm.on(Event::ConnectedPaired);
         let action: Action = fsm.on(Event::NotifySubscribed);
         assert_eq!(action, Action::Run);
         assert_eq!(fsm.state(), State::Subscribed);
     }
 
-    // ---- The stale-LTK recovery, from each place it can surface ----------------------------
+    // ---- The bond survives a device that is merely away ------------------------------------
 
     #[test]
-    fn encryption_failure_on_connect_triggers_remove_and_reacquire() {
+    fn a_single_encryption_failure_keeps_the_bond() {
         let mut fsm: Fsm = Fsm::new();
         fsm.start();
+        fsm.on(Event::Located);
+        let action: Action = fsm.on(Event::EncryptionFailed);
+        assert!(
+            matches!(action, Action::Backoff(_)),
+            "one failure is not evidence of a stale bond — the stick may simply be off"
+        );
+        assert_eq!(fsm.state(), State::Disconnected);
+    }
+
+    #[test]
+    fn a_failure_short_of_the_threshold_still_keeps_the_bond() {
+        let mut fsm: Fsm = Fsm::new();
+        fsm.start();
+        fsm.on(Event::Located);
+        fsm.on(Event::EncryptionFailed);
+        fsm.on(Event::BackoffElapsed);
+        fsm.on(Event::Located);
+        let action: Action = fsm.on(Event::EncryptionFailed);
+        assert!(matches!(action, Action::Backoff(_)));
+        assert_eq!(fsm.encryption_failures(), 2);
+    }
+
+    #[test]
+    fn the_threshold_of_encryption_failures_gives_the_bond_up() {
+        let mut fsm: Fsm = Fsm::new();
+        fsm.start();
+        fsm.on(Event::Located);
+        fsm.on(Event::EncryptionFailed);
+        fsm.on(Event::BackoffElapsed);
+        fsm.on(Event::Located);
+        fsm.on(Event::EncryptionFailed);
+        fsm.on(Event::BackoffElapsed);
+        fsm.on(Event::Located);
         let action: Action = fsm.on(Event::EncryptionFailed);
         assert_eq!(action, Action::RemoveDeviceThenReacquire);
         assert_eq!(fsm.state(), State::Repairing);
     }
 
     #[test]
-    fn a_pair_rejected_as_already_paired_triggers_remove_and_reacquire() {
+    fn a_successful_link_forgets_earlier_encryption_failures() {
         let mut fsm: Fsm = Fsm::new();
         fsm.start();
+        fsm.on(Event::Located);
+        fsm.on(Event::EncryptionFailed);
+        assert_eq!(fsm.encryption_failures(), 1);
+        fsm.on(Event::BackoffElapsed);
+        fsm.on(Event::Located);
+        fsm.on(Event::ConnectedPaired);
+        fsm.on(Event::NotifySubscribed);
+        assert_eq!(
+            fsm.encryption_failures(),
+            0,
+            "a working link proves the bond is good; the count must not carry over"
+        );
+    }
+
+    // ---- The stale-LTK recovery ------------------------------------------------------------
+
+    #[test]
+    fn a_pair_rejected_as_already_paired_recovers_at_once() {
+        let mut fsm: Fsm = Fsm::new();
+        fsm.start();
+        fsm.on(Event::Located);
         fsm.on(Event::ConnectedFresh);
         let action: Action = fsm.on(Event::PairRejectedAlreadyPaired);
         assert_eq!(action, Action::RemoveDeviceThenReacquire);
@@ -273,36 +423,36 @@ mod tests {
     }
 
     #[test]
-    fn encryption_failure_on_subscribe_triggers_remove_and_reacquire() {
+    fn a_reacquired_handle_locates_afresh_because_remove_evicted_it() {
         let mut fsm: Fsm = Fsm::new();
         fsm.start();
-        fsm.on(Event::ConnectedPaired);
-        let action: Action = fsm.on(Event::EncryptionFailed);
-        assert_eq!(action, Action::RemoveDeviceThenReacquire);
-        assert_eq!(fsm.state(), State::Repairing);
-    }
-
-    #[test]
-    fn a_reacquired_handle_connects_afresh() {
-        let mut fsm: Fsm = Fsm::new();
-        fsm.start();
-        fsm.on(Event::EncryptionFailed);
+        fsm.on(Event::Located);
+        fsm.on(Event::ConnectedFresh);
+        fsm.on(Event::PairRejectedAlreadyPaired);
         let action: Action = fsm.on(Event::Reacquired);
-        assert_eq!(action, Action::Connect);
-        assert_eq!(fsm.state(), State::Connecting);
+        assert_eq!(
+            action,
+            Action::Locate,
+            "remove_device evicted the device from BlueZ; connecting to it now cannot work"
+        );
+        assert_eq!(fsm.state(), State::Locating);
     }
 
     // ---- Reboot / disconnect: backoff, and it grows ----------------------------------------
 
     #[test]
     fn a_drop_while_subscribed_backs_off() {
-        let mut fsm: Fsm = Fsm::new();
-        fsm.start();
-        fsm.on(Event::ConnectedPaired);
-        fsm.on(Event::NotifySubscribed);
+        let mut fsm: Fsm = subscribed();
         let action: Action = fsm.on(Event::Disconnected);
         assert!(matches!(action, Action::Backoff(_)));
         assert_eq!(fsm.state(), State::Disconnected);
+    }
+
+    #[test]
+    fn a_drop_while_subscribed_reconnects_by_locating_again() {
+        let mut fsm: Fsm = subscribed();
+        fsm.on(Event::Disconnected);
+        assert_eq!(fsm.on(Event::BackoffElapsed), Action::Locate);
     }
 
     #[test]
@@ -310,10 +460,11 @@ mod tests {
         let mut fsm: Fsm = Fsm::new();
         fsm.start();
         // One failure bumps the counter above zero.
-        fsm.on(Event::Disconnected);
+        fsm.on(Event::NotFound);
         assert_eq!(fsm.attempt(), 1);
         // A full path back to Subscribed clears it.
         fsm.on(Event::BackoffElapsed);
+        fsm.on(Event::Located);
         fsm.on(Event::ConnectedPaired);
         fsm.on(Event::NotifySubscribed);
         assert_eq!(fsm.attempt(), 0);
@@ -323,12 +474,13 @@ mod tests {
     fn two_consecutive_failures_grow_the_backoff() {
         let mut fsm: Fsm = Fsm::new();
         fsm.start();
-        let Action::Backoff(first) = fsm.on(Event::Disconnected) else {
-            panic!("a drop backs off");
+        let Action::Backoff(first) = fsm.on(Event::NotFound) else {
+            panic!("a failed scan backs off");
         };
         fsm.on(Event::BackoffElapsed);
+        fsm.on(Event::Located);
         let Action::Backoff(second) = fsm.on(Event::Disconnected) else {
-            panic!("a second drop backs off");
+            panic!("a second failure backs off");
         };
         assert!(
             second > first,
@@ -353,6 +505,8 @@ mod tests {
     fn any_event() -> impl Strategy<Value = Event> {
         prop_oneof![
             Just(Event::BackoffElapsed),
+            Just(Event::Located),
+            Just(Event::NotFound),
             Just(Event::ConnectedFresh),
             Just(Event::ConnectedPaired),
             Just(Event::Reacquired),
@@ -371,6 +525,8 @@ mod tests {
     fn any_non_fatal_event() -> impl Strategy<Value = Event> {
         prop_oneof![
             Just(Event::BackoffElapsed),
+            Just(Event::Located),
+            Just(Event::NotFound),
             Just(Event::ConnectedFresh),
             Just(Event::ConnectedPaired),
             Just(Event::Reacquired),
@@ -393,6 +549,46 @@ mod tests {
                 let action: Action = fsm.on(event);
                 let live: bool = before == State::Encrypted || before == State::Subscribed;
                 prop_assert!(!(live && action == Action::Pair));
+            }
+        }
+
+        /// The bond is never given up on thin evidence. `RemoveDeviceThenReacquire` destroys the
+        /// bond, and re-bonding is the one act needing a human at the glass inside a 30-second
+        /// window — so across any event sequence, the machine only ever chooses it after
+        /// [`REBOND_AFTER_ENCRYPTION_FAILURES`] consecutive encryption failures, or on the
+        /// self-contradictory `PairRejectedAlreadyPaired`. A regression to the old hair trigger
+        /// (where a single failure sufficed) turns this red — and that trigger fired every time
+        /// the stick was merely switched off.
+        #[test]
+        fn a_bond_is_only_destroyed_on_conclusive_evidence(
+            events in proptest::collection::vec(any_event(), 0..64),
+        ) {
+            let mut fsm: Fsm = Fsm::new();
+            for event in events {
+                let failures_before: u32 = fsm.encryption_failures();
+                let action: Action = fsm.on(event);
+                let destroys: bool = action == Action::RemoveDeviceThenReacquire;
+                let conclusive: bool = event == Event::PairRejectedAlreadyPaired
+                    || failures_before + 1 >= REBOND_AFTER_ENCRYPTION_FAILURES;
+                prop_assert!(!destroys || conclusive);
+            }
+        }
+
+        /// A device that is away never costs its bond, however long it stays away: an unbounded
+        /// run of failed scans and dropped links only ever backs off. This is "bond once, and
+        /// forever" stated as a property — the counter that gates re-bonding must not be
+        /// advanced by absence, only by a link that came up and then refused to encrypt.
+        #[test]
+        fn an_absent_device_never_costs_its_bond(
+            events in proptest::collection::vec(
+                prop_oneof![Just(Event::NotFound), Just(Event::Disconnected), Just(Event::BackoffElapsed)],
+                0..64,
+            ),
+        ) {
+            let mut fsm: Fsm = Fsm::new();
+            for event in events {
+                let action: Action = fsm.on(event);
+                prop_assert!(action != Action::RemoveDeviceThenReacquire);
             }
         }
 

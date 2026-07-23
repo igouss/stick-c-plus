@@ -17,10 +17,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use bluer::agent::Agent;
-use bluer::{Adapter, Address, Session};
+use bluer::{Adapter, Session};
 use buddy_bridge_shell::{
-    build_agent, discover, BluerCentral, DriveLoop, IoCapability, LinkPeer, PasskeyProvider,
-    TokioSleeper,
+    build_agent, BluerCentral, DriveLoop, IoCapability, LinkPeer, PasskeyProvider, TokioSleeper,
 };
 use buddy_daemon_shell::{keepalive, socket, Daemon};
 use buddy_permission::{DEFAULT_SOCK_FILENAME, SOCK_ENV};
@@ -171,11 +170,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tz_offset_s: tz_offset_s(),
     };
 
-    log::info!("scanning for a '{NAME_PREFIX}' peripheral…");
-    let address: Address = discover(&adapter, NAME_PREFIX).await?;
-    log::info!("found {address}; connecting");
+    // Discovery belongs to the loop, not to startup. The daemon used to scan once here and then
+    // connect to that address forever, which left it with no way back whenever BlueZ forgot the
+    // device — most sharply after the stale-bond recovery, whose `remove_device` evicts it by
+    // definition. Now every attempt begins by locating the stick, so a cold start, a reboot, a
+    // stick carried out of range, and a recovered bond are all the same self-healing path.
+    log::info!("looking for a '{NAME_PREFIX}' peripheral (and retrying until it appears)…");
 
-    let central: BluerCentral = BluerCentral::new(adapter, address)?;
+    let central: BluerCentral = BluerCentral::new(adapter, NAME_PREFIX);
     let mut driver: DriveLoop<BluerCentral, TokioSleeper, DaemonPeer> =
         DriveLoop::new(central, TokioSleeper, peer);
 

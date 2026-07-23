@@ -27,9 +27,70 @@ impl BridgeWorld {
     }
 }
 
-#[given("a bridge that has started connecting")]
-fn a_bridge_that_has_started_connecting(world: &mut BridgeWorld) {
+#[given("a bridge that has started looking for the stick")]
+fn a_bridge_that_has_started_looking(world: &mut BridgeWorld) {
     world.action = Some(world.fsm.start());
+}
+
+#[given("a bridge that has found the stick")]
+fn a_bridge_that_has_found_the_stick(world: &mut BridgeWorld) {
+    world.fsm.start();
+    world.action = Some(world.fsm.on(Event::Located));
+}
+
+#[given("a bridge that has connected to a bonded stick")]
+fn a_bridge_connected_to_a_bonded_stick(world: &mut BridgeWorld) {
+    world.fsm.start();
+    world.fsm.on(Event::Located);
+    world.action = Some(world.fsm.on(Event::ConnectedPaired));
+}
+
+#[when("the scan window closes with nothing found")]
+fn the_scan_finds_nothing(world: &mut BridgeWorld) {
+    world.action = Some(world.fsm.on(Event::NotFound));
+}
+
+/// Walk the machine through one full failed round: back off, look again, connect to the bonded
+/// stick, and fail to encrypt. Repeating this step is how a scenario reaches the threshold.
+#[when("the link fails to encrypt")]
+fn the_link_fails_to_encrypt(world: &mut BridgeWorld) {
+    world.fsm.on(Event::BackoffElapsed);
+    world.fsm.on(Event::Located);
+    world.fsm.on(Event::ConnectedPaired);
+    world.action = Some(world.fsm.on(Event::EncryptionFailed));
+}
+
+#[when("the stale bond has been removed")]
+fn the_stale_bond_has_been_removed(world: &mut BridgeWorld) {
+    world.action = Some(world.fsm.on(Event::Reacquired));
+}
+
+#[then("the bridge decides to look for the stick")]
+fn decides_to_locate(world: &mut BridgeWorld) {
+    assert_eq!(world.action(), &Action::Locate);
+}
+
+#[then("the bridge decides to connect")]
+fn decides_to_connect(world: &mut BridgeWorld) {
+    assert_eq!(world.action(), &Action::Connect);
+}
+
+#[then("the bridge decides to wait and try again")]
+fn decides_to_back_off(world: &mut BridgeWorld) {
+    assert!(
+        matches!(world.action(), Action::Backoff(_)),
+        "expected a backed-off retry, got {:?}",
+        world.action()
+    );
+}
+
+#[then("the bridge keeps the bond")]
+fn keeps_the_bond(world: &mut BridgeWorld) {
+    assert_ne!(
+        world.action(),
+        &Action::RemoveDeviceThenReacquire,
+        "the bond must not be given up here — re-bonding needs a human at the glass"
+    );
 }
 
 #[when("the transport reports a fresh (unpaired) connection")]

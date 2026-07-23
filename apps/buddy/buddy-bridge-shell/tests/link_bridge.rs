@@ -30,6 +30,11 @@ struct ScriptCentral {
 impl Central for ScriptCentral {
     type Tx = BoxTx;
 
+    /// Always found: these scenarios are about what a RUNNING link carries, not how it is found.
+    async fn locate(&mut self) -> Result<(), CentralError> {
+        Ok(())
+    }
+
     async fn connect(&mut self) -> Result<Connected, CentralError> {
         Ok(Connected {
             already_paired: true,
@@ -110,6 +115,7 @@ impl LinkPeer for RecordingPeer {
 async fn run_to_link_end(central: ScriptCentral, peer: RecordingPeer) {
     let mut driver: DriveLoop<ScriptCentral, NoSleep, RecordingPeer> =
         DriveLoop::new(central, NoSleep, peer);
+    driver.step().await; // locate → connect
     driver.step().await; // connect (paired) → subscribe
     driver.step().await; // subscribe → run
     driver.step().await; // on_run: pump the link until its stream ends

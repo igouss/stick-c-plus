@@ -12,6 +12,7 @@
 //! bonds. See `tests/device_bridge.rs` (`#[ignore]`d) and `just bridge-device`.
 
 use std::pin::Pin;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use bluer::gatt::remote::{Characteristic, CharacteristicWriteRequest, Service};
@@ -31,11 +32,24 @@ pub const NUS_TX: Uuid = Uuid::from_u128(0x6e40_0003_b5a3_f393_e0a9_e50e_24dc_ca
 /// The default ATT payload before an MTU is negotiated (23-byte MTU minus 3).
 const DEFAULT_MTU: u16 = 23;
 
-/// A BLE central bound to one peripheral by address, driving it over bluer.
+/// How long one [`Central::locate`] scan runs before reporting [`CentralError::NotFound`].
+///
+/// The scan returns the instant the stick is seen, so this is only the cost of a *failed* look —
+/// it bounds the wait so an absent device produces a steady, observable retry rhythm instead of
+/// a daemon parked forever in a scan (the six-minute silence that opened this bug).
+const SCAN_WINDOW: Duration = Duration::from_secs(20);
+
+/// A BLE central bound to the stick *by advertised name*, driving it over bluer.
+///
+/// The binding is by name rather than address because the address is not knowable before the
+/// first scan, and the device handle does not survive [`Central::remove_and_reacquire`]. Both
+/// are re-established by [`Central::locate`], which is the only thing that sets `address` and
+/// `device`.
 pub struct BluerCentral {
     adapter: Adapter,
-    address: Address,
-    device: Device,
+    name_prefix: String,
+    address: Option<Address>,
+    device: Option<Device>,
     rx: Option<Characteristic>,
     tx: Option<Characteristic>,
     mtu: u16,
@@ -44,25 +58,30 @@ pub struct BluerCentral {
 }
 
 impl BluerCentral {
-    /// Bind to the device at `address` on `adapter` (found by a prior scan).
-    pub fn new(adapter: Adapter, address: Address) -> Result<Self, CentralError> {
-        let device: Device = adapter
-            .device(address)
-            .map_err(|err: bluer::Error| CentralError::Bluer(err.to_string()))?;
-        Ok(BluerCentral {
+    /// A central that will look for a peripheral whose advertised name starts with `name_prefix`.
+    /// Nothing is resolved until [`Central::locate`] runs, so this cannot fail.
+    pub fn new(adapter: Adapter, name_prefix: &str) -> Self {
+        BluerCentral {
             adapter,
-            address,
-            device,
+            name_prefix: name_prefix.to_string(),
+            address: None,
+            device: None,
             rx: None,
             tx: None,
             mtu: DEFAULT_MTU,
             was_paired_at_connect: false,
-        })
+        }
     }
 
-    /// The address this central is bound to.
-    pub fn address(&self) -> Address {
+    /// The address this central last located, or `None` before the first successful scan.
+    pub fn address(&self) -> Option<Address> {
         self.address
+    }
+
+    /// The located device handle, or [`CentralError::NotConnected`] when nothing has been
+    /// located yet — the type-level statement that `locate` precedes every other operation.
+    fn device(&self) -> Result<&Device, CentralError> {
+        self.device.as_ref().ok_or(CentralError::NotConnected)
     }
 
     /// Classify an error that occurred while the device was (or was not) already paired: a
@@ -80,7 +99,7 @@ impl BluerCentral {
     /// Resolve the NUS RX/TX characteristics and the negotiated MTU on the live link.
     async fn resolve_gatt(&mut self) -> Result<(), CentralError> {
         let services: Vec<Service> = self
-            .device
+            .device()?
             .services()
             .await
             .map_err(|err: bluer::Error| self.stale_or_bluer(err))?;
@@ -137,15 +156,30 @@ impl BluerCentral {
 impl Central for BluerCentral {
     type Tx = Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>;
 
+    async fn locate(&mut self) -> Result<(), CentralError> {
+        let address: Address = discover(&self.adapter, &self.name_prefix, SCAN_WINDOW).await?;
+        let device: Device = self
+            .adapter
+            .device(address)
+            .map_err(|err: bluer::Error| CentralError::Bluer(err.to_string()))?;
+        // A located device is a fresh handle: any characteristics resolved against the previous
+        // one belong to a connection that no longer exists.
+        self.address = Some(address);
+        self.device = Some(device);
+        self.rx = None;
+        self.tx = None;
+        Ok(())
+    }
+
     async fn connect(&mut self) -> Result<Connected, CentralError> {
         // Read the bond state BEFORE connecting — it is the discriminator for the stale-LTK
         // trap, and it must be sampled while BlueZ still reports the pre-connect view.
         self.was_paired_at_connect = self
-            .device
+            .device()?
             .is_paired()
             .await
             .map_err(|err: bluer::Error| CentralError::Bluer(err.to_string()))?;
-        self.device
+        self.device()?
             .connect()
             .await
             .map_err(|err: bluer::Error| self.stale_or_bluer(err))?;
@@ -159,14 +193,14 @@ impl Central for BluerCentral {
         // pair() is a no-op re-key when BlueZ already holds a bond — surface it so the FSM can
         // recover rather than silently doing nothing.
         let already: bool = self
-            .device
+            .device()?
             .is_paired()
             .await
             .map_err(|err: bluer::Error| CentralError::Bluer(err.to_string()))?;
         if already {
             return Err(CentralError::AlreadyPaired);
         }
-        self.device
+        self.device()?
             .pair()
             .await
             .map_err(|err: bluer::Error| CentralError::Bluer(err.to_string()))?;
@@ -174,16 +208,22 @@ impl Central for BluerCentral {
     }
 
     async fn remove_and_reacquire(&mut self) -> Result<(), CentralError> {
-        // Clear BlueZ's stale bond. remove_device INVALIDATES the Device handle, so re-acquire
-        // a fresh one and drop the resolved characteristics — the next connect re-resolves.
+        let address: Address = self.address.ok_or(CentralError::NotConnected)?;
+        // This is the expensive act: it destroys the bond, and the owner must type a passkey at
+        // the glass to get one back. The FSM only reaches here on conclusive evidence, so say so
+        // loudly rather than letting a re-pairing prompt appear from nowhere.
+        log::warn!(
+            "giving up the bond with {address} after repeated encryption failures — \
+             the device will have to be paired again"
+        );
         self.adapter
-            .remove_device(self.address)
+            .remove_device(address)
             .await
             .map_err(|err: bluer::Error| CentralError::Bluer(err.to_string()))?;
-        self.device = self
-            .adapter
-            .device(self.address)
-            .map_err(|err: bluer::Error| CentralError::Bluer(err.to_string()))?;
+        // remove_device INVALIDATES the handle *and evicts the device from BlueZ entirely*, so
+        // there is nothing to re-acquire here: only a fresh scan can produce a connectable
+        // device. Drop everything and let the FSM's `Locate` rebuild it.
+        self.device = None;
         self.rx = None;
         self.tx = None;
         Ok(())
@@ -207,7 +247,7 @@ impl Central for BluerCentral {
         // disconnect, so a device reboot fires no removal and the notify stream would hang open
         // forever. Watch the device's `Connected` property and end the stream when it goes false.
         let device_events = self
-            .device
+            .device()?
             .events()
             .await
             .map_err(|err: bluer::Error| self.stale_or_bluer(err))?;
@@ -240,9 +280,40 @@ impl Central for BluerCentral {
 }
 
 /// Scan (filtered to the NUS service) for a peripheral whose advertised name starts with
-/// `name_prefix`, returning its address. The discovery stream is dropped on return, which stops
-/// scanning.
-pub async fn discover(adapter: &Adapter, name_prefix: &str) -> Result<Address, CentralError> {
+/// `name_prefix`, returning its address, or [`CentralError::NotFound`] if `window` elapses
+/// first. The discovery stream is dropped on return, which stops scanning.
+///
+/// ## Why this must be `discover_devices_with_changes`
+///
+/// A 128-bit service UUID and a name do not both fit in a 31-byte advertisement, so the firmware
+/// puts the name in the **scan response** (see `bring_up_ble`) — it arrives strictly after the
+/// advertisement that creates the device. bluer says so plainly: *"Device properties are queried
+/// asynchronously and may not be available yet when a DeviceAdded event occurs. Use
+/// discover_devices_with_changes when you want to be notified when the device properties
+/// change."*
+///
+/// With plain `discover_devices` the name is `None` at `DeviceAdded`, the device is skipped, and
+/// it is **never re-emitted** — so a cold daemon scans forever past a stick that is advertising
+/// two feet away. It appeared to work only when something else (`bluetoothctl scan`) had already
+/// cached the name, because `discover_devices` replays already-known addresses first and the
+/// cached name resolves instantly. That is the whole bug: it could only find a device somebody
+/// else had already found.
+///
+/// `discover_devices_with_changes` re-emits `DeviceAdded` on every property change, so the name
+/// is re-checked when the scan response lands.
+pub async fn discover(
+    adapter: &Adapter,
+    name_prefix: &str,
+    window: Duration,
+) -> Result<Address, CentralError> {
+    tokio::time::timeout(window, matching_device(adapter, name_prefix))
+        .await
+        .unwrap_or(Err(CentralError::NotFound))
+}
+
+/// The unbounded scan [`discover`] puts a deadline on: resolve the first device whose name
+/// matches, re-checking each time a device's properties change.
+async fn matching_device(adapter: &Adapter, name_prefix: &str) -> Result<Address, CentralError> {
     use bluer::{AdapterEvent, DiscoveryFilter, DiscoveryTransport};
     use std::collections::HashSet;
 
@@ -256,18 +327,19 @@ pub async fn discover(adapter: &Adapter, name_prefix: &str) -> Result<Address, C
         .await
         .map_err(|err: bluer::Error| CentralError::Bluer(err.to_string()))?;
     let mut events = adapter
-        .discover_devices()
+        .discover_devices_with_changes()
         .await
         .map_err(|err: bluer::Error| CentralError::Bluer(err.to_string()))?;
     while let Some(event) = events.next().await {
         let AdapterEvent::DeviceAdded(address) = event else {
             continue;
         };
-        // The name rides in the scan response, so it may not be present on the first event;
-        // a device whose name is not yet known is simply skipped and re-seen on a later event.
         let device: Device = adapter
             .device(address)
             .map_err(|err: bluer::Error| CentralError::Bluer(err.to_string()))?;
+        // A device whose name is not resolved YET is skipped here and re-offered by the stream
+        // as soon as the scan response lands — which is precisely what the `_with_changes`
+        // variant guarantees and the plain one does not.
         let name: Option<String> = device
             .name()
             .await
@@ -279,7 +351,5 @@ pub async fn discover(adapter: &Adapter, name_prefix: &str) -> Result<Address, C
             return Ok(address);
         }
     }
-    Err(CentralError::Bluer(format!(
-        "discovery ended before a '{name_prefix}' device appeared"
-    )))
+    Err(CentralError::NotFound)
 }

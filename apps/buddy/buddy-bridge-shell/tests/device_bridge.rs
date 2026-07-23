@@ -18,8 +18,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bluer::{Adapter, Address, Session};
 use buddy_bridge_shell::{
-    build_agent, chunk, discover, BluerCentral, Central, IoCapability, PasskeyProvider,
-    RxReassembler,
+    build_agent, chunk, BluerCentral, Central, IoCapability, PasskeyProvider, RxReassembler,
 };
 use futures::StreamExt;
 use tokio::time::timeout;
@@ -115,10 +114,13 @@ async fn bonds_subscribes_round_trips_and_reconnects() {
         "the agent must pair as KeyboardOnly, never NoInputNoOutput"
     );
 
-    let address: Address = discover(&adapter, NAME_PREFIX)
-        .await
-        .expect("find the Claude- stick");
-    let mut central: BluerCentral = BluerCentral::new(adapter, address).expect("bind the device");
+    let mut central: BluerCentral = BluerCentral::new(adapter, NAME_PREFIX);
+
+    // (0) Find it. This is the step that must work from COLD — with no prior `bluetoothctl scan`
+    // and nothing in BlueZ's cache — which is exactly what the old discovery could not do.
+    central.locate().await.expect("find the Claude- stick");
+    let address: Address = central.address().expect("a located device has an address");
+    eprintln!("located {address}");
 
     // (1) Bond.
     let connected = central.connect().await.expect("connect + resolve GATT");

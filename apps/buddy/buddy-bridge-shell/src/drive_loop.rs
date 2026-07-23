@@ -78,6 +78,7 @@ impl<C: Central, S: Sleeper, P: LinkPeer> DriveLoop<C, S, P> {
     pub async fn step(&mut self) -> Step {
         let event: Event = match self.action.clone() {
             Action::FailFast(reason) => return Step::Stopped(reason.to_string()),
+            Action::Locate => self.on_locate().await,
             Action::Connect => self.on_connect().await,
             Action::Pair => self.on_pair().await,
             Action::RemoveDeviceThenReacquire => self.on_remove_and_reacquire().await,
@@ -90,6 +91,19 @@ impl<C: Central, S: Sleeper, P: LinkPeer> DriveLoop<C, S, P> {
         };
         self.action = self.fsm.on(event);
         Step::Continue
+    }
+
+    /// A device that is simply away is the routine case, not a fault: `NotFound` is reported at
+    /// debug level and retried, while a real stack failure during the scan is warned about.
+    async fn on_locate(&mut self) -> Event {
+        match self.central.locate().await {
+            Ok(()) => Event::Located,
+            Err(CentralError::NotFound) => Event::NotFound,
+            Err(other) => {
+                warn!("locate failed: {other}");
+                Event::NotFound
+            }
+        }
     }
 
     async fn on_connect(&mut self) -> Event {

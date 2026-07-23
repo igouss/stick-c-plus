@@ -110,38 +110,58 @@ lint:
 
 # ---- Bridge (the Linux BLE central — needs BlueZ; the device test needs the stick) ----
 
-# Run the bridge daemon: scan for the Claude-XXXX stick, bond (type the passkey the glass
-# shows when prompted), subscribe, and reconnect across reboots. Needs a BlueZ adapter; no
-# root on this box. Flash the peer first with `just run-buddy`. RUST_LOG=debug
-# for more. Ctrl-C to exit.
-bridge:
-    cargo run -p buddy-bridge
-
-# Bring the bridge up on the SAME socket the Claude Code hook resolves, and pair interactively.
-# The passkey is no longer a constant to pipe in: the firmware draws a fresh random one per
-# pairing and shows it on the glass, so read it off the stick and type it at the prompt. Watch
-# the log for `link up: bonded` — that (not the passkey prompt) is the success signal; the daemon
-# used to print nothing on success and looked hung at the prompt.
-# NOTE: do NOT run `bluetoothctl scan` while this runs — a second discovery session steals the
-# daemon's and it silently never finds the stick. Ctrl-C to stop.
-bridge-pair:
+# THE one command: run the bridge daemon on the socket the Claude Code hook resolves. It finds
+# the stick from cold, bonds if it has to, and then reconnects by itself forever — across the
+# stick's reboots, yours, and any trip out of range. Bond once; after that this never asks you
+# anything. Flash the peer first with `just run-buddy`. RUST_LOG=debug for more; Ctrl-C to stop.
+#
+# The signal to watch for is `link up: bonded`, NOT the passkey prompt — a passkey prompt on a
+# stick you have already bonded means the bond was lost, which `just bridge-pair` re-establishes.
+bridge: bridge-preflight
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! ls /sys/class/bluetooth/hci* >/dev/null 2>&1; then
-      echo "❌ no BlueZ adapter under /sys/class/bluetooth — is Bluetooth up?"; exit 2
-    fi
     # Default to the SAME path the hook binary resolves when Claude Code spawns it with no
     # BUDDY_BRIDGE_SOCK: $XDG_RUNTIME_DIR/buddy-bridge.sock (temp dir only if that is unset). A
     # /tmp default here would silently miss the hook — daemon and hook must agree on the path.
     sock="${BUDDY_BRIDGE_SOCK:-${XDG_RUNTIME_DIR:-/tmp}/buddy-bridge.sock}"
     echo "▶ bridge ↔ claude-buddy, hook socket $sock"
-    echo "  type the six digits the STICK'S GLASS shows when prompted; watch for 'link up: bonded'."
-    echo "  do NOT 'bluetoothctl scan' alongside this. Ctrl-C to stop."
-    RUST_LOG=info BUDDY_BRIDGE_SOCK="$sock" cargo run --release -p buddy-bridge
+    echo "  waiting for the stick; it is picked up whenever it appears. Ctrl-C to stop."
+    RUST_LOG="${RUST_LOG:-info}" BUDDY_BRIDGE_SOCK="$sock" cargo run --release -p buddy-bridge
 
-# Forget the HOST half of an out-of-sync bond to the Claude-XXXX stick (the recurring first step
-# when pairing loops on a stale LTK). The DEVICE half lives in the stick's NVS and survives a
-# reflash — this prints the erase command to clear it too. See kb/guides/buddy-permission-hook.md.
+# Everything that must be true before the daemon can work, asserted rather than assumed. Each
+# check exists because its absence produced a silent hang or a mystery failure, not a message.
+bridge-preflight:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! ls /sys/class/bluetooth/hci* >/dev/null 2>&1; then
+      echo "❌ no BlueZ adapter under /sys/class/bluetooth — is Bluetooth up?"; exit 2
+    fi
+    # A soft-blocked adapter accepts every D-Bus call and simply never sees an advertisement:
+    # the daemon scans forever and BlueZ reports no error at all.
+    if command -v rfkill >/dev/null 2>&1 && rfkill list bluetooth 2>/dev/null | grep -q 'blocked: yes'; then
+      echo "❌ bluetooth is rfkill-blocked — 'rfkill unblock bluetooth' first"; exit 2
+    fi
+    # A daemon already holding the hook socket wins the bind; a second one dies on it, or worse,
+    # the two fight over the adapter and neither keeps a link.
+    sock="${BUDDY_BRIDGE_SOCK:-${XDG_RUNTIME_DIR:-/tmp}/buddy-bridge.sock}"
+    if pgrep -x buddy-bridge >/dev/null 2>&1; then
+      echo "❌ a buddy-bridge is already running (socket $sock) — stop it first: pkill -x buddy-bridge"; exit 2
+    fi
+    echo "✅ preflight: adapter present, radio unblocked, no bridge already running"
+
+# Deliberately re-bond: forget BOTH halves of the bond, then bring the daemon up so a fresh
+# pairing happens now, while you are looking at the glass. This is the ONLY recipe that should
+# ever ask you for six digits — `just bridge` is the everyday command, and a bond survives
+# reboots on both sides. Reach for this when a passkey prompt appears where none should.
+bridge-pair: bridge-forget bridge
+
+# Forget the HOST half of an out-of-sync bond to the Claude-XXXX stick. The DEVICE half lives in
+# the stick's NVS and survives a reflash — this prints the erase command to clear it too. See
+# kb/guides/buddy-permission-hook.md.
+#
+# Removing the device from BlueZ is now safe: it evicts the cache entry, and the daemon's
+# discovery finds an advertising stick with no cache entry (which is what the old one could not
+# do — that is why this recipe used to leave the stick undiscoverable).
 bridge-forget:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -160,12 +180,9 @@ bridge-forget:
 # false green, and it is deliberately NOT in `just ci` (a bond needs the physical device).
 # Preflight asserts a BlueZ adapter is present; set STICK_PASSKEY to the six digits the glass
 # shows (the firmware draws a fresh one per pairing — there is no constant to fall back on).
-bridge-device:
+bridge-device: bridge-preflight
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! ls /sys/class/bluetooth/hci* >/dev/null 2>&1; then
-      echo "❌ no BlueZ adapter under /sys/class/bluetooth — is Bluetooth up?"; exit 2
-    fi
     echo "▶ bridge device test — flash the peer first: just run-buddy"
     echo "  you will be asked to enter the passkey shown on the glass, and to power-cycle the stick."
     cargo test -p buddy-bridge-shell --test device_bridge -- --ignored --nocapture

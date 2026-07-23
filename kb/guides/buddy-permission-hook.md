@@ -55,30 +55,37 @@ full-screen on the glass, which is what you type at the daemon's prompt below.
 
 1. Power the stick; it advertises `Claude-XXXX` and shows a 6-digit passkey when a
    central attempts to bond.
-2. Run the daemon in a terminal you can type into (it reads the passkey from stdin,
-   prompts on stderr):
+2. Run the daemon in a terminal you can type into (the first bond reads the passkey
+   from stdin, prompting on stderr):
 
    ```sh
-   RUST_LOG=info ./target/release/buddy-bridge
+   just bridge
    ```
 
-3. It scans, finds the stick, and prints
-   `Enter the 6-digit passkey shown on the stick:` — type the digits from the glass
-   and press enter.
-4. On success the log shows the bond and `hook socket listening at <path>`. The
-   bond persists across reboots on both sides; you only pair once.
+3. It looks for the stick — retrying until it appears, so the order you start things
+   in does not matter. On the **first** bond it prints
+   `Enter the 6-digit passkey shown on the stick:`; type the digits from the glass and
+   press enter.
+4. On success the log shows `link up: bonded` and `hook socket listening at <path>`.
 
 Leave `buddy-bridge` running (a `systemd --user` service or a `tmux` pane). It is
 the process every hook talks to.
 
-> **Bonding looks silent — that is expected only up to a point.** The success signal
-> is the `link up: bonded` log line, not the passkey prompt. If the daemon sits in
-> `scanning …` forever, you almost certainly have a `bluetoothctl scan` running that
-> stole its discovery session — stop it. `just bridge-pair` brings the daemon up on the
-> **same socket the hook resolves** and prompts for the passkey; there is no constant to
-> automate, because the stick draws a fresh one per pairing.
-> The four bring-up traps are catalogued in
-> [buddy-bridge-bonding-gotchas](../findings/buddy-bridge-bonding-gotchas.md).
+> **Bond once, and forever.** The bond persists across reboots on both sides, and the
+> daemon rediscovers and reconnects by itself — a stick carried out of range and brought
+> back rejoins with no prompt and no restart. `just bridge` is therefore the only command
+> you normally run; it also brings the daemon up on the **same socket the hook resolves**,
+> which a bare `cargo run` does not guarantee.
+>
+> The success signal is the `link up: bonded` log line, not the passkey prompt. A passkey
+> prompt on a stick you have already bonded means the bond was lost — `just bridge-pair`
+> clears both halves and re-establishes it deliberately. There is no constant to automate:
+> the stick draws a fresh passkey per pairing.
+>
+> The bring-up traps are catalogued in
+> [buddy-bridge-bonding-gotchas](../findings/buddy-bridge-bonding-gotchas.md) — including
+> the discovery defect that made the daemon unable to find a stick from cold, whose
+> mis-diagnosis this guide previously repeated.
 
 ## Installing the hook into settings.json
 

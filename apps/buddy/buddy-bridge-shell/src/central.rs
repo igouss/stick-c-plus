@@ -27,6 +27,9 @@ pub struct Connected {
 pub enum CentralError {
     /// An operation was attempted with no live connection.
     NotConnected,
+    /// The scan window closed without the device advertising — it is off, asleep, or out of
+    /// range. Routine and always retried; never a reason to give up the bond.
+    NotFound,
     /// The link failed to encrypt — the stale-LTK trap. The adapter raises this when the
     /// device was already paired yet the link dropped before it could be used (BlueZ offered a
     /// stale LTK the device rejected), since a specific bluer `ErrorKind` is not reliable.
@@ -46,6 +49,7 @@ impl core::fmt::Display for CentralError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             CentralError::NotConnected => write!(f, "not connected"),
+            CentralError::NotFound => write!(f, "no advertising device found in the scan window"),
             CentralError::EncryptionFailed => write!(f, "link encryption failed (stale bond?)"),
             CentralError::AlreadyPaired => write!(f, "already paired — re-key is a no-op"),
             CentralError::AgentMissing => write!(f, "no pairing agent registered"),
@@ -71,7 +75,17 @@ pub trait Central: Send {
     /// notify stream does not end on its own; see `BluerCentral::subscribe_tx`).
     type Tx: Stream<Item = Vec<u8>> + Unpin + Send;
 
+    /// Find the stick and make it a device the stack can connect to, returning
+    /// [`CentralError::NotFound`] if the scan window closes first.
+    ///
+    /// This exists because a central cannot connect to a peripheral the stack has never seen,
+    /// and the stack forgets routinely: on a cold start it has no cache, and
+    /// [`Central::remove_and_reacquire`] evicts the device by definition. Every connect attempt
+    /// is preceded by this call, so there is no path that connects to an evicted handle.
+    async fn locate(&mut self) -> Result<(), CentralError>;
+
     /// Connect to the device (resolving GATT), and report whether it was already paired.
+    /// Only meaningful after a successful [`Central::locate`].
     async fn connect(&mut self) -> Result<Connected, CentralError>;
 
     /// Bond as initiator — the agent prompts for the passkey the device displays.
