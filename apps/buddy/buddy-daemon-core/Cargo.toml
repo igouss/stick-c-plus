@@ -1,0 +1,43 @@
+[package]
+name = "buddy-daemon-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The pure COORDINATOR sequencing the permission loop between the per-tool-call hooks and the single bonded BLE link. An ECB Control: it owns NO effects (no socket, BLE, clock, thread) and folds inputs into an ordered Vec<Effect> the async daemon performs. Every emitted snapshot passes the emission gate, so a bare keepalive that clears a live prompt is unrepresentable. Time is injected. std, bridge-side only, host-tested."
+
+[lib]
+name = "buddy_daemon_core"
+path = "src/lib.rs"
+
+# The host-testable heart of the daemon IPC: an ECB CONTROL that sequences the permission loop
+# and returns a Vec<Effect> for the async adapter (UnixListener + live link) to perform. It owns
+# NO effects. Like buddy-permission it binds to the wire DTOs (PermissionResponse,
+# serialize_snapshot, serialize_time, serialize_owner) and the bridge-side policy (Ledger,
+# GatedSnapshot, HookRequest, DaemonReply), so a `domain` role would be an ILLEGAL outward edge to
+# buddy-wire / buddy-permission. context = "buddy" scopes it.
+[package.metadata.hex-arch]
+role = "port-and-adapter"
+context = "buddy"
+
+[dependencies]
+# The bridge-side policy this coordinator sequences: the session->snapshot Ledger, the
+# GatedSnapshot emission gate, and the hook<->daemon IPC DTOs (HookRequest, DaemonReply).
+buddy-permission = { path = "../buddy-permission" }
+# The wire contract: PermissionResponse::parse (typed BadDecision, never a silent Once), and the
+# central->device serializers (serialize_snapshot / serialize_time / serialize_owner).
+buddy-wire = { path = "../buddy-wire" }
+
+# Host-only; this crate is bridge-side only regardless and reaches no device build.
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# The step definitions parse the emitted SendLink JSON to assert prompt-present / absent and the
+# handshake shapes — the codec the daemon uses on the wire, host-side only.
+serde_json = "1"
+
+# The Gherkin plumbing test proves the loop end-to-end under its own harness; unit + property
+# tests run under the default harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false

@@ -226,6 +226,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "buddy-daemon-core"
+version = "0.1.0"
+dependencies = [
+ "buddy-permission",
+ "buddy-wire",
+ "cucumber",
+ "proptest",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "buddy-hook"
 version = "0.1.0"
 dependencies = [
