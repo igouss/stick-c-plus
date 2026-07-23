@@ -27,10 +27,10 @@
 //! `{"time":[epoch, tz_offset_seconds]}`. Wrong arity is [`InboundError::TimeArity`], **not**
 //! a fall-through to the snapshot merge (which upstream did, clearing the prompt).
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// A pending approval prompt on the wire: the fields the snapshot may set or clear.
-#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct Prompt {
     /// The prompt id echoed back in a permission response.
     pub id: String,
@@ -108,25 +108,40 @@ impl From<serde_json::Error> for InboundError {
 
 /// The parsed fields of one snapshot packet: absent fields are `None` and drive the asymmetric
 /// merge in [`SnapshotState::merge`].
-#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize)]
+///
+/// The same DTO round-trips in **both** directions: [`parse_inbound`] deserializes it device-side,
+/// and [`crate::outbound::serialize_snapshot`] serializes it central-side. Every field is
+/// `#[serde(skip_serializing_if = "Option::is_none")]`, so an absent field stays **absent** on the
+/// wire — omitting `prompt` clears it on the device, omitting a keep-prior field keeps it. Emitting
+/// `null` would be a different, wrong message; skipping is load-bearing.
+#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize)]
 pub struct SnapshotPacket {
     /// Total session count, capped `u8`; absent keeps prior.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub total: Option<u8>,
     /// Running session count; absent keeps prior.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub running: Option<u8>,
     /// Waiting session count; absent keeps prior.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub waiting: Option<u8>,
     /// Completion flag; **absent resets to `false`**.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub completed: Option<bool>,
     /// Desktop token total; forwarded to the stats latch **only** when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tokens: Option<u32>,
     /// Today's token count; absent keeps prior.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tokens_today: Option<u32>,
     /// The status line; absent keeps prior.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub msg: Option<String>,
     /// The transcript entries; absent keeps prior.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub entries: Option<Vec<String>>,
     /// The pending prompt; **absent clears** id / tool / hint.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<Prompt>,
 }
 

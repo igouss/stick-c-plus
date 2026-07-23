@@ -17,7 +17,10 @@
 //!   touch prompt state (defect fix b/D1), and merge snapshots asymmetrically on absent fields.
 //! - [`command`] — the command vocabulary and its exhaustive dispatch to an [`Ack`], with an
 //!   explicit nack for unknown commands (defect fix a/D3).
-//! - [`permission`] — the device→central [`PermissionResponse`].
+//! - [`permission`] — the device↔central [`PermissionResponse`]: the device serializes it with
+//!   [`PermissionResponse::to_json`], the central reads it back with [`PermissionResponse::parse`].
+//! - [`outbound`] — the central→device serializers (snapshot, time sync, connect messages): the
+//!   daemon's half of the contract, the faithful mirror of [`parse_inbound`].
 //!
 //! ## NUS UUIDs (reference)
 //!
@@ -29,6 +32,7 @@
 pub mod command;
 pub mod framing;
 pub mod inbound;
+pub mod outbound;
 pub mod permission;
 
 pub use command::{dispatch, Ack, Command};
@@ -36,4 +40,5 @@ pub use framing::{FrameError, Framer, Ring, LINE_CAPACITY, RING_CAPACITY};
 pub use inbound::{
     parse_inbound, BuddyEvent, Inbound, InboundError, Prompt, SnapshotPacket, SnapshotState,
 };
-pub use permission::{Decision, PermissionResponse};
+pub use outbound::{serialize_name, serialize_owner, serialize_snapshot, serialize_time};
+pub use permission::{Decision, PermissionParseError, PermissionResponse};
