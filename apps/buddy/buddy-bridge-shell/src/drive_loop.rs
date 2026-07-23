@@ -6,11 +6,13 @@
 //! reconnect/recovery flow (happy path, stale-LTK recovery, reboot, missing agent) is proven
 //! on the host against a fake; only the concrete `BluerCentral` needs the device.
 
-use buddy_bridge_core::{Action, Event, Fsm, State};
+use buddy_bridge_core::{chunk, Action, Event, Fsm, State};
 use futures::StreamExt;
-use log::{info, warn};
+use log::warn;
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::central::{Central, CentralError, Connected};
+use crate::link_peer::LinkPeer;
 use crate::reassembler::RxReassembler;
 use crate::sleeper::Sleeper;
 
@@ -24,25 +26,28 @@ pub enum Step {
     Stopped(String),
 }
 
-/// Runs a [`Fsm`] against a [`Central`] + [`Sleeper`], carrying the one bit of state the FSM
-/// does not: the live TX stream between a successful subscribe and the pump that consumes it.
-pub struct DriveLoop<C: Central, S: Sleeper> {
+/// Runs a [`Fsm`] against a [`Central`] + [`Sleeper`], bridging the live link to a [`LinkPeer`],
+/// and carrying the one bit of state the FSM does not: the live TX stream between a successful
+/// subscribe and the pump that consumes it.
+pub struct DriveLoop<C: Central, S: Sleeper, P: LinkPeer> {
     fsm: Fsm,
     central: C,
     sleeper: S,
+    peer: P,
     tx: Option<C::Tx>,
     action: Action,
 }
 
-impl<C: Central, S: Sleeper> DriveLoop<C, S> {
-    /// A loop primed with the first [`Action::Connect`].
-    pub fn new(central: C, sleeper: S) -> Self {
+impl<C: Central, S: Sleeper, P: LinkPeer> DriveLoop<C, S, P> {
+    /// A loop primed with the first [`Action::Connect`], bridging each running link to `peer`.
+    pub fn new(central: C, sleeper: S, peer: P) -> Self {
         let mut fsm: Fsm = Fsm::new();
         let action: Action = fsm.start();
         DriveLoop {
             fsm,
             central,
             sleeper,
+            peer,
             tx: None,
             action,
         }
@@ -141,24 +146,66 @@ impl<C: Central, S: Sleeper> DriveLoop<C, S> {
         }
     }
 
-    /// Pump the TX stream, reassembling notifications into whole lines, until the link ends.
+    /// Bridge the running link to the [`LinkPeer`]: reassemble each TX notification into whole lines
+    /// and hand them up (`on_line`), while writing every line the peer emits down the link (chunked
+    /// to the negotiated MTU), until the TX stream ends. Announces `on_up` before pumping and
+    /// `on_down` after the link drops.
     async fn on_run(&mut self) -> Event {
         let mut stream: C::Tx = self
             .tx
             .take()
             .expect("Run only follows a successful Subscribe");
+        // The negotiated MTU sizes the RX chunks; a probe failure degrades to the 23-byte floor
+        // rather than dropping the session — a small MTU only writes more, smaller pieces.
+        let mtu: u16 = self.central.mtu().await.unwrap_or(MTU_FLOOR);
         let mut reassembler: RxReassembler = RxReassembler::new();
-        while let Some(payload) = stream.next().await {
-            match reassembler.accept(&payload) {
-                Ok(lines) => {
-                    for line in lines {
-                        info!("rx: {}", String::from_utf8_lossy(&line));
-                    }
-                }
-                Err(truncation) => warn!("reassembly: {truncation}"),
+        let mut outbound: UnboundedReceiver<String> = self.peer.on_up();
+        // Once the peer's outbound channel closes (the daemon is gone), disable that branch and pump
+        // TX only — never busy-loop on a closed receiver.
+        let mut outbound_open: bool = true;
+        loop {
+            tokio::select! {
+                payload = stream.next() => match payload {
+                    Some(payload) => self.absorb(&mut reassembler, &payload),
+                    // The notify stream ends when the link drops (device reboot, out of range).
+                    None => break,
+                },
+                line = outbound.recv(), if outbound_open => match line {
+                    Some(line) => self.emit(&line, mtu).await,
+                    None => outbound_open = false,
+                },
             }
         }
-        // The notify stream ends when the link drops (device reboot, out of range).
+        self.peer.on_down();
         Event::Disconnected
     }
+
+    /// Reassemble one raw TX notification and hand every whole line it completed to the peer. A
+    /// typed truncation is logged, never a silent drop.
+    fn absorb(&self, reassembler: &mut RxReassembler, payload: &[u8]) {
+        match reassembler.accept(payload) {
+            Ok(lines) => lines
+                .into_iter()
+                .for_each(|line: Vec<u8>| self.peer.on_line(line)),
+            Err(truncation) => warn!("reassembly: {truncation}"),
+        }
+    }
+
+    /// Write one outbound line down the link, framed with the device's `\n` terminator and split
+    /// into MTU-sized pieces. A failed write abandons this line; the FSM learns of a dropped link
+    /// when the TX stream ends.
+    async fn emit(&self, line: &str, mtu: u16) {
+        let mut framed: Vec<u8> = line.as_bytes().to_vec();
+        framed.push(b'\n');
+        for piece in chunk(&framed, mtu) {
+            if let Err(err) = self.central.write_rx(piece).await {
+                warn!("rx write failed: {err}");
+                return;
+            }
+        }
+    }
 }
+
+/// The ATT MTU floor (payload sizing is `mtu - 3`), used when the MTU probe fails so a session can
+/// still make progress with smaller writes.
+const MTU_FLOOR: u16 = 23;

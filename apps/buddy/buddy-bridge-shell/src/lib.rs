@@ -7,9 +7,12 @@
 //!
 //! - [`Central`] — the port the FSM drives: connect / pair / recover a stale bond / subscribe /
 //!   write, with every stack error mapped to a typed [`CentralError`].
-//! - [`DriveLoop`] — the generic loop that runs a `Fsm` against any [`Central`] + [`Sleeper`].
-//!   Because both are ports, the whole reconnect/recovery flow is proven on the host against a
-//!   fake; only the concrete bluer adapter needs the stick.
+//! - [`DriveLoop`] — the generic loop that runs a `Fsm` against any [`Central`] + [`Sleeper`],
+//!   bridging each running link to a [`LinkPeer`]. Because all three are ports, the whole
+//!   reconnect/recovery flow AND the link bridge are proven on the host against fakes; only the
+//!   concrete bluer adapter needs the stick.
+//! - [`LinkPeer`] — the seam a running link crosses into: the permission coordinator in production,
+//!   a recording fake under test. `on_run` pumps TX up (`on_line`) and RX down (from `on_up`).
 //! - [`RxReassembler`] — reuses `buddy-wire`'s `Ring` + `Framer` to turn fragmented TX
 //!   notifications (and the device's separate-`\n` quirk) back into whole JSON lines.
 //! - [`Sleeper`] — the injected async sleep, so the backoff schedule runs instantly under test.
@@ -21,6 +24,7 @@ pub mod agent;
 pub mod bluer_central;
 pub mod central;
 pub mod drive_loop;
+pub mod link_peer;
 pub mod reassembler;
 pub mod sleeper;
 
@@ -31,5 +35,6 @@ pub use bluer_central::{discover, BluerCentral, NUS_RX, NUS_SERVICE, NUS_TX};
 pub use buddy_bridge_core::{chunk, IoCapability};
 pub use central::{Central, CentralError, Connected};
 pub use drive_loop::{DriveLoop, Step};
+pub use link_peer::LinkPeer;
 pub use reassembler::RxReassembler;
 pub use sleeper::{NoSleep, Sleeper, TokioSleeper};

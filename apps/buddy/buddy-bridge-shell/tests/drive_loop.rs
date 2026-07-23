@@ -9,11 +9,28 @@ use std::collections::VecDeque;
 
 use async_trait::async_trait;
 use buddy_bridge_core::{Action, State};
-use buddy_bridge_shell::{Central, CentralError, Connected, DriveLoop, NoSleep, Step};
+use buddy_bridge_shell::{Central, CentralError, Connected, DriveLoop, LinkPeer, NoSleep, Step};
 use futures::stream::{self, Iter};
+use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 /// A finite payload stream — models a subscription that ends when the link drops.
 type Payloads = Iter<std::vec::IntoIter<Vec<u8>>>;
+
+/// A do-nothing [`LinkPeer`] for the FSM tests: it consumes device lines and has nothing to send,
+/// so its outbound channel is closed from the start (the loop pumps TX only). These tests assert the
+/// reconnect DECISIONS, not the link bridge — that is `link_bridge.rs`.
+struct NullPeer;
+
+impl LinkPeer for NullPeer {
+    fn on_up(&self) -> UnboundedReceiver<String> {
+        // A closed receiver: no lines to write, the outbound branch disables itself at once.
+        let (_tx, rx): (mpsc::UnboundedSender<String>, UnboundedReceiver<String>) =
+            mpsc::unbounded_channel();
+        rx
+    }
+    fn on_line(&self, _line: Vec<u8>) {}
+    fn on_down(&self) {}
+}
 
 /// A scripted `Central`: each method pops its next result and records the call, so a test both
 /// drives the loop and asserts the exact sequence of operations it performed.
@@ -79,7 +96,8 @@ async fn a_fresh_device_pairs_then_subscribes() {
         already_paired: false,
     }));
     fake.pair.push_back(Ok(()));
-    let mut driver: DriveLoop<FakeCentral, NoSleep> = DriveLoop::new(fake, NoSleep);
+    let mut driver: DriveLoop<FakeCentral, NoSleep, NullPeer> =
+        DriveLoop::new(fake, NoSleep, NullPeer);
 
     // connect → ConnectedFresh → the loop decides to pair.
     assert_eq!(driver.step().await, Step::Continue);
@@ -97,7 +115,8 @@ async fn an_already_paired_device_reaches_the_running_state() {
     }));
     fake.subscribe
         .push_back(Ok(vec![b"{\"alive\":1}\n".to_vec()]));
-    let mut driver: DriveLoop<FakeCentral, NoSleep> = DriveLoop::new(fake, NoSleep);
+    let mut driver: DriveLoop<FakeCentral, NoSleep, NullPeer> =
+        DriveLoop::new(fake, NoSleep, NullPeer);
 
     // connect → ConnectedPaired → subscribe (no pairing).
     driver.step().await;
@@ -123,7 +142,8 @@ async fn a_stale_bond_is_removed_reacquired_and_repaired() {
         already_paired: false,
     }));
     fake.pair.push_back(Ok(()));
-    let mut driver: DriveLoop<FakeCentral, NoSleep> = DriveLoop::new(fake, NoSleep);
+    let mut driver: DriveLoop<FakeCentral, NoSleep, NullPeer> =
+        DriveLoop::new(fake, NoSleep, NullPeer);
 
     driver.step().await; // connect → subscribe
     driver.step().await; // subscribe fails encryption → remove + re-acquire
@@ -146,7 +166,8 @@ async fn a_reboot_ends_the_stream_and_the_loop_reconnects() {
     fake.connect.push_back(Ok(Connected {
         already_paired: true,
     }));
-    let mut driver: DriveLoop<FakeCentral, NoSleep> = DriveLoop::new(fake, NoSleep);
+    let mut driver: DriveLoop<FakeCentral, NoSleep, NullPeer> =
+        DriveLoop::new(fake, NoSleep, NullPeer);
 
     driver.step().await; // connect → subscribe
     driver.step().await; // subscribe → run
@@ -160,7 +181,8 @@ async fn a_reboot_ends_the_stream_and_the_loop_reconnects() {
 async fn a_missing_agent_stops_the_loop_instead_of_retrying_forever() {
     let mut fake: FakeCentral = FakeCentral::default();
     fake.connect.push_back(Err(CentralError::AgentMissing));
-    let mut driver: DriveLoop<FakeCentral, NoSleep> = DriveLoop::new(fake, NoSleep);
+    let mut driver: DriveLoop<FakeCentral, NoSleep, NullPeer> =
+        DriveLoop::new(fake, NoSleep, NullPeer);
 
     // run() would loop forever on a retryable fault; a missing agent must terminate it.
     let reason: String = driver.run().await;
