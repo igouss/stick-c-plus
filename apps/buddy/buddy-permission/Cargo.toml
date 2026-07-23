@@ -1,0 +1,44 @@
+[package]
+name = "buddy-permission"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Bridge-side permission + heartbeat POLICY for the desk pet: the fail-safe PreToolUse hook decision (allow/deny/emit-nothing), the session->snapshot ledger, the emission gating rule that keeps a live prompt on the glass, and the hook<->daemon IPC DTOs. Pure and time-injected — it decides; the daemon owns every effect. std, bridge-side only, host-tested."
+
+[lib]
+name = "buddy_permission"
+path = "src/lib.rs"
+
+# Bridge-side policy over the wire contract: it decides WHAT the hook prints, WHAT snapshot the
+# daemon emits, and WHAT the IPC messages carry — with no socket, no BLE, no clock, no thread.
+# The same port-and-adapter role as buddy-wire: it binds to the wire DTOs (SnapshotPacket,
+# Decision, PermissionResponse) and the domain (TokenLatch), so a `domain` role would be an
+# ILLEGAL outward edge to buddy-wire. context = "buddy" scopes it. The daemon (a later hand
+# phase) depends on THIS crate and owns all the effects.
+[package.metadata.hex-arch]
+role = "port-and-adapter"
+context = "buddy"
+
+[dependencies]
+# The pure heart: the three-case TokenLatch, reused so a daemon restart / device reboot never
+# double-counts tokens.
+buddy-core = { path = "../buddy-core" }
+# The wire contract this policy binds to: SnapshotPacket, Decision, PermissionResponse,
+# serialize_snapshot. std but device-independent.
+buddy-wire = { path = "../buddy-wire" }
+# The IPC DTOs are ours to define; serde derives them, serde_json is the transport codec the
+# daemon uses. Both are already pulled by buddy-wire.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Host-only; never reaches any device build (this crate is bridge-side only regardless).
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run under the
+# default harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false

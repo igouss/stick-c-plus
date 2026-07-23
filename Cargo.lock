@@ -226,6 +226,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "buddy-permission"
+version = "0.1.0"
+dependencies = [
+ "buddy-core",
+ "buddy-wire",
+ "cucumber",
+ "proptest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "buddy-wire"
 version = "0.1.0"
 dependencies = [
