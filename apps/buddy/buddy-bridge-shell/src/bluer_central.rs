@@ -16,7 +16,7 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use bluer::gatt::remote::{Characteristic, CharacteristicWriteRequest, Service};
 use bluer::gatt::WriteOp;
-use bluer::{Adapter, Address, Device, Uuid};
+use bluer::{Adapter, Address, Device, DeviceEvent, DeviceProperty, Uuid};
 use futures::{Stream, StreamExt};
 
 use crate::central::{Central, CentralError, Connected};
@@ -197,10 +197,32 @@ impl Central for BluerCentral {
         let tx: &Characteristic = self.tx.as_ref().ok_or(CentralError::NotConnected)?;
         // Subscribing writes the CCCD; on a stale bond this is exactly where encryption is
         // rejected, so route the failure through the same discriminator.
-        let stream = tx
+        let notifications = tx
             .notify()
             .await
             .map_err(|err: bluer::Error| self.stale_or_bluer(err))?;
+        // The `Central` contract is that this stream ENDS when the link drops, so the loop sees
+        // Disconnected and reconnects. bluer's notify stream only ends on the characteristic's
+        // D-Bus `InterfacesRemoved` — but BlueZ CACHES GATT objects for a bonded device across a
+        // disconnect, so a device reboot fires no removal and the notify stream would hang open
+        // forever. Watch the device's `Connected` property and end the stream when it goes false.
+        let device_events = self
+            .device
+            .events()
+            .await
+            .map_err(|err: bluer::Error| self.stale_or_bluer(err))?;
+        let disconnected = async move {
+            let mut device_events = Box::pin(device_events);
+            while let Some(event) = device_events.next().await {
+                if matches!(
+                    event,
+                    DeviceEvent::PropertyChanged(DeviceProperty::Connected(false))
+                ) {
+                    return;
+                }
+            }
+        };
+        let stream = notifications.take_until(Box::pin(disconnected));
         Ok(Box::pin(stream))
     }
 

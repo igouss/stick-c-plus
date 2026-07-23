@@ -147,7 +147,18 @@ async fn bonds_subscribes_round_trips_and_reconnects() {
     // link recovers with NO passkey re-entry.
     eprintln!("\n>>> POWER-CYCLE THE STICK NOW — it should reconnect with no passkey <<<\n");
     fired.store(false, Ordering::SeqCst);
-    while tx.next().await.is_some() {} // drain until the stream ends (disconnect)
+    // Drain until the stream ends (disconnect). BlueZ caches GATT objects for a bonded device,
+    // so the raw notify stream would never end on a reboot; the fixed `subscribe_tx` closes it on
+    // the `Connected(false)` event. The timeout is a backstop so a regression can never hang CI.
+    let drained: Result<(), _> = timeout(Duration::from_secs(30), async {
+        while tx.next().await.is_some() {}
+    })
+    .await;
+    assert!(
+        drained.is_ok(),
+        "TX stream did not end within 30s of the device rebooting — subscribe_tx is not \
+         closing the stream on disconnect (BlueZ GATT-cache hang)"
+    );
     drop(tx);
 
     let mut resumed: bool = false;

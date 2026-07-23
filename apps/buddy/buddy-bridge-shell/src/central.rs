@@ -63,6 +63,12 @@ impl std::error::Error for CentralError {}
 pub trait Central: Send {
     /// The reassembly-free stream of raw TX notification payloads (each item is one ATT
     /// notification; fragmentation is the reason the caller reassembles).
+    ///
+    /// Contract: this stream MUST end (yield `None`) when the link drops, since that is how
+    /// [`DriveLoop`](crate::drive_loop::DriveLoop) learns the device went away and reconnects.
+    /// A stream that stays open on a disconnect hangs the loop — the concrete adapter is
+    /// responsible for closing it (BlueZ caches GATT objects for bonded devices, so the raw
+    /// notify stream does not end on its own; see `BluerCentral::subscribe_tx`).
     type Tx: Stream<Item = Vec<u8>> + Unpin + Send;
 
     /// Connect to the device (resolving GATT), and report whether it was already paired.
