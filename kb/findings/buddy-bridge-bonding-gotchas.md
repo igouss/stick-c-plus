@@ -52,11 +52,20 @@ BT adapter, never the port — but a stuck monitor still blocks reflashing the s
 
 ```sh
 just bridge-forget                       # if a prior bond is looping (host + prints NVS erase)
-just run-bin-buddy ble-spike             # flash the peer; then Ctrl-C the monitor (frees the port)
-just bridge-spike-pair                   # daemon + auto-passkey 123456; wait for 'link up: bonded'
+just run-buddy                           # flash the peer; then Ctrl-C the monitor (frees the port)
+just bridge-pair                         # daemon on the hook's socket; wait for 'link up: bonded'
 # operational check, from another shell:
 bluetoothctl info <addr> | grep -E 'Bonded|Connected'
 ```
+
+> **The passkey is no longer a constant to pipe in.** These four traps were found against the
+> `ble-spike` bin, which used a fixed `123456` so pairing was reproducible across flashes. That
+> bin is gone and so is the constant: the product firmware draws a **fresh random passkey per
+> pairing** from the hardware RNG and shows it full-screen on the glass, because a published
+> constant defeats the MITM protection LE Secure Connections bonding exists to provide. So
+> `bridge-pair` prompts and you type what the stick shows — there is nothing to automate, and
+> `just bridge-spike-pair` no longer exists. The four traps themselves are unchanged; they are
+> properties of BlueZ and of the two-sided bond, not of the peer firmware.
 
 See [buddy-permission-hook](../guides/buddy-permission-hook.md) for the full loop and
 the fail-safe proof.

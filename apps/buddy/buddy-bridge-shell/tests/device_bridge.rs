@@ -3,9 +3,9 @@
 //! Like the aioesphomeapi oracle, this is `#[ignore]`d on purpose: a plain `cargo test` shows
 //! it *ignored*, never a false green, because a bond cannot be faked. It runs the concrete
 //! [`BluerCentral`] against a live NUS peripheral over BlueZ (5.87 on this box) and proves the
-//! five things the spike must do. Run it with a flashed stick via `just bridge-device`; flash
-//! the peer with `just run-bin-buddy ble-spike` first. The spike's fixed passkey is `123456`
-//! (override with `STICK_PASSKEY`).
+//! five things the link must do. Run it with a flashed stick via `just bridge-device`; flash the
+//! peer with `just run-buddy` first, and set `STICK_PASSKEY` to the six digits that stick's glass
+//! shows for this pairing — the firmware draws a fresh one each time, so there is no constant.
 //!
 //! The load-bearing security assertion is (5): the passkey callback MUST fire during a fresh
 //! pairing. If pairing completes without it, BlueZ silently downgraded to Just Works (no MITM)
@@ -41,12 +41,23 @@ impl PasskeyProvider for RecordingPasskey {
     }
 }
 
-/// The passkey to enter: `STICK_PASSKEY`, or the spike's fixed `123456`.
+/// The passkey to enter, from `STICK_PASSKEY` — read off the stick's glass for this pairing.
+///
+/// There is deliberately **no fallback**. The firmware draws a fresh passkey per pairing, so any
+/// constant this test could guess is wrong, and a wrong guess fails as a *pairing* error — which
+/// reads like a broken bond rather than an unset variable and sends the operator hunting the wrong
+/// fault. Missing input is a missing input: say so, by name, before touching the adapter.
 fn stick_passkey() -> u32 {
-    std::env::var("STICK_PASSKEY")
-        .ok()
-        .and_then(|raw: String| raw.trim().parse::<u32>().ok())
-        .unwrap_or(123_456)
+    let raw: String = std::env::var("STICK_PASSKEY").unwrap_or_else(|_| {
+        panic!(
+            "STICK_PASSKEY is unset. The firmware shows a FRESH random passkey on the glass for \
+             each pairing — there is no constant to fall back on. Read the six digits off the \
+             stick and re-run with STICK_PASSKEY=<digits>."
+        )
+    });
+    raw.trim()
+        .parse::<u32>()
+        .unwrap_or_else(|err| panic!("STICK_PASSKEY={raw:?} is not a six-digit number: {err}"))
 }
 
 /// True if `needle` occurs in `haystack`.

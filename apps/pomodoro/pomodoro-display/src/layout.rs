@@ -191,6 +191,24 @@ const _: () = {
     );
 };
 
+/// Landscape splits by column and portrait by row — the one structural difference between the two
+/// pictures, asserted so a later edit cannot quietly turn one into the other.
+///
+/// A build-time check, not a `#[test]`: both layouts are `const`, so this has exactly one answer
+/// and knowing it at compile time is strictly stronger than learning it from a test run.
+const _: () = {
+    let cell_w: u32 = FONT.character_size.width;
+    assert!(
+        LANDSCAPE.sprite_origin.x as u32
+            >= LANDSCAPE.label_origin.x as u32 + cell_w * LABEL_WIDTH as u32,
+        "landscape stands the creature beside the text"
+    );
+    assert!(
+        PORTRAIT.sprite_origin.y > PORTRAIT.clock_origin.y,
+        "portrait stands the creature below the text"
+    );
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,21 +244,8 @@ mod tests {
         });
     }
 
-    /// Landscape splits by column and portrait by row — the one structural difference between
-    /// the two pictures, asserted so a later edit cannot quietly turn one into the other.
-    #[test]
-    fn landscape_splits_by_column_and_portrait_by_row() {
-        let cell_w: u32 = FONT.character_size.width;
-        assert!(
-            LANDSCAPE.sprite_origin.x as u32
-                >= LANDSCAPE.label_origin.x as u32 + cell_w * LABEL_WIDTH as u32,
-            "landscape stands the creature beside the text"
-        );
-        assert!(
-            PORTRAIT.sprite_origin.y > PORTRAIT.clock_origin.y,
-            "portrait stands the creature below the text"
-        );
-    }
+    // The column/row split that used to be asserted here is now a `const _` block beside the two
+    // layouts — the same claim, checked by the compiler instead of by a test run.
 
     /// The narrow canvas really is narrow: whatever the portrait layout does, it does inside
     /// thirteen columns. Stated as the number rather than derived, so a font change that

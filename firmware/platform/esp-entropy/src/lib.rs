@@ -38,6 +38,24 @@ pub fn random_u32() -> u32 {
     unsafe { esp_random() }
 }
 
+/// The largest multiple of [`PASSKEY_RANGE`] that fits in a `u32` — draws at or above it are
+/// rejected, which is the whole of the debiasing.
+///
+/// It is `floor(2^32 / range) * range`, computed without ever naming 2^32 in `u32` arithmetic:
+/// `u32::MAX` is `2^32 - 1`, and `MAX - (MAX % range)` is that same multiple for every range that
+/// does not divide 2^32 exactly (a million does not — it carries a factor of 5^6).
+///
+/// The correctness property is one line, and it is asserted below at compile time rather than
+/// argued in prose: **the accepted interval must be a whole number of ranges.** Subtract anything
+/// further and the residues stop being equally represented, which is precisely the bias the
+/// rejection is here to remove.
+const ACCEPT_LIMIT: u32 = u32::MAX - (u32::MAX % PASSKEY_RANGE);
+
+// The debiasing is exactly this, and a compiler that will not build a biased passkey is a better
+// guarantee than a comment claiming the arithmetic is right.
+const _: () = assert!(ACCEPT_LIMIT.is_multiple_of(PASSKEY_RANGE));
+const _: () = assert!(ACCEPT_LIMIT > u32::MAX - PASSKEY_RANGE);
+
 /// A fresh BLE passkey in `000000..=999999`, drawn without modulo bias.
 ///
 /// A plain `random_u32() % 1_000_000` would be *biased*: 2^32 is not a multiple of a million, so
@@ -48,12 +66,9 @@ pub fn random_u32() -> u32 {
 /// Call this **while the Bluetooth controller is up** (which the pairing callback always is) —
 /// see the crate docs on where the entropy comes from.
 pub fn passkey() -> u32 {
-    // The largest multiple of the range that fits in a u32; draws at or above it are rejected.
-    // 2^32 - (2^32 mod range), computed without overflowing: u32::MAX is 2^32 - 1.
-    let limit: u32 = u32::MAX - (u32::MAX % PASSKEY_RANGE) - (PASSKEY_RANGE - 1);
     loop {
         let draw: u32 = random_u32();
-        if draw < limit {
+        if draw < ACCEPT_LIMIT {
             return draw % PASSKEY_RANGE;
         }
     }

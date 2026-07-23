@@ -45,10 +45,11 @@ cargo build --release -p buddy-bridge -p buddy-hook
 # → target/release/buddy-hook     (the PreToolUse hook)
 ```
 
-The firmware side (the stick) is the `claude-buddy` app; flash it with
-`just run-bin-buddy <bin>` (see [flashing-and-serial-access](flashing-and-serial-access.md)).
-It advertises as `Claude-XXXX` (last two BT-MAC bytes) and demands LE Secure
-Connections bonding with passkey entry.
+The firmware side (the stick) is the `claude-buddy` app; flash it with `just run-buddy`
+(see [flashing-and-serial-access](flashing-and-serial-access.md)). It advertises as
+`Claude-XXXX` (last two BT-MAC bytes) and demands LE Secure Connections bonding with
+passkey entry — a **fresh random passkey per pairing**, drawn on the device and shown
+full-screen on the glass, which is what you type at the daemon's prompt below.
 
 ## Cold-start pairing
 
@@ -73,8 +74,9 @@ the process every hook talks to.
 > **Bonding looks silent — that is expected only up to a point.** The success signal
 > is the `link up: bonded` log line, not the passkey prompt. If the daemon sits in
 > `scanning …` forever, you almost certainly have a `bluetoothctl scan` running that
-> stole its discovery session — stop it. For a flashed `ble-spike` stick, `just
-> bridge-spike-pair` brings the daemon up and auto-enters the fixed passkey `123456`.
+> stole its discovery session — stop it. `just bridge-pair` brings the daemon up on the
+> **same socket the hook resolves** and prompts for the passkey; there is no constant to
+> automate, because the stick draws a fresh one per pairing.
 > The four bring-up traps are catalogued in
 > [buddy-bridge-bonding-gotchas](../findings/buddy-bridge-bonding-gotchas.md).
 
