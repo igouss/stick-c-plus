@@ -1,0 +1,32 @@
+[package]
+name = "buddy-bridge-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Framework-free policy for the Linux BLE-central bridge: the pairing/connection decision FSM (with first-class stale-LTK recovery), the TX MTU chunker, the reconnect backoff schedule, and the IoCapability proof token that makes a Just-Works downgrade unrepresentable. Pure — no bluer, no tokio, no clock; time is a parameter. Host-tested."
+
+[lib]
+name = "buddy_bridge_core"
+path = "src/lib.rs"
+
+# The pure heart of the bridge: it decides WHAT to do next (connect / pair / re-pair /
+# subscribe / back off / fail fast), how to split a payload for the negotiated MTU, and how
+# long to wait before the next reconnect — with no framework and no I/O, so every rule is
+# proven on the host. context = "buddy" scopes it; it depends on nothing but core/std value
+# types. It must NOT depend on buddy-wire (that points outward — the Ring/Framer live in the
+# driving-adapter shell).
+[package.metadata.hex-arch]
+role = "domain"
+context = "buddy"
+
+# Host-only. These link std and never reach any device build.
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run under the
+# default harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false

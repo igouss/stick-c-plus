@@ -1,0 +1,43 @@
+[package]
+name = "buddy-bridge-shell"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The imperative shell of the Linux BLE-central bridge: the async Central port the pure FSM drives, the generic DriveLoop that runs the decision against any Central (host-tested with a FakeCentral, no device), the RxReassembler that reuses buddy-wire's Ring+Framer, and the concrete BluerCentral over bluer 0.17.4. std/tokio, Linux-only."
+
+[lib]
+name = "buddy_bridge_shell"
+path = "src/lib.rs"
+
+# A driving (primary) adapter: it turns the passage of time and the BLE link's outcomes into
+# a run of the pure decision (buddy-bridge-core) against a Central port, reassembling TX
+# notifications through buddy-wire's framing and chunking RX writes for the MTU. It owns
+# effects (tokio tasks, the bluer session) but drives inward through ports; the generic loop
+# is proven on the host against a fake, only BluerCentral needs the device. May depend on
+# domain / port-and-adapter — here buddy-bridge-core (domain) and buddy-wire (port-and-adapter).
+[package.metadata.hex-arch]
+role = "driving-adapter"
+context = "buddy"
+
+[dependencies]
+# The Linux BlueZ client. btleplug cannot bond on any platform; bluer (the BlueZ project's
+# own crate) offers Device::pair/remove_device. The `bluetoothd` feature is NOT a default —
+# without it Device, the pairing agent, and the GATT client do not exist.
+bluer = { version = "0.17.4", features = ["bluetoothd"] }
+# The pure decision this shell runs: the FSM, the mtu-3 chunker, the backoff schedule.
+buddy-bridge-core = { path = "../buddy-bridge-core" }
+# The NUS wire contract: the Ring + Framer the RxReassembler reuses to turn fragmented TX
+# notifications back into whole JSON lines, with typed truncation errors.
+buddy-wire = { path = "../buddy-wire" }
+# The async runtime the BLE work runs on (bluer is tokio-based). io-std/sync for the stdin
+# passkey channel the composition root builds.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "io-std"] }
+# Async methods on the Central port (boxed futures — dyn-friendly, simple).
+async-trait = "0.1"
+# Stream combinators for pumping the TX notify stream.
+futures = "0.3"
+# A failed connect / dropped link is logged; the composition root installs the logger.
+log = "0.4"
+
+[dev-dependencies]
+proptest = "1"

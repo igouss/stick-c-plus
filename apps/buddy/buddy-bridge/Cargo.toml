@@ -1,0 +1,31 @@
+[package]
+name = "buddy-bridge"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The composition root of the Linux BLE-central bridge: a daemon that registers the pairing agent (holding its handle for the run), scans for the Claude-XXXX stick, and drives the pure decision against a live BluerCentral. The one place bluer, stdin, and the logger are wired together."
+
+[[bin]]
+name = "buddy-bridge"
+path = "src/main.rs"
+
+# The composition root: it owns the process, wires the concrete bluer adapter + the stdin
+# passkey provider + the real sleeper into the driving-adapter's DriveLoop, and holds the
+# pairing AgentHandle for the daemon's life. It may depend on anything; it names the effects
+# so nothing inward has to.
+[package.metadata.hex-arch]
+role = "composition-root"
+context = "buddy"
+
+[dependencies]
+# The bridge adapter: the DriveLoop, the BluerCentral, the pairing-agent builder, discovery.
+buddy-bridge-shell = { path = "../buddy-bridge-shell" }
+# The runtime, and stdin for the passkey the operator reads off the glass.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "sync"] }
+# The BLE session + agent registration live here (the composition root), over the same bluer.
+bluer = { version = "0.17.4", features = ["bluetoothd"] }
+# Async trait impl for the stdin passkey provider.
+async-trait = "0.1"
+# Structured logging; env_logger installs the logger the inner crates log through.
+log = "0.4"
+env_logger = "0.11"

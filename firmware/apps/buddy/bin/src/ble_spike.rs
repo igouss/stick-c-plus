@@ -60,6 +60,12 @@ fn main() {
     let name: String = advertised_name(device);
     log::info!("advertising as {name}, passkey {SPIKE_PASSKEY:06}");
 
+    // Keep the GAP device name (0x2A00) equal to the advertised Complete Local Name. NimBLE
+    // defaults it to "nimble", and BlueZ caches that GATT-read name and serves it back to a
+    // central's name filter — so a bridge (or the desktop picker) matching the "Claude-" prefix
+    // silently never sees the device once it has connected. One name, one source of truth.
+    BLEDevice::set_device_name(&name).expect("set the GAP device name");
+
     let server: &mut BLEServer = device.get_server();
     server.on_connect(|_server, desc| {
         log::info!(
