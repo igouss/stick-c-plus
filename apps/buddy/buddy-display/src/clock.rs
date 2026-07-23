@@ -34,10 +34,10 @@ where
     text_field(
         target,
         layout.row_origin(time_row),
-        palette::PRIMARY,
+        time_colour(clock),
         layout.cols,
         FieldAlign::Centred,
-        format_args!("{:02}:{:02}", clock.hour.min(23), clock.minute.min(59)),
+        format_args!("{}", Time(clock)),
     )?;
     text_field(
         target,
@@ -47,6 +47,30 @@ where
         FieldAlign::Centred,
         format_args!("{}", Power(clock)),
     )
+}
+
+/// The time itself, or `--:--` on a stick nobody has told the time to.
+///
+/// The board has no RTC; it learns the hour from the host over the link. Until then the honest
+/// answer is dashes — the same shape the glass already uses for a battery it cannot measure. A
+/// confident `00:00` is not a blank, it is a wrong reading the owner would act on.
+struct Time<'a>(&'a ClockView);
+
+impl core::fmt::Display for Time<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.0.time {
+            Some((hour, minute)) => write!(f, "{:02}:{:02}", hour.min(23), minute.min(59)),
+            None => f.write_str("--:--"),
+        }
+    }
+}
+
+/// The time is dim until it is real, so an unsynced clock does not read as an authoritative one.
+const fn time_colour(clock: &ClockView) -> Rgb565 {
+    match clock.time {
+        Some(_) => palette::PRIMARY,
+        None => palette::DIM,
+    }
 }
 
 /// The power line under the time: the charge when the board can measure it, and whether it is
@@ -84,8 +108,7 @@ mod tests {
 
     fn clock() -> ClockView {
         ClockView {
-            hour: 14,
-            minute: 37,
+            time: Some((14, 37)),
             battery_pct: Some(82),
             charging: true,
         }
@@ -107,7 +130,7 @@ mod tests {
     #[test]
     fn each_minute_paints_differently() {
         let mut later: ClockView = clock();
-        later.minute = 38;
+        later.time = Some((14, 38));
         assert_ne!(
             painted(&LANDSCAPE, &clock()).pixels(),
             painted(&LANDSCAPE, &later).pixels()
@@ -142,14 +165,37 @@ mod tests {
     #[test]
     fn a_nonsense_reading_stays_on_both_canvases() {
         let absurd: ClockView = ClockView {
-            hour: u8::MAX,
-            minute: u8::MAX,
+            time: Some((u8::MAX, u8::MAX)),
             battery_pct: Some(u8::MAX),
             charging: false,
         };
         assert_eq!(painted(&LANDSCAPE, &absurd).escaped(), 0);
         assert_eq!(painted(&PORTRAIT, &absurd).escaped(), 0);
         assert_eq!(painted(&LANDSCAPE, &ClockView::default()).escaped(), 0);
+    }
+
+    /// A stick nobody has told the time to says so, rather than painting a confident midnight.
+    ///
+    /// The board has no RTC, so this is the state it boots into and stays in until the host
+    /// syncs — the first thing an owner sees on a charger. `00:00` there is not a blank, it is a
+    /// wrong reading, and the whole point is that it must not be mistakable for a real one.
+    #[test]
+    fn an_unsynced_clock_does_not_paint_a_confident_midnight() {
+        let unsynced: ClockView = ClockView {
+            time: None,
+            ..clock()
+        };
+        let midnight: ClockView = ClockView {
+            time: Some((0, 0)),
+            ..clock()
+        };
+        assert_ne!(
+            painted(&LANDSCAPE, &unsynced).pixels(),
+            painted(&LANDSCAPE, &midnight).pixels(),
+            "an unsynced clock is indistinguishable from a real midnight"
+        );
+        assert_ne!(time_colour(&unsynced), time_colour(&midnight));
+        assert_eq!(painted(&PORTRAIT, &unsynced).escaped(), 0);
     }
 
     /// A board with no gauge says what it does know rather than painting a plausible number —

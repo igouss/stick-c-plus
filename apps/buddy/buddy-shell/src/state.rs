@@ -403,8 +403,9 @@ impl DeviceState {
         view.sessions_running = u32::from(self.snapshot.running);
         view.sessions_waiting = u32::from(self.snapshot.waiting);
         view.clock = ClockView {
-            hour: self.wall.hour_minute(self.now).map_or(0, |(h, _)| h),
-            minute: self.wall.hour_minute(self.now).map_or(0, |(_, m)| m),
+            // Read once, not twice: an unsynced wall clock reports `None` and the glass shows
+            // dashes rather than a midnight nobody set.
+            time: self.wall.hour_minute(self.now),
             battery_pct: self.battery_pct,
             charging: self.charging,
         };

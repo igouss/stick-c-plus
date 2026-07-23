@@ -142,10 +142,14 @@ pub struct StatsView {
 /// The wall clock, as the charging screen shows it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct ClockView {
-    /// Hour of day, `0..=23`.
-    pub hour: u8,
-    /// Minute, `0..=59`.
-    pub minute: u8,
+    /// The wall-clock time as `(hour 0..=23, minute 0..=59)`, when the host has said what it is.
+    ///
+    /// `Option`, for the same reason [`battery_pct`](Self::battery_pct) is one. This board has no
+    /// RTC: it learns the time from an `Inbound::Time` line and knows nothing until one arrives.
+    /// A stick that has never been linked would otherwise paint a confident `00:00` — which is
+    /// not a missing reading, it is a *wrong* one, and midnight is a plausible enough answer that
+    /// the owner would believe it. `None` says "nobody has told me", and the glass says so.
+    pub time: Option<(u8, u8)>,
     /// Battery charge in percent, when the board can actually measure it.
     ///
     /// `Option`, not a `u8` with a sentinel: this board's PMIC adapter reports whether USB is

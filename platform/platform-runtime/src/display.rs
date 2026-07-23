@@ -387,7 +387,16 @@ where
         _ => now,
     };
     let elapsed: Tick = now.saturating_sub(since);
-    let frame: usize = state.frame_index(elapsed);
+    // Only a state that says it is animated gets a moving frame number. `frame` is part of the
+    // repaint-suppression comparison, so on a still picture a counter that kept advancing would
+    // fail that comparison every single tick and repaint a picture that had not changed — and a
+    // renderer that clears its region before drawing turns that into a visible flicker. What
+    // `is_animated` means is "this picture changes with time"; when it is false, it must not.
+    let frame: usize = if state.is_animated() {
+        state.frame_index(elapsed)
+    } else {
+        0
+    };
 
     let next: Shown<S> = Shown {
         state,
@@ -427,9 +436,14 @@ mod tests {
     /// deliberately excludes the value — so `Still(30)` and `Still(60)` share an anchor, the
     /// way a pomodoro's `mm:ss` value shares the phase's anchor. `Still` is motionless (frame
     /// 0 forever); `Moving` animates on its own clock.
+    /// `Ticking` is the regression shape: a state that says it is **not** animated while its
+    /// `frame_index` still moves with the clock — which is what every app state does whose
+    /// creature is simply not on the current screen, because the frame is computed from the
+    /// creature's own selector and never asked whether it is being drawn.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     enum TestState {
         Still(u8),
+        Ticking(u8),
         Moving(u8),
     }
 
@@ -441,6 +455,7 @@ mod tests {
         fn anchor(&self) -> u8 {
             match self {
                 TestState::Still(_) => 0,
+                TestState::Ticking(_) => 2,
                 TestState::Moving(_) => 1,
             }
         }
@@ -452,7 +467,9 @@ mod tests {
         fn frame_index(&self, elapsed_ms: Tick) -> usize {
             match self {
                 TestState::Still(_) => 0,
-                TestState::Moving(_) => ((elapsed_ms / FRAME_HOLD) as usize) % FRAMES,
+                TestState::Ticking(_) | TestState::Moving(_) => {
+                    ((elapsed_ms / FRAME_HOLD) as usize) % FRAMES
+                }
             }
         }
     }
@@ -683,6 +700,33 @@ mod tests {
         let _g2: Glass<TestState> = render_once(&mut screen, &mut src, &mut landscape(), 22, g1);
 
         assert_eq!(shown_states(&shown).len(), 1, "a steady state repainted");
+    }
+
+    /// A still state whose frame counter keeps ticking is *still still* — painted once.
+    ///
+    /// The regression. `frame` is part of the suppression comparison, and an app computes it
+    /// from its creature's selector without asking whether the current screen draws a creature.
+    /// So a state that is motionless by its own account had a frame number that advanced
+    /// anyway, failed the comparison on every tick, and repainted forever. On the metal that is
+    /// not a wasted cycle but a *visible flicker*, because a renderer clears its region before
+    /// it draws: the buddy's charging clock blinked at the render period, which is how this was
+    /// found. Three ticks, well past a frame boundary, must paint exactly once.
+    #[test]
+    fn a_still_state_with_a_ticking_frame_counter_is_still_painted_once() {
+        let (mut screen, shown): (FakeScreen, _) = FakeScreen::new();
+        let mut src = fixed(TestState::Ticking(30));
+
+        let g0: Glass<TestState> = render_once(&mut screen, &mut src, &mut landscape(), 0, None);
+        let g1: Glass<TestState> =
+            render_once(&mut screen, &mut src, &mut landscape(), FRAME_HOLD, g0);
+        let _g2: Glass<TestState> =
+            render_once(&mut screen, &mut src, &mut landscape(), FRAME_HOLD * 2, g1);
+
+        assert_eq!(
+            shown_states(&shown).len(),
+            1,
+            "a state that reports itself still repainted as its frame counter advanced"
+        );
     }
 
     /// Turning the picture repaints an otherwise unchanged state.

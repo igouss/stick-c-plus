@@ -83,8 +83,7 @@ fn buddy() -> BuddyView {
         tokens_today: 128_400,
     };
     view.clock = ClockView {
-        hour: 14,
-        minute: 37,
+        time: Some((14, 37)),
         battery_pct: Some(82),
         charging: true,
     };
