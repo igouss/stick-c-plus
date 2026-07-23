@@ -1,0 +1,39 @@
+[package]
+name = "buddy-creature"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The reusable creature foundation for the M5StickC Plus desk pet: the (species, PersonaState) -> sprite-set seam, so adding a creature is adding a const data value, never a match arm. A species is a table of sprite sets indexed by the persona ordinal; an ordered registry resolves the persisted species index; the pure selection over time picks which sprite in a state's set is active and delegates frame timing to the sprite's own frame_at clock. no_std, no alloc, no drawing — it borrows vendored art, it does not render it."
+
+[lib]
+name = "buddy_creature"
+path = "src/lib.rs"
+
+# Presentation policy over shared art: it binds each PersonaState (buddy-core) onto a set of
+# vendored Sprites (platform-display) and selects one over elapsed time, drawing nothing.
+# role = "port-and-adapter" — it may depend on domain (buddy-core) and on other
+# port-and-adapter crates (platform-display). context = "buddy" scopes it to the buddy app;
+# promote to "shared" only if a second consumer appears.
+[package.metadata.hex-arch]
+role = "port-and-adapter"
+context = "buddy"
+
+[dependencies]
+# The board-generic picture: the Sprite type (its pure frame_at clock) and the vendored
+# ClaudePix preset library this crate binds the persona states onto.
+platform-display = { path = "../../../platform/platform-display" }
+# The buddy domain: the PersonaState the sprite table is indexed by (ordinals are load-bearing)
+# and the SpeciesIndex the registry resolves.
+buddy-core = { path = "../buddy-core" }
+
+# Host-only. These link std and never reach the Xtensa build (a dependent excludes them).
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run under the
+# default harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false

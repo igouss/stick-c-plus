@@ -215,6 +215,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "buddy-creature"
+version = "0.1.0"
+dependencies = [
+ "buddy-core",
+ "cucumber",
+ "platform-display",
+ "proptest",
+ "tokio",
+]
+
+[[package]]
 name = "buddy-wire"
 version = "0.1.0"
 dependencies = [
