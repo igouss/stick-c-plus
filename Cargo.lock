@@ -123,6 +123,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "buddy-bridge-core"
+version = "0.1.0"
+dependencies = [
+ "cucumber",
+ "proptest",
+ "tokio",
+]
+
+[[package]]
 name = "buddy-core"
 version = "0.1.0"
 dependencies = [

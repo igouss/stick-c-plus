@@ -23,6 +23,7 @@ members = [
     # apps/ — one bounded context per app on the shared foundation.
     "apps/buddy/buddy-core",
     "apps/buddy/buddy-wire",
+    "apps/buddy/buddy-bridge-core",
     "apps/host-monitor/host-core",
     "apps/host-monitor/host-display",
     "apps/host-monitor/host-shell",
