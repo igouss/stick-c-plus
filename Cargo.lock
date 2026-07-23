@@ -289,6 +289,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "buddy-shell"
+version = "0.1.0"
+dependencies = [
+ "buddy-core",
+ "buddy-creature",
+ "buddy-display",
+ "buddy-wire",
+ "cucumber",
+ "log",
+ "platform-core",
+ "platform-input",
+ "proptest",
+ "tokio",
+]
+
+[[package]]
 name = "buddy-wire"
 version = "0.1.0"
 dependencies = [

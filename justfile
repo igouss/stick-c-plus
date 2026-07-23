@@ -112,19 +112,19 @@ lint:
 
 # Run the bridge daemon: scan for the Claude-XXXX stick, bond (type the passkey the glass
 # shows when prompted), subscribe, and reconnect across reboots. Needs a BlueZ adapter; no
-# root on this box. Flash the peer first with `just run-bin-buddy ble-spike`. RUST_LOG=debug
+# root on this box. Flash the peer first with `just run-buddy`. RUST_LOG=debug
 # for more. Ctrl-C to exit.
 bridge:
     cargo run -p buddy-bridge
 
-# Bring the bridge up against a flashed `ble-spike` stick and AUTO-ENTER its fixed passkey
-# (123456), so a cold pairing needs no hand-typing. Sets BUDDY_BRIDGE_SOCK and prints where the
-# hook socket lands. Watch the log for `link up: bonded` — that (not the passkey prompt) is the
-# success signal; the daemon used to print nothing on success and looked hung at the prompt.
+# Bring the bridge up on the SAME socket the Claude Code hook resolves, and pair interactively.
+# The passkey is no longer a constant to pipe in: the firmware draws a fresh random one per
+# pairing and shows it on the glass, so read it off the stick and type it at the prompt. Watch
+# the log for `link up: bonded` — that (not the passkey prompt) is the success signal; the daemon
+# used to print nothing on success and looked hung at the prompt.
 # NOTE: do NOT run `bluetoothctl scan` while this runs — a second discovery session steals the
-# daemon's and it silently never finds the stick. Spike-only: the real firmware shows a
-# per-pairing passkey, so use plain `just bridge` and type it. Ctrl-C to stop.
-bridge-spike-pair passkey="123456":
+# daemon's and it silently never finds the stick. Ctrl-C to stop.
+bridge-pair:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! ls /sys/class/bluetooth/hci* >/dev/null 2>&1; then
@@ -134,9 +134,10 @@ bridge-spike-pair passkey="123456":
     # BUDDY_BRIDGE_SOCK: $XDG_RUNTIME_DIR/buddy-bridge.sock (temp dir only if that is unset). A
     # /tmp default here would silently miss the hook — daemon and hook must agree on the path.
     sock="${BUDDY_BRIDGE_SOCK:-${XDG_RUNTIME_DIR:-/tmp}/buddy-bridge.sock}"
-    echo "▶ bridge ↔ ble-spike, auto-passkey {{passkey}}, hook socket $sock"
-    echo "  watch for 'link up: bonded'; do NOT 'bluetoothctl scan' alongside this. Ctrl-C to stop."
-    yes {{passkey}} | RUST_LOG=info BUDDY_BRIDGE_SOCK="$sock" cargo run --release -p buddy-bridge
+    echo "▶ bridge ↔ claude-buddy, hook socket $sock"
+    echo "  type the six digits the STICK'S GLASS shows when prompted; watch for 'link up: bonded'."
+    echo "  do NOT 'bluetoothctl scan' alongside this. Ctrl-C to stop."
+    RUST_LOG=info BUDDY_BRIDGE_SOCK="$sock" cargo run --release -p buddy-bridge
 
 # Forget the HOST half of an out-of-sync bond to the Claude-XXXX stick (the recurring first step
 # when pairing loops on a stale LTK). The DEVICE half lives in the stick's NVS and survives a
@@ -157,14 +158,15 @@ bridge-forget:
 # reconnect-across-reboot, and the Just-Works-downgrade regression (the passkey callback must
 # fire). Like `oracle`, it is #[ignore]d so a plain `cargo test` shows it *ignored*, never a
 # false green, and it is deliberately NOT in `just ci` (a bond needs the physical device).
-# Preflight asserts a BlueZ adapter is present; STICK_PASSKEY overrides the spike's 123456.
+# Preflight asserts a BlueZ adapter is present; set STICK_PASSKEY to the six digits the glass
+# shows (the firmware draws a fresh one per pairing — there is no constant to fall back on).
 bridge-device:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! ls /sys/class/bluetooth/hci* >/dev/null 2>&1; then
       echo "❌ no BlueZ adapter under /sys/class/bluetooth — is Bluetooth up?"; exit 2
     fi
-    echo "▶ bridge device test — flash the peer first: just run-bin-buddy ble-spike"
+    echo "▶ bridge device test — flash the peer first: just run-buddy"
     echo "  you will be asked to enter the passkey shown on the glass, and to power-cycle the stick."
     cargo test -p buddy-bridge-shell --test device_bridge -- --ignored --nocapture
 
@@ -287,11 +289,16 @@ run-bin bin:
 run-bin-pomodoro bin:
     cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p pomodoro --bin {{bin}}'
 
-# Flash and monitor one named bin of the Claude buddy package. `just run-bin-buddy ble-spike`
-# brings up the Nordic UART peripheral on its own — it advertises as Claude-XXXX, demands LE
-# Secure Connections bonding, echoes newline-delimited lines back, and prints what the BLE
-# stack cost in heap. Pair it from the other side with `bluetoothctl` (scan on, pair <addr>,
-# then type the passkey the serial log shows). `just run` puts the plant monitor back.
+# Build, flash, and monitor the Claude desk pet. It advertises as Claude-XXXX, demands LE Secure
+# Connections bonding, shows a FRESH RANDOM passkey on the glass for each pairing, renders the
+# creature and the transcript HUD, and answers a pending tool call on A (allow) or B (deny).
+# Pair it with `just bridge-pair` and type the digits the glass shows. `just run` puts the plant
+# monitor back.
+run-buddy:
+    cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}" ESP_IDF_SYS_ROOT_CRATE=claude-buddy ESP_IDF_SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.buddy.defaults"; cargo run --release -p claude-buddy'
+
+# Flash and monitor one named bin of the Claude buddy package — for a bench tool alongside the
+# desk pet itself. `just run-buddy` is the app.
 run-bin-buddy bin:
     cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}" ESP_IDF_SYS_ROOT_CRATE=claude-buddy ESP_IDF_SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.buddy.defaults"; cargo run --release -p claude-buddy --bin {{bin}}'
 

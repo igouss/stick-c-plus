@@ -146,8 +146,13 @@ pub struct ClockView {
     pub hour: u8,
     /// Minute, `0..=59`.
     pub minute: u8,
-    /// Battery charge, in percent.
-    pub battery_pct: u8,
+    /// Battery charge in percent, when the board can actually measure it.
+    ///
+    /// `Option`, not a `u8` with a sentinel: this board's PMIC adapter reports whether USB is
+    /// present and nothing else, so a firmware that has no gauge must be able to say *nothing*
+    /// rather than paint a plausible number. A fabricated `82%` on the glass is worse than a
+    /// blank — it is a reading the owner would believe.
+    pub battery_pct: Option<u8>,
     /// Whether the board is on external power.
     pub charging: bool,
 }

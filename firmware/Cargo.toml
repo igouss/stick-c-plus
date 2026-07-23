@@ -27,6 +27,7 @@ members = [
     "platform/board-support",
     "platform/net",
     "platform/esp-metrics",
+    "platform/esp-entropy",
     "apps/plant-monitor/adapters",
     "apps/plant-monitor/firmware-infra",
     "apps/plant-monitor/bin",

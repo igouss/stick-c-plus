@@ -45,12 +45,23 @@ where
         battery_colour(clock),
         layout.cols,
         FieldAlign::Centred,
-        format_args!(
-            "{}%{}",
-            clock.battery_pct.min(100),
-            if clock.charging { " CHG" } else { "" }
-        ),
+        format_args!("{}", Power(clock)),
     )
+}
+
+/// The power line under the time: the charge when the board can measure it, and whether it is
+/// filling. A board with no gauge says only what it does know.
+struct Power<'a>(&'a ClockView);
+
+impl core::fmt::Display for Power<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match (self.0.battery_pct, self.0.charging) {
+            (Some(pct), true) => write!(f, "{}% CHG", pct.min(100)),
+            (Some(pct), false) => write!(f, "{}%", pct.min(100)),
+            (None, true) => f.write_str("CHARGING"),
+            (None, false) => f.write_str("ON BATTERY"),
+        }
+    }
 }
 
 /// The colour of the battery reading: charging is calm, a low battery off the charger is not.
@@ -58,12 +69,10 @@ where
 /// Charging outranks low, because a low battery that is *filling* is a non-event and colouring
 /// it red would teach the owner to ignore the colour.
 const fn battery_colour(clock: &ClockView) -> Rgb565 {
-    if clock.charging {
-        palette::APPROVE
-    } else if clock.battery_pct <= LOW_BATTERY_PCT {
-        palette::PROMPT_HOT
-    } else {
-        palette::DIM
+    match (clock.charging, clock.battery_pct) {
+        (true, _) => palette::APPROVE,
+        (false, Some(pct)) if pct <= LOW_BATTERY_PCT => palette::PROMPT_HOT,
+        (false, _) => palette::DIM,
     }
 }
 
@@ -77,7 +86,7 @@ mod tests {
         ClockView {
             hour: 14,
             minute: 37,
-            battery_pct: 82,
+            battery_pct: Some(82),
             charging: true,
         }
     }
@@ -122,7 +131,7 @@ mod tests {
     #[test]
     fn a_low_battery_on_the_charger_is_not_hot() {
         let mut low_charging: ClockView = clock();
-        low_charging.battery_pct = 5;
+        low_charging.battery_pct = Some(5);
         let mut low_unplugged: ClockView = low_charging;
         low_unplugged.charging = false;
         assert_ne!(battery_colour(&low_charging), palette::PROMPT_HOT);
@@ -135,12 +144,28 @@ mod tests {
         let absurd: ClockView = ClockView {
             hour: u8::MAX,
             minute: u8::MAX,
-            battery_pct: u8::MAX,
+            battery_pct: Some(u8::MAX),
             charging: false,
         };
         assert_eq!(painted(&LANDSCAPE, &absurd).escaped(), 0);
         assert_eq!(painted(&PORTRAIT, &absurd).escaped(), 0);
         assert_eq!(painted(&LANDSCAPE, &ClockView::default()).escaped(), 0);
+    }
+
+    /// A board with no gauge says what it does know rather than painting a plausible number —
+    /// and the two states are still told apart.
+    #[test]
+    fn a_board_with_no_gauge_says_only_what_it_knows() {
+        let mut charging: ClockView = clock();
+        charging.battery_pct = None;
+        let mut on_battery: ClockView = charging;
+        on_battery.charging = false;
+        assert!(painted(&LANDSCAPE, &charging).lit_pixels() > 0);
+        assert_ne!(
+            painted(&LANDSCAPE, &charging).pixels(),
+            painted(&LANDSCAPE, &on_battery).pixels()
+        );
+        assert_eq!(painted(&PORTRAIT, &on_battery).escaped(), 0);
     }
 
     /// Both ways up, because a charging stick is as often stood upright as laid flat.

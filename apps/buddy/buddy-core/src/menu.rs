@@ -80,6 +80,15 @@ impl Menu {
         matches!(self.state, MenuState::Open { .. })
     }
 
+    /// Whether the menu is open, and where its cursor rests.
+    ///
+    /// [`is_open`](Self::is_open) answers the *gate* question — the shake sampler only needs to
+    /// know that a menu is up. A renderer needs the cursor as well, and reading it back out of
+    /// the [`MenuOutcome`] stream would be a second copy of the cursor kept in step by hand.
+    pub const fn state(&self) -> MenuState {
+        self.state
+    }
+
     /// Fold one button event into the menu, returning what it did.
     ///
     /// The dispatch table: a front-button long-hold toggles open/closed; while open, a

@@ -1,0 +1,21 @@
+[package]
+name = "esp-entropy"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Safe access to the ESP32's hardware random number generator — the one call a firmware needs to produce a per-pairing BLE passkey that an attacker cannot know in advance."
+
+[lib]
+name = "esp_entropy"
+path = "src/lib.rs"
+
+# `infra` — it wraps a vendor C API and nothing else. Per the hex-lint matrix `infra` may
+# depend only on `infra`, which is exactly the containment wanted: nothing domain-shaped can
+# leak in here, and the `unsafe` cannot leak out.
+[package.metadata.hex-arch]
+role = "infra"
+
+[dependencies]
+# The generated ESP-IDF bindings. Like esp-metrics, this crate names them for their raw C
+# function rather than for a safe wrapper someone else already wrote — because there is none.
+esp-idf-sys = "0.37"

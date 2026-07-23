@@ -3,17 +3,13 @@ name = "claude-buddy"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "M5StickC Plus desk pet that lives off Claude Code approvals — a bonded BLE Nordic UART link, an ASCII buddy, and approve/deny on the two buttons."
+description = "M5StickC Plus desk pet that lives off Claude Code approvals — a bonded BLE Nordic UART link, a pixel-art creature on the glass, and approve/deny on the two buttons."
+# The buddy is the point of this package; a bare `cargo run -p claude-buddy` must choose it.
+default-run = "claude-buddy"
 
-# A spike, not the buddy: the smallest firmware that proves the BLE transport this app is
-# built on actually works — advertise as Claude-XXXX, bond over LE Secure Connections, and
-# echo newline-delimited lines back over the Nordic UART Service at the negotiated MTU.
-# Everything else in the epic assumes this link exists, so it is written and flashed first.
-# It reports its own flash and heap cost on the serial console, because the planning estimate
-# (~250 KB flash, ~60-75 KB heap) is the number the rest of the design rests on.
 [[bin]]
-name = "ble-spike"
-path = "src/ble_spike.rs"
+name = "claude-buddy"
+path = "src/main.rs"
 
 # The imperative shell's outermost layer: it composes adapters and owns effects, so it is the
 # one crate the effect-audit `domain` gate must never tag.
@@ -31,9 +27,33 @@ log = "0.4"
 # server, LE Secure Connections bonding, and the passkey callback are reachable without `unsafe`
 # in this crate. Pairs with esp-idf-svc 0.52, which is what the rest of this workspace is on.
 esp32-nimble = "0.12"
-# Heap readings. The spike's whole job is to report what BLE costs, and these counters exist
-# only as ESP-IDF C functions — so they are read through the one crate that owns that `unsafe`.
+# Heap readings — a reboot loop on this board is an allocation failure, and these counters are
+# what predict one. They exist only as ESP-IDF C functions, so they are read through the one
+# crate that owns that `unsafe`.
 esp-metrics = { path = "../../../platform/esp-metrics" }
+# The hardware RNG behind the per-pairing passkey. Same containment as esp-metrics: exactly one
+# crate in this workspace is allowed to speak C for it.
+esp-entropy = { path = "../../../platform/esp-entropy" }
+# The board: the AXP192 PMIC that powers the LCD rails, the MPU6886 IMU, and the board-generic
+# panel / button / IMU adapters the loops are wired to.
+board-support = { path = "../../../platform/board-support" }
+platform-adapters = { path = "../../../platform/adapters" }
+# Shares the one internal I2C bus across bus devices: the AXP192 PMIC and the MPU6886 IMU sit on
+# the same two pins and are read from two different threads, so each gets its own `MutexDevice`
+# handle over the single controller.
+embedded-hal-bus = { version = "0.3", features = ["std"] }
+# Gives the shared bus a `'static` home without leaking it, the same way the panel adapter homes
+# its pixel buffer.
+static_cell = "2"
+# Host crates, referenced by path across the two workspaces: the generic render loop and the
+# Monotonic clock, the Tick and the ports, the buttons, and the buddy's own domain / picture /
+# wire / shell — all of which cross-compile to xtensa unchanged.
+platform-core = { path = "../../../../platform/platform-core" }
+platform-input = { path = "../../../../platform/platform-input" }
+platform-runtime = { path = "../../../../platform/platform-runtime" }
+buddy-core = { path = "../../../../apps/buddy/buddy-core" }
+buddy-display = { path = "../../../../apps/buddy/buddy-display" }
+buddy-shell = { path = "../../../../apps/buddy/buddy-shell" }
 
 [build-dependencies]
 # Emits the ESP-IDF sysenv link/search flags for the final link (via ldproxy).

@@ -1,0 +1,45 @@
+[package]
+name = "buddy-shell"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Host-testable imperative shell for the Claude desk pet on the stick: the device state that folds inbound wire messages and button presses into the next view, the screen navigation, the link-liveness window, the wall clock, and the input thread that turns A/B into a permission response. std-linked but device-independent — it names no BLE stack and no pin."
+
+[lib]
+name = "buddy_shell"
+path = "src/lib.rs"
+
+# A driving (primary) adapter: the input loop and the wire fold turn button gestures, elapsed
+# time, and inbound lines into calls on the pure `buddy_core::step`, reading the Button/Clock
+# ports and driving the Notifier/Bond ports (all injected by the composition root). It may
+# depend only on domain / usecase / port-and-adapter. context = "buddy".
+[package.metadata.hex-arch]
+role = "driving-adapter"
+context = "buddy"
+
+[dependencies]
+# The pure desk-pet domain: the persona layers, the menu, the sensors, the stats, and `step`.
+buddy-core = { path = "../buddy-core" }
+# The species registry, so the menu cycles the creatures that actually exist rather than a
+# count written down here and left behind.
+buddy-creature = { path = "../buddy-creature" }
+# The picture the shell builds: BuddyView and the screens it navigates between.
+buddy-display = { path = "../buddy-display" }
+# The wire contract: the inbound classification, the asymmetric snapshot merge, and the
+# permission response the device originates.
+buddy-wire = { path = "../buddy-wire" }
+# The board-generic ports the loop drives: Clock, Tick, Acceleration, FixedStr.
+platform-core = { path = "../../../platform/platform-core" }
+# The buttons: the two ports, the gesture recognizer, and the event stream the loop folds.
+platform-input = { path = "../../../platform/platform-input" }
+# The shell logs a refused notify so a dead link is observable; inert without a logger.
+log = "0.4"
+
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[[test]]
+name = "cucumber"
+harness = false

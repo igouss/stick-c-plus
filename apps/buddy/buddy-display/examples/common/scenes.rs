@@ -85,7 +85,7 @@ fn buddy() -> BuddyView {
     view.clock = ClockView {
         hour: 14,
         minute: 37,
-        battery_pct: 82,
+        battery_pct: Some(82),
         charging: true,
     };
     view.device = DeviceView {

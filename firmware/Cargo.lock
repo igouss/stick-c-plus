@@ -124,6 +124,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "buddy-core"
+version = "0.1.0"
+dependencies = [
+ "platform-core",
+ "platform-input",
+]
+
+[[package]]
+name = "buddy-creature"
+version = "0.1.0"
+dependencies = [
+ "buddy-core",
+ "platform-display",
+]
+
+[[package]]
+name = "buddy-display"
+version = "0.1.0"
+dependencies = [
+ "buddy-core",
+ "buddy-creature",
+ "embedded-graphics",
+ "platform-core",
+ "platform-display",
+]
+
+[[package]]
+name = "buddy-shell"
+version = "0.1.0"
+dependencies = [
+ "buddy-core",
+ "buddy-creature",
+ "buddy-display",
+ "buddy-wire",
+ "log",
+ "platform-core",
+ "platform-input",
+]
+
+[[package]]
+name = "buddy-wire"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "build-time"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -243,13 +291,24 @@ dependencies = [
 name = "claude-buddy"
 version = "0.1.0"
 dependencies = [
+ "board-support",
+ "buddy-core",
+ "buddy-display",
+ "buddy-shell",
+ "embedded-hal-bus",
  "embuild",
+ "esp-entropy",
  "esp-idf-hal",
  "esp-idf-svc",
  "esp-idf-sys",
  "esp-metrics",
  "esp32-nimble",
  "log",
+ "platform-adapters",
+ "platform-core",
+ "platform-input",
+ "platform-runtime",
+ "static_cell",
 ]
 
 [[package]]
@@ -611,6 +670,13 @@ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "esp-entropy"
+version = "0.1.0"
+dependencies = [
+ "esp-idf-sys",
 ]
 
 [[package]]
