@@ -24,6 +24,7 @@ members = [
     "apps/buddy/buddy-core",
     "apps/buddy/buddy-wire",
     "apps/buddy/buddy-bridge-core",
+    "apps/buddy/buddy-bridge-shell",
     "apps/host-monitor/host-core",
     "apps/host-monitor/host-display",
     "apps/host-monitor/host-shell",
