@@ -226,6 +226,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "buddy-hook"
+version = "0.1.0"
+dependencies = [
+ "buddy-permission",
+ "buddy-wire",
+ "serde_json",
+]
+
+[[package]]
 name = "buddy-permission"
 version = "0.1.0"
 dependencies = [

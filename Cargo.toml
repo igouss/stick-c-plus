@@ -28,6 +28,7 @@ members = [
     "apps/buddy/buddy-bridge",
     "apps/buddy/buddy-creature",
     "apps/buddy/buddy-permission",
+    "apps/buddy/buddy-hook",
     "apps/host-monitor/host-core",
     "apps/host-monitor/host-display",
     "apps/host-monitor/host-shell",

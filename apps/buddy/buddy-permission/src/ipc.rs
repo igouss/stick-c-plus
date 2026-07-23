@@ -16,6 +16,14 @@ use crate::hook::AskOutcome;
 use buddy_wire::Decision;
 use serde::{Deserialize, Serialize};
 
+/// The environment variable that names the daemon's unix-socket path, shared by the hook and the
+/// daemon so both agree on where the IPC lives. The *resolution* (reading the env, choosing a
+/// runtime directory) is a boundary concern owned by the binaries; this crate only fixes the name.
+pub const SOCK_ENV: &str = "BUDDY_BRIDGE_SOCK";
+
+/// The default socket filename, used under the runtime directory when [`SOCK_ENV`] is unset.
+pub const DEFAULT_SOCK_FILENAME: &str = "buddy-bridge.sock";
+
 /// The tool-call context the hook forwards to the daemon, from the (externally parsed) PreToolUse
 /// payload.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]

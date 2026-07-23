@@ -1,0 +1,34 @@
+[package]
+name = "buddy-hook"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The PreToolUse hook adapter: a short-lived, std-only process spawned per tool call that parses the hook payload, asks the long-lived daemon over a unix socket while holding its OWN deadline, and prints the fail-safe decision. On no-answer / daemon-down / unbonded it prints NOTHING (exit 0) so Claude Code's normal prompt takes over. No tokio — nothing to spin up per call."
+
+[lib]
+name = "buddy_hook"
+path = "src/lib.rs"
+
+[[bin]]
+name = "buddy-hook"
+path = "src/main.rs"
+
+# A driving adapter: it adapts an external protocol (Claude Code's PreToolUse stdin/stdout contract
+# and the daemon's unix socket) onto the pure decision in buddy-permission. It owns effects — stdin,
+# stdout, the socket, the clock via the read deadline, and env resolution in the bin — so the policy
+# crate does not. Dependencies point inward to buddy-permission. context = "buddy".
+[package.metadata.hex-arch]
+role = "driving-adapter"
+context = "buddy"
+
+[dependencies]
+# The pure policy this adapter drives: parse_pretooluse, decide, to_stdout, the IPC DTOs, and the
+# shared socket-path contract. Everything load-bearing is decided there; this crate only plumbs.
+buddy-permission = { path = "../buddy-permission" }
+# The IPC framing codec: HookRequest out, DaemonReply in, one JSON line each.
+serde_json = "1"
+
+# Host-only. The socket integration test asserts against buddy-wire's Decision (the value an
+# Allow/Deny reply resolves to); serde_json (a normal dep) frames the fake daemon's replies.
+[dev-dependencies]
+buddy-wire = { path = "../buddy-wire" }

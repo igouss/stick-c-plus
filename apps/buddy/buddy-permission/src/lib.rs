@@ -44,14 +44,18 @@
 //!   live prompt on every emitted snapshot.
 //! - [`ipc`] — the hook↔daemon message DTOs (ours to define): the [`HookRequest`](ipc::HookRequest)
 //!   the hook forwards and the [`DaemonReply`](ipc::DaemonReply) that maps back to an
-//!   [`AskOutcome`](hook::AskOutcome).
+//!   [`AskOutcome`](hook::AskOutcome), plus the socket-path contract both binaries share.
+//! - [`pretooluse`] — the tolerant, fail-safe parse of the Claude Code PreToolUse stdin payload
+//!   into a [`HookRequest`]: required fields required, everything else tolerated, no guessing.
 
 pub mod gating;
 pub mod hook;
 pub mod ipc;
 pub mod ledger;
+pub mod pretooluse;
 
 pub use gating::GatedSnapshot;
 pub use hook::{decide, to_stdout, AskOutcome, HookOutput, Permission, PreToolUseDecision};
-pub use ipc::{DaemonReply, HookRequest};
+pub use ipc::{DaemonReply, HookRequest, DEFAULT_SOCK_FILENAME, SOCK_ENV};
 pub use ledger::{Ledger, SessionEvent, SessionId};
+pub use pretooluse::{parse_pretooluse, PreToolUseParseError};
