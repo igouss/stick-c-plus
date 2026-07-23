@@ -4,7 +4,7 @@ title: "Establishing the buddy BLE bond: what looks like a failure, and what act
 kind: finding
 scope: project:stick-c-plus
 reviewed: 2026-07-23
-check: grep -q 'discover_devices_with_changes' apps/buddy/buddy-bridge-shell/src/bluer_central.rs && ! grep -Eq '\.discover_devices\(\)' apps/buddy/buddy-bridge-shell/src/bluer_central.rs   # trap 2: the plain variant never re-offers a device once its name resolves, so a cold scan misses a stick that is advertising
+check: ! grep -q 'uuids:' apps/buddy/buddy-bridge-shell/src/bluer_central.rs && grep -q 'discover_devices_with_changes' apps/buddy/buddy-bridge-shell/src/bluer_central.rs   # trap 2: a `uuids:` discovery filter hides the stick outright (the measured cause); `_with_changes` is the documented-race insurance
 ---
 
 Bringing `buddy-bridge` up against a flashed `Claude-XXXX` stick had four traps that each
@@ -41,19 +41,33 @@ logged `found …; connecting` **instantly**.
 alongside the daemon". That got cause and cure backwards: the external scan was the only
 thing making the daemon work at all.
 
-**The actual cause.** A 128-bit service UUID and a name do not both fit in a 31-byte
-advertisement, so the firmware puts the name in the **scan response**, which arrives
-strictly after the advertisement. The daemon used bluer's `discover_devices()` and read
-`device.name()` on `DeviceAdded` — where the name is still `None`. bluer's own docs say so:
-*"Device properties are queried asynchronously and may not be available yet when a
-DeviceAdded event occurs. Use `discover_devices_with_changes` when you want to be notified
-when the device properties change."* With the plain variant the unnamed device is skipped
-and **never re-emitted**, so the scan runs forever past a stick two feet away. It appeared
-to work only once something else had cached the name, because `discover_devices()` replays
-already-known addresses first and a cached name resolves immediately.
+**The actual cause, measured.** The daemon set a discovery filter on the NUS service UUID.
+BlueZ matches a UUID filter against what the peripheral *advertises*, and the stick cannot
+advertise both name and UUID: flags (3) + `Claude-0292` as a complete local name (13) + a
+128-bit UUID (18) is 34 bytes against a 31-byte limit, so one is displaced into the scan
+response. The filter therefore excluded the device **outright** — BlueZ never reported it at
+all, however long the scan ran. An unfiltered `bluetoothctl scan` had no such problem, which
+is exactly why it saw the stick in two seconds and the daemon did not see it in six minutes.
 
-**The fix** is `discover_devices_with_changes()` in `bluer_central.rs`, which re-offers a
-device on every property change, so the name is re-checked when the scan response lands.
+Proven by direct A/B on the metal, cache and stick unchanged, filter the only variable:
+
+| discovery filter | result |
+| --- | --- |
+| `uuids: {NUS}` + LE transport | two 20 s windows, nothing found |
+| LE transport only | `found C8:85:41:4E:02:92` in the same second |
+
+**The fix** is to filter on transport only and match on the advertised **name**, which is the
+real identity predicate. The NUS UUID is still verified where the answer is reliable — on the
+connected link, in `resolve_gatt`, which requires the service and both characteristics.
+
+A second, *unproven* change rides along: `discover_devices_with_changes()` instead of
+`discover_devices()`. The name arrives in the scan response, after the `DeviceAdded` that
+creates the device, and bluer warns properties "may not be available yet" at that point; the
+plain variant never re-emits a device, so a late name would be missed forever. But once the
+UUID filter was gone the plain variant *also* found the stick — with a cache warmed seconds
+before, so not a cold test. It is kept as documented-correct insurance, **not** as something
+observed to fix anything. Do not cite it as the cause; the filter was the cause.
+
 Scanning with `bluetoothctl` alongside the daemon is no longer forbidden — BlueZ multiplexes
 discovery sessions — but it is no longer of any use either.
 

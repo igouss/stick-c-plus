@@ -162,6 +162,9 @@ impl Central for BluerCentral {
             .adapter
             .device(address)
             .map_err(|err: bluer::Error| CentralError::Bluer(err.to_string()))?;
+        // Finding the stick is the milestone the operator is waiting on, and the one whose
+        // absence used to be indistinguishable from a hang. Say it every time.
+        log::info!("found {address}; connecting");
         // A located device is a fresh handle: any characteristics resolved against the previous
         // one belong to a connection that no longer exists.
         self.address = Some(address);
@@ -283,24 +286,25 @@ impl Central for BluerCentral {
 /// `name_prefix`, returning its address, or [`CentralError::NotFound`] if `window` elapses
 /// first. The discovery stream is dropped on return, which stops scanning.
 ///
-/// ## Why this must be `discover_devices_with_changes`
+/// ## Two hazards, one measured and one documented
 ///
-/// A 128-bit service UUID and a name do not both fit in a 31-byte advertisement, so the firmware
-/// puts the name in the **scan response** (see `bring_up_ble`) — it arrives strictly after the
-/// advertisement that creates the device. bluer says so plainly: *"Device properties are queried
-/// asynchronously and may not be available yet when a DeviceAdded event occurs. Use
+/// **Measured, on the metal (2026-07-23).** Filtering discovery on the NUS UUID made the stick
+/// invisible: two consecutive 20-second windows reported nothing while the firmware logged
+/// `advertising as Claude-0292`. Removing the UUID filter — changing nothing else — found it in
+/// the *same second*. See `matching_device` for why the UUID cannot be relied on in the
+/// advertisement. This was the whole six-minute hang.
+///
+/// **Documented, and guarded defensively.** The name rides in the scan response, so it arrives
+/// after the advertisement that creates the device, and bluer warns: *"Device properties are
+/// queried asynchronously and may not be available yet when a DeviceAdded event occurs. Use
 /// discover_devices_with_changes when you want to be notified when the device properties
-/// change."*
+/// change."* Plain `discover_devices` never re-emits a device, so a name that resolves late
+/// would be missed forever. `_with_changes` re-offers it on every property change.
 ///
-/// With plain `discover_devices` the name is `None` at `DeviceAdded`, the device is skipped, and
-/// it is **never re-emitted** — so a cold daemon scans forever past a stick that is advertising
-/// two feet away. It appeared to work only when something else (`bluetoothctl scan`) had already
-/// cached the name, because `discover_devices` replays already-known addresses first and the
-/// cached name resolves instantly. That is the whole bug: it could only find a device somebody
-/// else had already found.
-///
-/// `discover_devices_with_changes` re-emits `DeviceAdded` on every property change, so the name
-/// is re-checked when the scan response lands.
+/// Honesty about that second one: it is **not** separately proven here. Once the UUID filter was
+/// gone, the plain variant also found the stick — but only with a cache warmed seconds earlier,
+/// which is not a cold test. It is kept because bluer documents the race and it costs nothing,
+/// not because it was observed to fix anything.
 pub async fn discover(
     adapter: &Adapter,
     name_prefix: &str,
@@ -315,10 +319,21 @@ pub async fn discover(
 /// matches, re-checking each time a device's properties change.
 async fn matching_device(adapter: &Adapter, name_prefix: &str) -> Result<Address, CentralError> {
     use bluer::{AdapterEvent, DiscoveryFilter, DiscoveryTransport};
-    use std::collections::HashSet;
 
+    // Filter on the TRANSPORT ONLY — deliberately not on `uuids`.
+    //
+    // BlueZ matches a UUID filter against what the peripheral *advertises*, and the stick cannot
+    // advertise both: flags (3) + `Claude-0292` as a complete local name (13) + a 128-bit UUID
+    // (18) is 34 bytes against a 31-byte limit, so one of them is displaced into the scan
+    // response. Filtering on the NUS UUID therefore excluded the device outright — BlueZ never
+    // reported it at all, no matter how long the scan ran, which is why an unfiltered
+    // `bluetoothctl scan` saw it in two seconds and this daemon did not see it in six minutes.
+    //
+    // The name prefix below is the real identity predicate, and the NUS UUID is still verified
+    // where it is authoritative: `resolve_gatt` requires the service and both characteristics on
+    // the connected link. Nothing is trusted that was not checked; it is checked where the answer
+    // is reliable.
     let filter: DiscoveryFilter = DiscoveryFilter {
-        uuids: HashSet::from([NUS_SERVICE]),
         transport: DiscoveryTransport::Le,
         ..Default::default()
     };

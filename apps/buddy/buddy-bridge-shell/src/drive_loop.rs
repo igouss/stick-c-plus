@@ -8,7 +8,7 @@
 
 use buddy_bridge_core::{chunk, Action, Event, Fsm, State};
 use futures::StreamExt;
-use log::warn;
+use log::{info, warn};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::central::{Central, CentralError, Connected};
@@ -98,7 +98,13 @@ impl<C: Central, S: Sleeper, P: LinkPeer> DriveLoop<C, S, P> {
     async fn on_locate(&mut self) -> Event {
         match self.central.locate().await {
             Ok(()) => Event::Located,
-            Err(CentralError::NotFound) => Event::NotFound,
+            Err(CentralError::NotFound) => {
+                // Never silent. A scan that found nothing is the normal state while the stick is
+                // switched off, and reporting it is what distinguishes "waiting for you to turn
+                // it on" from "wedged" — the six-minute silence this whole bead came from.
+                info!("nothing advertising in that scan window; still looking");
+                Event::NotFound
+            }
             Err(other) => {
                 warn!("locate failed: {other}");
                 Event::NotFound
