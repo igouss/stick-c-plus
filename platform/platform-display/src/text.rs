@@ -34,7 +34,13 @@ pub const FONT: MonoFont<'static> = FONT_10X20;
 
 /// Stack capacity of a rendered line: the widest field any app pads to, plus headroom,
 /// so a line is built with no heap allocation on the render path.
-pub const LINE_CAP: usize = 16;
+///
+/// Thirty-two bytes, which is the panel's full landscape width (24 columns of the 10×20 font)
+/// plus headroom. It was 16 while no app padded a field wider than half the glass; the buddy's
+/// transcript HUD draws edge-to-edge, and a field that spans the panel is the widest any layout
+/// on this board can ever ask for. Raising it only widens what is accepted — a `width` that fit
+/// before still fits — and costs sixteen bytes of stack on the render path.
+pub const LINE_CAP: usize = 32;
 
 /// A stack-allocated line buffer. The render path formats into this instead of a heap
 /// `String`, so a redraw allocates nothing on the ESP32's scarce SRAM.
@@ -276,7 +282,9 @@ mod tests {
     #[test]
     fn content_beyond_the_line_buffer_is_refused_not_truncated() {
         let mut fb: Framebuffer = Framebuffer::new();
-        let too_long: &str = "0123456789ABCDEFGHIJ";
+        // Derived from the cap rather than written out, so raising [`LINE_CAP`] cannot leave
+        // this test quietly asserting nothing.
+        let too_long: alloc::string::String = "x".repeat(LINE_CAP + 1);
         assert!(too_long.len() > LINE_CAP);
         assert!(matches!(
             text_field(

@@ -252,6 +252,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "buddy-display"
+version = "0.1.0"
+dependencies = [
+ "buddy-core",
+ "buddy-creature",
+ "cucumber",
+ "embedded-graphics",
+ "embedded-graphics-simulator",
+ "platform-core",
+ "platform-display",
+ "proptest",
+ "tokio",
+]
+
+[[package]]
 name = "buddy-hook"
 version = "0.1.0"
 dependencies = [

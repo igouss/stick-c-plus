@@ -1,0 +1,56 @@
+[package]
+name = "buddy-display"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Device-independent pixel layout of the Claude desk pet: the creature and its transcript HUD, the approval screen that replaces the HUD while a permission prompt is pending, the pet and info pages, the pairing-passkey takeover, the charging clock, and the menu/settings/reset overlays — rendered into any embedded-graphics DrawTarget, so the same code drives the ST7789 panel and a host framebuffer."
+
+[lib]
+name = "buddy_display"
+path = "src/lib.rs"
+
+# The seam between the buddy domain and the graphics port: it turns a BuddyView into pixels
+# through the board-generic platform-display primitives and asks buddy-creature which sprite
+# to composite. It owns the SCREENS, never the (species, state) -> art binding.
+# port-and-adapter may depend on domain (buddy-core, platform-core) and other
+# port-and-adapter crates (platform-display, buddy-creature). context = "buddy".
+[package.metadata.hex-arch]
+role = "port-and-adapter"
+context = "buddy"
+
+[dependencies]
+# The desk-pet domain: the persona the creature wears, the selected species, and the menu tree
+# the overlay draws.
+buddy-core = { path = "../buddy-core" }
+# The creature foundation: which sprite and which frame a (species, state, elapsed) shows. This
+# crate asks; it owns no art map of its own.
+buddy-creature = { path = "../buddy-creature" }
+# The board-generic kernel: the Animated contract the view implements, Tick, ScreenRotation,
+# and the FixedStr the view carries its text in.
+platform-core = { path = "../../../platform/platform-core" }
+# The board-generic picture: the sprite renderer, the fixed-width text primitives, and
+# RenderError. This crate holds only the buddy-specific layout on top.
+platform-display = { path = "../../../platform/platform-display" }
+# The graphics port (DrawTarget) plus the Point/Size/Rgb565/Rectangle the layout speaks in.
+embedded-graphics = "0.8"
+
+# Host-only; never reaches the Xtensa build (a dependent excludes dev-deps).
+[dev-dependencies]
+# The shared host framebuffer the render tests draw into.
+platform-display = { path = "../../../platform/platform-display", features = ["testing"] }
+# A host framebuffer that saves a PNG — the screenshots example + goldens test rasterize.
+embedded-graphics-simulator = { version = "0.8", default-features = false }
+# The shared scene catalog (examples/common/scenes.rs) is compiled by both the example and the
+# goldens test, so the normal deps it names must be reachable from those targets too.
+buddy-core = { path = "../buddy-core" }
+platform-core = { path = "../../../platform/platform-core" }
+embedded-graphics = "0.8"
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run under the default
+# harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false

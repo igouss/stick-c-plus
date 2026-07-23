@@ -50,14 +50,16 @@ screens:
     cargo run --quiet -p pomodoro-display --example pomodoro-screenshots
     cargo run --quiet -p host-display --example host-screenshots
     cargo run --quiet -p orientation-display --example orientation-screenshots
+    cargo run --quiet -p buddy-display --example buddy-screenshots
 
-# Re-bless the host-monitor golden screens from the current render. The `goldens` test
-# (part of `just test`) renders every state and fails if the picture drifts from the
-# committed PNGs in host-display/goldens/; run this after an INTENTIONAL layout/colour
-# change to accept the new look, then commit the goldens. It renders through the same
-# `host_display::render` the test checks, so a blessed golden and a checked render match.
+# Re-bless the golden screens from the current render — host-monitor and the buddy. The
+# `goldens` tests (part of `just test`) render every state and fail if the picture drifts
+# from the committed PNGs in each crate's goldens/; run this after an INTENTIONAL
+# layout/colour change to accept the new look, then commit the goldens. Both render through
+# the same function the test checks, so a blessed golden and a checked render match.
 screens-bless:
     BLESS_GOLDENS=1 cargo test -p host-display --test goldens
+    BLESS_GOLDENS=1 cargo test -p buddy-display --test goldens
 
 # Regenerate platform-display/src/sprite/generated.rs from the vendored ClaudePix frames
 # (babashka; no JS, no network). The generator re-hashes every preset and refuses to emit
