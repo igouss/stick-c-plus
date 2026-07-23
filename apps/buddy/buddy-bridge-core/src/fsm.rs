@@ -365,6 +365,23 @@ mod tests {
         ]
     }
 
+    /// Every event *except* the fatal `AgentMissing` — used to drive the machine into an
+    /// arbitrary reachable state before the fatal event is injected, so the FailFast property
+    /// is tested from every place the machine can actually be.
+    fn any_non_fatal_event() -> impl Strategy<Value = Event> {
+        prop_oneof![
+            Just(Event::BackoffElapsed),
+            Just(Event::ConnectedFresh),
+            Just(Event::ConnectedPaired),
+            Just(Event::Reacquired),
+            Just(Event::LinkEncrypted),
+            Just(Event::NotifySubscribed),
+            Just(Event::EncryptionFailed),
+            Just(Event::PairRejectedAlreadyPaired),
+            Just(Event::Disconnected),
+        ]
+    }
+
     proptest! {
         /// Never proposes to pair while the link is already encrypted or subscribed — a
         /// redundant pair on a live link is exactly the no-op re-key that must never happen.
@@ -387,6 +404,22 @@ mod tests {
             for event in events {
                 let _: Action = fsm.on(event);
             }
+        }
+
+        /// `AgentMissing` fails fast from *every* reachable state, not just `Connecting`: drive
+        /// the machine through an arbitrary non-fatal event sequence to land it somewhere, then
+        /// inject the fatal event and require `FailFast`. A regression that narrowed the check to
+        /// a single match arm would turn this red from whatever state it missed.
+        #[test]
+        fn a_missing_agent_fails_fast_from_every_reachable_state(
+            events in proptest::collection::vec(any_non_fatal_event(), 0..40),
+        ) {
+            let mut fsm: Fsm = Fsm::new();
+            events.iter().for_each(|event: &Event| {
+                let _: Action = fsm.on(*event);
+            });
+            let action: Action = fsm.on(Event::AgentMissing);
+            prop_assert!(matches!(action, Action::FailFast(_)));
         }
     }
 }
