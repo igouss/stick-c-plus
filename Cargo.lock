@@ -260,6 +260,7 @@ dependencies = [
  "cucumber",
  "embedded-graphics",
  "embedded-graphics-simulator",
+ "golden-screens",
  "platform-core",
  "platform-display",
  "proptest",
@@ -965,6 +966,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "golden-screens"
+version = "0.1.0"
+
+[[package]]
 name = "hash32"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1014,6 +1019,7 @@ version = "0.1.0"
 dependencies = [
  "embedded-graphics",
  "embedded-graphics-simulator",
+ "golden-screens",
  "host-core",
  "platform-core",
  "platform-display",
@@ -1377,6 +1383,7 @@ version = "0.1.0"
 dependencies = [
  "embedded-graphics",
  "embedded-graphics-simulator",
+ "golden-screens",
  "orientation-core",
  "platform-core",
  "platform-display",
@@ -1465,6 +1472,7 @@ version = "0.1.0"
 dependencies = [
  "embedded-graphics",
  "embedded-graphics-simulator",
+ "golden-screens",
  "plant-core",
  "platform-core",
  "platform-display",
@@ -1558,6 +1566,7 @@ version = "0.1.0"
 dependencies = [
  "embedded-graphics",
  "embedded-graphics-simulator",
+ "golden-screens",
  "platform-core",
  "platform-display",
  "plume-core",
@@ -1592,6 +1601,7 @@ version = "0.1.0"
 dependencies = [
  "embedded-graphics",
  "embedded-graphics-simulator",
+ "golden-screens",
  "platform-core",
  "platform-display",
  "pomodoro-core",
