@@ -16,6 +16,16 @@ path = "src/main.rs"
 [package.metadata.hex-arch]
 role = "composition-root"
 
+# See apps/plant-monitor/bin/Cargo.toml for what this table means. The buddy is the ONE app
+# with Bluetooth: its BT Kconfig lives in its own sdkconfig.buddy.defaults (layered, later
+# files win) so the other five apps do not carry ~250 KB of controller and host they never
+# use. That extra layer is also why it cannot join the shared workspace build — esp32-nimble
+# does not compile at all against a BT-disabled IDF (655 unresolved NimBLE symbols).
+[package.metadata.board]
+idf-root-crate = "claude-buddy"
+sdkconfig = ["sdkconfig.defaults", "sdkconfig.buddy.defaults"]
+summary = "Claude Code desk pet — bonded BLE link, pixel-art creature, approve/deny on the buttons"
+
 [dependencies]
 # The std/ESP-IDF stack. esp-idf-svc re-exports -hal and -sys, but all three are named so the
 # version floor shows.

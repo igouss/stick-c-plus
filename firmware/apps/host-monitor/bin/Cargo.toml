@@ -15,6 +15,13 @@ path = "src/main.rs"
 [package.metadata.hex-arch]
 role = "composition-root"
 
+# See apps/plant-monitor/bin/Cargo.toml for what this table means. Its own root crate builds a
+# lean ESP-IDF from host-monitor's own deps — no espressif/mdns, which this app never uses —
+# at the cost of a separate (slower first) IDF build.
+[package.metadata.board]
+idf-root-crate = "host-monitor"
+summary = "homelab CPU/memory monitor — one row of live sparklines per host, over WiFi"
+
 [dependencies]
 # The std/ESP-IDF stack (see kb/sources/rust-on-esp-idf.md). esp-idf-svc re-exports
 # -hal and -sys, but all three are named so the version floor shows.

@@ -16,6 +16,11 @@ path = "src/main.rs"
 [package.metadata.hex-arch]
 role = "composition-root"
 
+# See apps/plant-monitor/bin/Cargo.toml for what this table means. Shares the workspace ESP-IDF.
+[package.metadata.board]
+idf-root-crate = "plant-monitor"
+summary = "live IMU orientation readout — gravity vector, tilt angles, and the resting face"
+
 [dependencies]
 # The std/ESP-IDF stack. esp-idf-svc re-exports -hal and -sys, but all three are named so the
 # version floor shows.

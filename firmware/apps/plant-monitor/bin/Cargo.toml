@@ -47,6 +47,17 @@ path = "src/display_rotation_check.rs"
 [package.metadata.hex-arch]
 role = "composition-root"
 
+# How this app is built and flashed. The build/flash recipes read this table instead of
+# carrying one hardcoded recipe per app, so a new app is added HERE, not in the justfile.
+#   idf-root-crate  the crate esp-idf-sys builds its ESP-IDF from (ESP_IDF_SYS_ROOT_CRATE).
+#                   Naming plant-monitor shares the one IDF the workspace already builds.
+#   sdkconfig       ONLY when the app layers Kconfig beyond the shared sdkconfig.defaults.
+#                   Declaring it means the app needs its own IDF *configuration*, which is
+#                   exactly why such an app cannot be part of the shared workspace build.
+[package.metadata.board]
+idf-root-crate = "plant-monitor"
+summary = "soil-moisture plant monitor, published to Home Assistant over the ESPHome native API"
+
 [dependencies]
 # The std/ESP-IDF stack (see kb/sources/rust-on-esp-idf.md). esp-idf-svc
 # re-exports -hal and -sys, but all three are named so the version floor shows.

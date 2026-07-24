@@ -40,6 +40,13 @@ path = "src/blocker_probe.rs"
 [package.metadata.hex-arch]
 role = "composition-root"
 
+# See apps/plant-monitor/bin/Cargo.toml for what this table means. The timer links the shared
+# ESP-IDF (root crate = plant-monitor); its ELF drops the unused mdns symbols, so the flashed
+# image is offline and clean without paying for a second IDF build.
+[package.metadata.board]
+idf-root-crate = "plant-monitor"
+summary = "standalone offline pomodoro timer — screen, two buttons, and the buzzer"
+
 [dependencies]
 # The std/ESP-IDF stack. esp-idf-svc re-exports -hal and -sys, but all three are named so the
 # version floor shows.
