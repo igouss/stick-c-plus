@@ -7,8 +7,6 @@
 //! frame). Both are held rather than rebuilt because building either every frame is exactly
 //! the cost the design removes.
 
-use alloc::boxed::Box;
-
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use platform_core::{ScreenRotation, Tick};
@@ -44,12 +42,12 @@ pub const fn canvas_size(rotation: ScreenRotation) -> Size {
 
 /// The plume renderer: the sine table and the offscreen frame, held for the life of the app.
 ///
-/// The table sits behind a [`Box`] so the renderer itself is a pointer-sized thing to move into
-/// the display thread's closure — the 8 KiB of samples live on the heap, not in the closure
-/// that is moved onto the thread's stack.
+/// Both the table's samples and the frame's bits live on the **heap** (each owns a `Vec`), so
+/// the renderer itself is a small handle — cheap to move into the display thread's closure, and
+/// with no large buffer ever placed on a stack, which on bring-up would overflow it.
 pub struct Plume {
     /// The startup-built trigonometry the field is evaluated through.
-    table: Box<SinTable>,
+    table: SinTable,
     /// The one-bit frame the frond is plotted into and blitted from.
     canvas: Canvas,
 }
@@ -58,7 +56,7 @@ impl Plume {
     /// Build the renderer: pay for the sine table once, here, and never again.
     pub fn new() -> Self {
         Self {
-            table: Box::new(SinTable::new()),
+            table: SinTable::new(),
             canvas: Canvas::new(),
         }
     }

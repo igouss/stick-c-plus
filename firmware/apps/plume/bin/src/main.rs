@@ -109,9 +109,12 @@ fn main() {
     let rotation_source = |_now: Tick| PORTRAIT;
 
     // The plume is always animating, so it always paints at the animation cadence. Set that to
-    // the phase clock's own frame period, so one repaint advances the breath by one frame.
+    // the phase clock's own frame period, so one repaint advances the breath by one frame. The
+    // stack is bumped from the 8 KiB default to 16 KiB: a full-frame blit streams a 32 400-pixel
+    // fill through mipidsi's batch path, deeper than the text renders the default was sized for.
     let config: DisplayConfig = DisplayConfig {
         animation_period: Duration::from_millis(FRAME_MS),
+        stack_size: 16 * 1024,
         ..DisplayConfig::default()
     };
     let _display = spawn_display(

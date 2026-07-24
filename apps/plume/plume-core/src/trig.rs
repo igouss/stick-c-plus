@@ -27,6 +27,8 @@
 //! multiply and one add, which is what [`SinTable::sin`] does. The result is
 //! [proven](SinTable::sin) to sit within a small tolerance of `libm` across the whole circle.
 
+use alloc::vec;
+use alloc::vec::Vec;
 use core::f32::consts::{FRAC_PI_2, TAU};
 
 /// The table's size as a power of two, so the wrap-around after interpolation is a mask
@@ -43,23 +45,28 @@ const MASK: usize = LEN - 1;
 /// Index units per radian: a whole turn (`TAU`) spans [`LEN`] entries.
 const INDEX_PER_RADIAN: f32 = LEN as f32 / TAU;
 
-/// A quarter turn of one full circle of sines, sampled `LEN` times.
+/// A full circle of sines, sampled `LEN` times.
 ///
 /// Built once — [`SinTable::new`] pays the [`LEN`] `libm::sinf` calls at startup so the render
-/// loop never pays one. It is `LEN × 4` bytes (8 KiB at 2048 entries), which lives wherever
-/// its owner does; the plume renderer keeps one on the heap for the life of the app.
+/// loop never pays one. The samples live in a **heap** allocation (`LEN × 4` bytes, 8 KiB at
+/// 2048 entries), deliberately: the table is far larger than a task stack can spare, and
+/// building it as a stack array before moving it to the heap would overflow a bring-up stack
+/// on the way there. So the buffer is heap-allocated *first* and filled in place — the 8 KiB
+/// never sits on the stack. Found on the metal: an earlier stack-resident build double-faulted
+/// the ESP32 into a boot loop before the first frame.
 pub struct SinTable {
-    samples: [f32; LEN],
+    samples: Vec<f32>,
 }
 
 impl SinTable {
     /// Fill the table: entry *n* is `sin(2πn / LEN)`.
     ///
-    /// This is the *only* place `libm`'s transcendental is called in anger. A `while` loop
-    /// rather than an iterator so the whole thing is a plain fill with no closure — it runs
-    /// once, at bring-up, and its shape should read as "a table being filled" at a glance.
+    /// This is the *only* place `libm`'s transcendental is called in anger. The buffer is
+    /// allocated on the heap up front (`vec!`) and filled in place, so the 8 KiB of samples is
+    /// never a stack temporary — see the type docs. A `while` loop rather than an iterator so
+    /// the whole thing reads as "a table being filled" at a glance; it runs once, at bring-up.
     pub fn new() -> Self {
-        let mut samples: [f32; LEN] = [0.0; LEN];
+        let mut samples: Vec<f32> = vec![0.0; LEN];
         let mut n: usize = 0;
         while n < LEN {
             samples[n] = libm::sinf(n as f32 * (TAU / LEN as f32));
