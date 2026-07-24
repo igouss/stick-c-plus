@@ -59,12 +59,42 @@ bead-sync:
 # Graph-health gate. bv's insight metrics are lazily computed and report
 # Cycles:null when uncomputed (a false red), so the cycle count comes from
 # `br dep cycles` instead. Runs br diagnostics + asserts zero cycles; else fails.
+#
+# `br doctor` exits 1 for ANY finding, including P2 advisories about the shape of the graph,
+# so this recipe used to be permanently red on advice rather than on breakage — which is a
+# gate nobody can act on. It now judges the findings: exit 0 is clean, exit >= 1 is fatal
+# unless every line is one of the two advisories below, and an exit above the documented
+# findings code is a tool error, which must never read as clean (same reasoning as `hex-lint`).
+#
+# The two tolerated advisories, and why — re-derive this before extending the list:
+#   dep.dead_closed_blocking_edges  every one of the 30 edges points at a CLOSED issue, none
+#                                   at a missing one. That is a satisfied dependency, i.e.
+#                                   ordinary history; deleting the edges would erase what
+#                                   blocked what to silence a warning.
+#   dep.fully_unblocked_open        checked one by one: 10 of the 11 ARE listed by `br ready`,
+#                                   and the 11th (qqh.1) is absent because it is IN_PROGRESS,
+#                                   i.e. claimed. Nothing is actually hidden.
 [doc('beads graph-health gate: br doctor + zero dependency cycles')]
 [group('beads')]
 [no-exit-message]
 [script]
 bead-check:
-    {{ br }} doctor
+    # Exit codes are contract, not guesswork: `br doctor capabilities` documents
+    # 0 healthy · 1 findings_present · >=2 refusals and tool errors.
+    out="$({{ br }} doctor 2>&1)" && rc=0 || rc=$?
+    echo "$out"
+    if [ "$rc" -gt 1 ]; then
+      echo "❌ beads: br doctor exited $rc — a refusal or tool error, NOT a clean graph"
+      exit 1
+    fi
+    unexpected="$(echo "$out" | grep -E '^(WARN|FAIL|ERROR)' \
+      | grep -vE '^WARN (dep\.dead_closed_blocking_edges|dep\.fully_unblocked_open):' || true)"
+    if [ -n "$unexpected" ]; then
+      echo "❌ beads: br doctor finding outside the two known advisories:"
+      echo "$unexpected" | sed 's/^/     /'
+      exit 1
+    fi
+    echo "✅ beads: br doctor clean (bar the two documented advisories)"
     if {{ br }} dep cycles --json | {{ jq }} -e '.count == 0' >/dev/null; then
       echo "✅ beads: no dependency cycles"
     else
