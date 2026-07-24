@@ -644,11 +644,29 @@ setup-hooks:
     git config core.hooksPath .githooks
     @echo "hooks installed: .githooks/pre-commit → just precommit  (bypass: git commit -n)"
 
-# Everything CI checks: format, architecture (hex-lint), lint both worlds, test,
-# build. hex-lint runs early — an architecture breach fails fast, before builds.
+# The host leg of the gate: stable rustc, no device, no ESP-IDF.
+[private]
+host-gate: lint test
+
+# The firmware leg: Xtensa, both ESP-IDF configurations. Deliberately serial inside — the two
+# IDF builds share firmware/.embuild, so running them at once would race over one directory.
+[private]
+fw-gate: lint-fw lint-buddy build build-buddy
+
+# The two legs at once. They share nothing: separate workspaces, separate target directories,
+# so neither blocks the other on cargo's target-dir lock — which is the whole reason this can
+# be parallel at all. A failing leg still aborts the run and propagates its exit code; the
+# price is interleaved output while both are talking.
+[parallel]
+[private]
+_gates: host-gate fw-gate
+
+# Everything CI checks: format, architecture, lint both worlds, test, build. The cheap checks
+# stay serial and FIRST, so an architecture breach or an undeclared app fails in seconds rather
+# than behind two compilers; only the two expensive legs run together.
 [doc('everything CI checks: fmt, architecture, lint both worlds, test, build')]
 [group('meta')]
-ci: (fmt "check") hex-lint apps-check sprites-check lint lint-fw lint-buddy test build build-buddy
+ci: (fmt "check") hex-lint apps-check sprites-check _gates
 
 # Remove build artifacts (host + firmware). Confirmed because a firmware clean throws away
 # the built ESP-IDF with it, and that costs minutes to put back. `just --yes clean` skips
