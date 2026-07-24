@@ -41,6 +41,8 @@ members = [
     "apps/orientation/orientation-core",
     "apps/orientation/orientation-display",
     "apps/orientation/orientation-shell",
+    "apps/plume/plume-core",
+    "apps/plume/plume-display",
     "apps/plant-monitor/plant-core",
     "apps/plant-monitor/plant-display",
     "apps/plant-monitor/plant-shell",

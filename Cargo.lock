@@ -1543,6 +1543,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "plume-core"
+version = "0.1.0"
+dependencies = [
+ "cucumber",
+ "libm",
+ "proptest",
+ "tokio",
+]
+
+[[package]]
+name = "plume-display"
+version = "0.1.0"
+dependencies = [
+ "embedded-graphics",
+ "embedded-graphics-simulator",
+ "platform-core",
+ "platform-display",
+ "plume-core",
+]
+
+[[package]]
 name = "png"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -50,6 +50,7 @@ screens:
     cargo run --quiet -p pomodoro-display --example pomodoro-screenshots
     cargo run --quiet -p host-display --example host-screenshots
     cargo run --quiet -p orientation-display --example orientation-screenshots
+    cargo run --quiet -p plume-display --example plume-screenshots
     cargo run --quiet -p buddy-display --example buddy-screenshots
 
 # Re-bless the golden screens from the current render — host-monitor and the buddy. The
@@ -246,6 +247,12 @@ build-pomodoro:
 build-orientation:
     cd firmware && PATH="{{pyshim}}:$PATH" cargo build --release -p orientation
 
+# Build just the plume (Xtensa release). Like the orientation readout it links the shared
+# ESP-IDF the workspace builds (root crate = plant-monitor); with no network the plume ELF
+# drops the unused mdns symbols, so the flashed image is offline and clean.
+build-plume:
+    cd firmware && PATH="{{pyshim}}:$PATH" cargo build --release -p plume
+
 # Build just the host monitor (Xtensa release), with a lean mdns-free ESP-IDF. Unlike
 # `just build` (root crate = plant-monitor, which pulls the espressif/mdns managed
 # component), setting ESP_IDF_SYS_ROOT_CRATE=host-monitor builds an IDF from host-monitor's
@@ -334,6 +341,13 @@ run-pomodoro:
 # `just run` puts the plant monitor back.
 run-orientation:
     cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p orientation'
+
+# Build, flash, and monitor the plume: an ambient, clock-driven feathered frond that breathes
+# on the panel, stood on its USB-C port. No sensor and no buttons — just watch it move. The
+# serial heartbeat only says it is alive; the plume has no state. `just run` puts the plant
+# monitor back.
+run-plume:
+    cd firmware && {{sg}} 'export PATH="{{fw_path}}:$PATH" ESPFLASH_PORT="{{port}}"; cargo run --release -p plume'
 
 # Build, flash, and monitor the homelab host monitor. Fetches the bearer-gated hostpulse
 # endpoint ([host_monitor] endpoint+token in firmware/secrets.toml) and draws one row per

@@ -1,0 +1,41 @@
+[package]
+name = "plume"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "M5StickC Plus plume — an ambient, clock-driven feathered frond that breathes on the panel, on the shared board platform."
+# The animation is the point of this package; a bare `cargo run -p plume` must choose it.
+default-run = "plume"
+
+[[bin]]
+name = "plume"
+path = "src/main.rs"
+
+# The imperative shell's outermost layer: it composes adapters and owns effects, so it is the
+# one crate the effect-audit `domain` gate must never tag.
+[package.metadata.hex-arch]
+role = "composition-root"
+
+[dependencies]
+# The std/ESP-IDF stack. esp-idf-svc re-exports -hal and -sys, but all three are named so the
+# version floor shows.
+esp-idf-svc = "0.52"
+esp-idf-hal = "0.46"
+esp-idf-sys = "0.37"
+log = "0.4"
+# Firmware crates (same workspace): the BSP that powers the LCD rails, and the board-generic
+# panel adapter. This app has no sensor and no network — the panel is the whole of its I/O.
+board-support = { path = "../../../platform/board-support" }
+platform-adapters = { path = "../../../platform/adapters" }
+# Host crates, referenced by path across the two workspaces. platform-runtime is the generic
+# render loop + Monotonic clock; platform-core the Tick and the ScreenRotation; the plume-*
+# crates are the field, the phase clock, and the picture — all no_std/std and cross-compile to
+# xtensa cleanly.
+platform-core = { path = "../../../../platform/platform-core" }
+platform-runtime = { path = "../../../../platform/platform-runtime" }
+plume-core = { path = "../../../../apps/plume/plume-core" }
+plume-display = { path = "../../../../apps/plume/plume-display" }
+
+[build-dependencies]
+# Emits the ESP-IDF sysenv link/search flags for the final link (via ldproxy).
+embuild = "0.33"

@@ -1,0 +1,37 @@
+[package]
+name = "plume-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Framework-free plume domain for the M5StickC Plus: the parametric point field of a slow-breathing feathered frond and the phase clock that animates it, optimised for the chip it runs on — a startup-built sine table replaces every per-point transcendental, the point budget is halved to what the panel can show, and every value is f32 for the ESP32's single-precision FPU. no_std, host-tested, no unsafe."
+
+[lib]
+name = "plume_core"
+path = "src/lib.rs"
+
+# The pure heart of the plume app: the parametric field (a point cloud as a function of an
+# animation phase) and the sine table it is computed through, no framework and no I/O.
+# context = "plume" scopes it to its own bounded context; it depends on nothing but libm's
+# sqrt for the one honest magnitude in the field.
+[package.metadata.hex-arch]
+role = "domain"
+context = "plume"
+
+[dependencies]
+# `sqrtf` in no_std, for the one genuine magnitude in the field (`mag(k, e)`). libm is pure
+# computation: no allocator, no I/O, nothing that could make this crate impure. The sines and
+# cosines do *not* go through it on the hot path — they are read from a table this crate
+# builds once at startup, which is the whole point of the optimisation.
+libm = "0.2"
+
+# Host-only. These link std and never reach the Xtensa build (a dependent excludes them).
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run under the
+# default harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false
