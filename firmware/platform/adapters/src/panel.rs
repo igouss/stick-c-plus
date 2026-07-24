@@ -131,6 +131,9 @@ fn render_fault<E: core::fmt::Debug>(op: &str, err: RenderError<E>) -> St7789Err
     match err {
         RenderError::Draw(err) => fault(op, err),
         RenderError::LineOverflow => St7789Error(format!("ST7789 {op}: line buffer overflow")),
+        RenderError::FieldOverflow => {
+            St7789Error(format!("ST7789 {op}: a value was wider than its field"))
+        }
     }
 }
 

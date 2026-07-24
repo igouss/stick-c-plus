@@ -22,9 +22,15 @@ so a new experiment is a new directory under `apps/`, not a new firmware:
    IMU's gravity vector as three signed X/Y/Z bars, the pitch and roll in degrees, and the
    face it is resting on — laid out for whichever way up the board is being held. *Screen +
    IMU, no network, no buttons — turn it and watch.*
-5. **led-driver** — a NightDriverStrip-style **WS2812** animation driver (the repo's
+5. **plume** — an ambient, clock-driven **feathered frond** that breathes on the panel: a
+   five-thousand-point parametric field (a faithful port of a *Dwitter*) animated on the phase
+   clock alone. Its point is the platform's math and rendering under load — a startup-built
+   **sine table** replaces every per-point transcendental, and each frame is plotted into a
+   one-bit offscreen frame and blitted in a **single** SPI window, not five thousand pokes.
+   *Screen only, no sensor, no network — just watch it move.*
+6. **led-driver** — a NightDriverStrip-style **WS2812** animation driver (the repo's
    original purpose; the `led-core` effects domain lives on). *Future.*
-6. **rover** — a controllable robot. *Future; diverges in hardware.*
+7. **rover** — a controllable robot. *Future; diverges in hardware.*
 
 ## Architecture — hexagonal / ECB, on a shared platform
 
@@ -64,6 +70,7 @@ stick-c-plus/
 │  ├─ plant-monitor/       #   plant-core (moisture) · plant-display · plant-shell
 │  ├─ host-monitor/        #   host-core (Pulse frame + clamp/gap transform) · host-wire (JSON codec) · host-display · host-shell
 │  ├─ orientation/         #   orientation-core (tilt + resting face) · orientation-display · orientation-shell
+│  ├─ plume/               #   plume-core (parametric field + sine table + phase) · plume-display
 │  └─ led-driver/          #   led-core (WS2812 effects)
 ├─ firmware/          # the Xtensa boundary — a detached std/ESP-IDF workspace
 │  ├─ platform/            #   board-support (BSP: AXP192, MPU6886, I2C) · adapters (ST7789 panel +
@@ -151,6 +158,7 @@ just run-chime-selftest # play every jingle through the buzzer, hear it back on 
 just run                # the plant monitor  (a.k.a. `just flash`)
 just run-host-monitor   # the homelab CPU/memory monitor (WiFi → hostpulse → per-host sparklines)
 just run-orientation    # the IMU orientation readout (X/Y/Z bars + pitch/roll + resting face)
+just run-plume          # the ambient feathered frond that breathes on the panel (screen only)
 just monitor            # serial monitor only — pty-free (espflash --non-interactive)
 ```
 
