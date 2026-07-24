@@ -19,9 +19,9 @@ use platform_input::{ButtonEvent, ButtonId, Gesture};
 
 /// The screens B walks through, in order.
 ///
-/// The clock is in the ring rather than only appearing on a charger: a stick that shows a clock
-/// when docked, and cannot be *asked* for one otherwise, reads as a bug the first time somebody
-/// wants the time on battery.
+/// The clock is in the ring because it is the owner's to walk to. Nothing puts it there on their
+/// behalf except a battery about to die — a stick that answered a charger by hiding its creature
+/// behind a clock spent the glass on a fact the owner already had.
 const RING: [Screen; 4] = [
     Screen::Home,
     Screen::Pet(PetPage::Stats),
@@ -48,8 +48,7 @@ impl Nav {
         self.screen
     }
 
-    /// Force a screen — how the charging clock takes over when the board is docked, and how it
-    /// gives the screen back when it is unplugged.
+    /// Force a screen — how the clock takes the glass when the battery is about to die.
     pub fn show(&mut self, screen: Screen) {
         self.screen = screen;
     }
@@ -202,7 +201,7 @@ mod tests {
         assert_eq!(nav.screen(), Screen::Home);
     }
 
-    /// A forced screen is shown, and B walks on from it — how the charging clock takes the glass
+    /// A forced screen is shown, and B walks on from it — how the clock takes the glass
     /// and gives it back.
     #[test]
     fn a_forced_screen_is_shown_and_walked_on_from() {

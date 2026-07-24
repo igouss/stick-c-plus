@@ -66,7 +66,7 @@ pub use chime::{edge, PowerChime};
 pub use clock::Clock;
 pub use fixed_str::FixedStr;
 pub use imu::{is_at_rest, Acceleration, Imu, ONE_G_MG, REST_TOLERANCE_MG};
-pub use power::PowerSource;
+pub use power::{charge_percent, PowerSource, BATTERY_EMPTY_MV, BATTERY_FULL_MV};
 pub use power_debounce::{PowerDebounce, POWER_DEBOUNCE_MS};
 pub use rotation::{
     rotation_for, RotationSettler, ScreenRotation, IN_PLANE_MINIMUM_MG, QUADRANT_MARGIN_MG,

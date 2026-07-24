@@ -6,6 +6,27 @@
 
 use platform_core::Acceleration;
 
+/// The charge at or below which the buddy interrupts whatever it was showing.
+///
+/// Ten percent, and the number is the point of it. A charger is *not* news — the owner just
+/// plugged it in, they know — so being docked no longer takes the glass; the one power fact
+/// worth interrupting for is the one the owner cannot see coming, and by ten percent this board
+/// has minutes left. The clock screen's own colour turns hot earlier (at twenty), because
+/// warning and interrupting are different jobs.
+pub const CRITICAL_BATTERY_PCT: u8 = 10;
+
+/// Whether a charge reading is low enough to demand the glass.
+///
+/// `None` — a board with no gauge — is deliberately *not* critical: an unmeasured battery is
+/// unknown, not empty, and a device that took over its own screen because it could not read a
+/// register would do it forever.
+pub const fn is_critical_battery(battery_pct: Option<u8>) -> bool {
+    match battery_pct {
+        Some(pct) => pct <= CRITICAL_BATTERY_PCT,
+        None => false,
+    }
+}
+
 /// The strict shake threshold: a magnitude delta must **exceed** `0.8` g (`>`, not `>=`).
 pub const SHAKE_THRESHOLD_G: f32 = 0.8;
 /// The seed for the EMA baseline: `1.0` g, so a cold start under gravity does not false-fire.
@@ -281,5 +302,27 @@ mod tests {
             drive_face_up(&mut nap, 28);
             prop_assert!(!nap.is_napping());
         }
+    }
+}
+
+#[cfg(test)]
+mod battery_tests {
+    use super::*;
+
+    /// The threshold, on both sides of it — an interruption that fired a percent early or late
+    /// would be found on a desk, weeks later, and not before.
+    #[test]
+    fn the_glass_is_demanded_at_the_threshold_and_not_above_it() {
+        assert!(is_critical_battery(Some(CRITICAL_BATTERY_PCT)));
+        assert!(is_critical_battery(Some(0)));
+        assert!(!is_critical_battery(Some(CRITICAL_BATTERY_PCT + 1)));
+        assert!(!is_critical_battery(Some(100)));
+    }
+
+    /// An unmeasured battery is unknown, not empty. A board with no gauge that read `None` as
+    /// critical would take its own screen over for the rest of time.
+    #[test]
+    fn an_unmeasured_battery_is_not_critical() {
+        assert!(!is_critical_battery(None));
     }
 }

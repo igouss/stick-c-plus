@@ -103,11 +103,14 @@ fn sense_loop<I, P, C>(
             Ok(accel) => last = accel,
             Err(_) => warn!("buddy-sensors: IMU read failed; holding the previous reading"),
         }
-        match power.on_usb() {
-            // No battery gauge on this board's adapter, so the charge is unknown and the glass
-            // says so rather than showing a number nobody measured.
-            Ok(on_usb) => shared.with(|state: &mut DeviceState| state.power(on_usb, None)),
-            Err(_) => warn!("buddy-sensors: VBUS read failed; holding the previous power state"),
+        // Both halves of the power question, and a failure in either holds the previous answer:
+        // a flaky I2C read must not make the glass report a charge nobody measured, and must not
+        // make a board on a charger read as unplugged and chime about it.
+        match (power.on_usb(), power.battery_pct()) {
+            (Ok(on_usb), Ok(pct)) => {
+                shared.with(|state: &mut DeviceState| state.power(on_usb, pct))
+            }
+            _ => warn!("buddy-sensors: PMIC read failed; holding the previous power state"),
         }
 
         // The tick happens whatever the reads did: time passes regardless, and a domain whose

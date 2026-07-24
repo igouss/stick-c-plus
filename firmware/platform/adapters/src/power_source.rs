@@ -1,8 +1,9 @@
-//! The AXP192 PMIC as the platform [`PowerSource`] port: is USB (VBUS) present?
+//! The AXP192 PMIC as the platform [`PowerSource`] port: is USB (VBUS) present, and how
+//! full is the battery?
 
 use board_support::Axp192;
 use embedded_hal::i2c::I2c;
-use platform_core::PowerSource;
+use platform_core::{charge_percent, PowerSource};
 
 /// The M5StickC Plus AXP192 PMIC as the [`PowerSource`](platform_core::PowerSource) port.
 ///
@@ -33,5 +34,14 @@ impl<I2C: I2c> PowerSource for Axp192PowerSource<I2C> {
 
     fn on_usb(&mut self) -> Result<bool, Self::Error> {
         self.axp.vbus_present()
+    }
+
+    /// The charge, from the PMIC's battery-voltage ADC through the pure curve.
+    ///
+    /// `Some`, because this board *does* have a gauge — the register read is the whole of the
+    /// measurement and `charge_percent` is the whole of the judgement, so the two halves stay on
+    /// their own sides of the port.
+    fn battery_pct(&mut self) -> Result<Option<u8>, Self::Error> {
+        Ok(Some(charge_percent(self.axp.battery_millivolts()?)))
     }
 }

@@ -49,8 +49,9 @@ pub use menu::{Menu, MenuEntry, MenuOutcome, MenuState, MENU_ENTRIES};
 pub use oneshot::{OneShot, APPROVAL_HEART_WINDOW_S, CELEBRATE_MS, DIZZY_MS, HEART_MS};
 pub use persona::{derive, PersonaState, Snapshot, WAKE_WINDOW_MS};
 pub use sensors::{
-    is_face_down, NapCounter, NapTransition, ShakeDetector, NAP_COUNTER_MAX, NAP_COUNTER_MIN,
-    NAP_ENTER, NAP_LEAVE, SHAKE_BASELINE_SEED_G, SHAKE_THRESHOLD_G,
+    is_critical_battery, is_face_down, NapCounter, NapTransition, ShakeDetector,
+    CRITICAL_BATTERY_PCT, NAP_COUNTER_MAX, NAP_COUNTER_MIN, NAP_ENTER, NAP_LEAVE,
+    SHAKE_BASELINE_SEED_G, SHAKE_THRESHOLD_G,
 };
 pub use species::{SpeciesIndex, GIF_SENTINEL, SPECIES_NVS_KEY};
 pub use stats::{

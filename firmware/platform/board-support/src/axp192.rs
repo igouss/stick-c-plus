@@ -88,6 +88,19 @@ const PEK_ALL: u8 = PEK_SHORT_PRESS | PEK_LONG_PRESS;
 /// independent of whether the board draws charge from it.
 const VBUS_PRESENT: u8 = 0x20;
 
+/// Register 0x78 — the battery-voltage ADC, high 8 bits of a 12-bit reading.
+const REG_BATTERY_VOLTAGE: u8 = 0x78;
+
+/// Register 0x79 — the low 4 bits of the same reading, in its low nibble.
+const REG_BATTERY_VOLTAGE_LOW: u8 = 0x79;
+
+/// The battery-voltage ADC's step, in microvolts: the AXP192 datasheet's 1.1 mV/LSB.
+///
+/// Microvolts rather than millivolts because 1.1 is not an integer, and rounding the step
+/// before multiplying by up to 4095 of them would put a tenth of a volt of error on a full
+/// battery — enough to move a charge reading by several percent.
+const BATTERY_STEP_UV: u32 = 1_100;
+
 /// The M5StickC Plus AXP192 PMIC, over a shared or owned I2C bus.
 pub struct Axp192<I2C> {
     i2c: I2C,
@@ -214,6 +227,22 @@ impl<I2C: I2c> Axp192<I2C> {
     /// plug or pull shows up here as this bit going high or low.
     pub fn vbus_present(&mut self) -> Result<bool, I2C::Error> {
         Ok(self.read(REG_POWER_STATUS)? & VBUS_PRESENT == VBUS_PRESENT)
+    }
+
+    /// The battery voltage in millivolts, from the PMIC's own ADC.
+    ///
+    /// Twelve bits across [`REG_BATTERY_VOLTAGE`] (high 8) and the register after it (low 4), at
+    /// [`BATTERY_STEP_UV`] per step. The channel is live because [`power_on`](Self::power_on)
+    /// writes `0x82 = 0xFF` — every ADC channel enabled, exactly as the factory firmware does.
+    ///
+    /// A *voltage*, not a percentage: turning volts into a charge is a judgement about a
+    /// chemistry, and it belongs inward with the rest of the pure arithmetic
+    /// (`platform_core::charge_percent`), not in a register reader.
+    pub fn battery_millivolts(&mut self) -> Result<u16, I2C::Error> {
+        let high: u32 = u32::from(self.read(REG_BATTERY_VOLTAGE)?);
+        let low: u32 = u32::from(self.read(REG_BATTERY_VOLTAGE_LOW)?);
+        let steps: u32 = (high << 4) | (low & 0x0F);
+        Ok((steps * BATTERY_STEP_UV / 1_000) as u16)
     }
 
     /// Read one register: write its address, read one byte back.

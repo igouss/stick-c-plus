@@ -54,18 +54,20 @@ use esp32_nimble::{
 };
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::i2c::I2cDriver;
+use esp_idf_hal::ledc::LowSpeed;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::EspLogger;
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
 use log::{info, warn};
 use platform_adapters::{
-    Axp192Backlight, Axp192PowerSource, Fixed, GpioButton, Mpu6886Imu, Panel, PanelScreen,
-    PekButton,
+    Axp192Backlight, Axp192PowerSource, Fixed, GpioButton, LedcBuzzer, Mpu6886Imu, Panel,
+    PanelScreen, PekButton,
 };
 use platform_core::{ScreenRotation, Tick};
 use platform_input::Buttons;
 use platform_runtime::{
-    spawn_display, BacklightSwitch, DisplayConfig, LitFlag, Monotonic, DISPLAY_STACK_SIZE,
+    spawn_buzzer, spawn_display, spawn_power_watch, BacklightSwitch, BuzzerHandle, BuzzerTask,
+    DisplayConfig, LitFlag, Monotonic, PowerWatchConfig, DISPLAY_STACK_SIZE,
 };
 use static_cell::StaticCell;
 
@@ -257,6 +259,18 @@ fn main() {
     ));
     let lit: LitFlag = backlight.flag();
 
+    // The passive buzzer on G2, through LEDC. One buzzer, one owner: it moves into a single
+    // owner thread and every caller plays through a `Clone + Send` handle, so two sounds can
+    // never interleave or truncate one another. Held for the life of main.
+    let buzzer: LedcBuzzer<'_, LowSpeed> = LedcBuzzer::new(
+        peripherals.ledc.timer0,
+        peripherals.ledc.channel0,
+        peripherals.pins.gpio2,
+    )
+    .expect("buzzer G2 (LEDC)");
+    let (_buzzer_owner, tone): (BuzzerTask, BuzzerHandle) =
+        spawn_buzzer(buzzer).expect("spawn buzzer owner");
+
     // ---- the state ---------------------------------------------------------------------
     let device: &mut BLEDevice = BLEDevice::take();
     let address: String = address_of(device);
@@ -318,6 +332,17 @@ fn main() {
     )
     .expect("spawn buddy-display");
     info!("display thread up: ST7789 rendering the creature, the HUD and the approval screen");
+
+    // Power-watch: poll VBUS on its own AXP192 handle, debounce it, and sound the spool-up /
+    // spool-down chime a settled USB plug or unplug decides — through the same one buzzer owner
+    // the rest of the app plays through. Silent at boot: the first sample only seeds the
+    // baseline. A second handle rather than a shared one because the sensor thread owns the
+    // first: both are thin readers of the same PMIC over the bus mutex.
+    let vbus: Axp192PowerSource<MutexDevice<'static, I2cDriver<'static>>> =
+        Axp192PowerSource::new(Axp192::new(MutexDevice::new(bus)));
+    let _power_watch = spawn_power_watch(vbus, tone, clock, PowerWatchConfig::default())
+        .expect("spawn buddy power-watch");
+    info!("power-watch thread up: USB plug = spool-up, unplug = spool-down");
 
     // The backlight switch has no other owner in this app — the buddy's glass stays lit, and the
     // display loop's LitFlag reads the `true` the wrapper published at power-on. Held so the

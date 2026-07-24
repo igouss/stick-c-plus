@@ -28,8 +28,8 @@
 //! person pressing A while looking at an approval screen means.
 
 use buddy_core::{
-    charging_mood, Approval, Buddy, MenuEntry, MenuOutcome, MenuState, NapTransition, Outcome,
-    PersonaState, SpeciesIndex, StepInput,
+    charging_mood, is_critical_battery, Approval, Buddy, MenuEntry, MenuOutcome, MenuState,
+    NapTransition, Outcome, PersonaState, SpeciesIndex, StepInput,
 };
 use buddy_display::{BuddyView, ClockView, Hint, Overlay, PromptView, Screen, Tool, Transcript};
 use buddy_wire::{Command, Decision, Inbound, PermissionResponse, Prompt, SnapshotState};
@@ -95,8 +95,9 @@ pub struct DeviceState {
     screen_on: bool,
     /// Whether the board is on external power.
     charging: bool,
-    /// Battery charge in percent, when a gauge is wired. This board's PMIC adapter reports only
-    /// whether USB is present, so today it is `None` and the clock says so.
+    /// Battery charge in percent, from the PMIC's own ADC through `platform_core::charge_percent`.
+    /// `None` on a board whose adapter has no gauge, and the clock says so rather than painting a
+    /// number nobody measured.
     battery_pct: Option<u8>,
     /// The tick of the last [`tick`](DeviceState::tick) — the clock every view is built at.
     now: Tick,
@@ -195,18 +196,23 @@ impl DeviceState {
         }
     }
 
-    /// Report the power state. A board put on the charger shows the clock; taken off, it goes
-    /// back home — but only from the clock, so a plug-in does not yank the owner off a page they
-    /// were reading.
+    /// Report the power state, and let a battery about to die — and only that — take the glass.
+    ///
+    /// Being on a charger is **not** news: the owner plugged the cable in themselves, and a
+    /// device that answered by hiding its creature behind a clock is spending the one screen it
+    /// has on a fact nobody asked for. So docking changes no screen at all; the clock is a
+    /// screen the owner walks to.
+    ///
+    /// A battery at [`CRITICAL_BATTERY_PCT`] is the opposite: it is the one power fact the owner
+    /// cannot see coming, and by then this board has minutes left. It takes the glass **on the
+    /// crossing**, once, so an owner who navigates away is not dragged back every hundred
+    /// milliseconds for as long as the battery stays flat.
     pub fn power(&mut self, charging: bool, battery_pct: Option<u8>) {
-        let docked: bool = charging && !self.charging;
-        let undocked: bool = !charging && self.charging;
+        let was_critical: bool = is_critical_battery(self.battery_pct);
         self.charging = charging;
         self.battery_pct = battery_pct;
-        if docked {
+        if !was_critical && is_critical_battery(battery_pct) {
             self.nav.show(Screen::Clock);
-        } else if undocked && self.nav.screen() == Screen::Clock {
-            self.nav.show(Screen::Home);
         }
     }
 
@@ -468,7 +474,7 @@ fn species_count() -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use buddy_core::is_face_down;
+    use buddy_core::{is_face_down, CRITICAL_BATTERY_PCT};
     use buddy_wire::{BuddyEvent, SnapshotPacket};
 
     const A_CLICK: ButtonEvent = ButtonEvent::new(ButtonId::Front, Gesture::Click);
@@ -679,25 +685,55 @@ mod tests {
         assert_eq!(state.view().passkey, Some(482_913));
     }
 
-    /// Docking shows the clock and undocking gives the screen back.
+    /// A charger changes no screen, in either direction.
+    ///
+    /// Reported from the desk: plugging the stick in hid the creature behind a clock nobody had
+    /// asked for, and the owner could not see what the buddy was doing while it charged — which
+    /// is most of its life. Being docked is a fact the owner already has; the glass is spent on
+    /// what they do not.
     #[test]
-    fn docking_shows_the_clock_and_undocking_gives_it_back() {
+    fn a_charger_is_not_news_and_takes_no_screen() {
         let mut state: DeviceState = state();
-        state.power(true, None);
-        assert_eq!(state.view().screen, Screen::Clock);
-        state.power(false, None);
+        state.power(true, Some(80));
+        assert_eq!(state.view().screen, Screen::Home);
+        state.power(false, Some(80));
         assert_eq!(state.view().screen, Screen::Home);
     }
 
-    /// Undocking does NOT yank the owner off a page they walked to themselves.
+    /// A battery about to die DOES take the glass — once, on the crossing.
+    ///
+    /// The once matters: the sensor thread reports ten times a second, and a rule that showed the
+    /// clock on every low reading would drag the owner back to it every hundred milliseconds for
+    /// as long as the battery stayed flat.
     #[test]
-    fn undocking_does_not_move_a_screen_the_owner_chose() {
+    fn a_critical_battery_takes_the_glass_once() {
+        let mut state: DeviceState = state();
+        state.power(false, Some(CRITICAL_BATTERY_PCT + 1));
+        assert_eq!(state.view().screen, Screen::Home, "not low yet");
+
+        state.power(false, Some(CRITICAL_BATTERY_PCT));
+        assert_eq!(state.view().screen, Screen::Clock, "the crossing");
+
+        state.press(B_CLICK, 1_000);
+        let walked_to: Screen = state.view().screen;
+        assert_ne!(walked_to, Screen::Clock, "the owner walked away from it");
+        state.power(false, Some(CRITICAL_BATTERY_PCT - 1));
+        assert_eq!(
+            state.view().screen,
+            walked_to,
+            "a battery still flat must not drag the owner back"
+        );
+    }
+
+    /// A board with no gauge never crosses the threshold — an unmeasured battery is unknown, not
+    /// empty, and a stick that took its own screen over because it could not read a register
+    /// would never give it back.
+    #[test]
+    fn a_board_with_no_gauge_keeps_its_screen() {
         let mut state: DeviceState = state();
         state.power(true, None);
-        state.press(B_CLICK, 1_000);
-        let chosen: Screen = state.view().screen;
         state.power(false, None);
-        assert_eq!(state.view().screen, chosen);
+        assert_eq!(state.view().screen, Screen::Home);
     }
 
     /// The transcript reaches the glass, newest first.
