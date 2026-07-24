@@ -23,14 +23,14 @@ set lazy
 
 port := "/dev/ttyUSB0"
 chip := "esp32"
-baud := "115200"   # the board's FT232 is unreliable above this.
-elf  := "firmware/target/xtensa-esp32-espidf/release/plant-monitor"
+baud := "115200" # the board's FT232 is unreliable above this.
+elf := "firmware/target/xtensa-esp32-espidf/release/plant-monitor"
 # `sg dialout -c` grants the group espflash needs; the absolute path dodges the
 # ast-grep `sg` alias, and `require` proves it is there before a recipe leans on it.
 sg := require("/usr/bin/sg") + " dialout -c"
 # Firmware toolchain PATH: python 3.12 (ESP-IDF bootstrap), cargo/rustup shims,
 # and ninja (via linuxbrew). Prepended inside `sg`, which may reset the env.
-pyshim  := justfile_directory() / "firmware/tools/pyshim"
+pyshim := justfile_directory() / "firmware/tools/pyshim"
 fw_path := pyshim + ":$HOME/.cargo/bin:/home/linuxbrew/.linuxbrew/bin"
 # The aioesphomeapi conformance-oracle venv (git-ignored, survives `cargo clean`).
 oracle_venv := justfile_directory() / ".oracle-venv"
@@ -47,16 +47,16 @@ bridge_sock := "${BUDDY_BRIDGE_SOCK:-${XDG_RUNTIME_DIR:-/tmp}/buddy-bridge.sock}
 # cosmetic: in `hex-lint` a missing binary landed in the `unexpected exit` branch and read as
 # an architecture violation — a false red on the gate. These resolve against just's PATH; the
 # device recipes re-exec under `sg` with {{fw_path}}, so for those this is a proxy check.
-bb           := require("bb")
-br           := require("br")
-bv           := require("bv")
-hex_lint     := require("hex-lint")
+bb := require("bb")
+br := require("br")
+bv := require("bv")
+hex_lint := require("hex-lint")
 effect_audit := require("effect-audit")
-espflash     := require("espflash")
+espflash := require("espflash")
 bluetoothctl := require("bluetoothctl")
-jq           := require("jq")
-curl         := require("curl")
-size_bin     := require("size")
+jq := require("jq")
+curl := require("curl")
+size_bin := require("size")
 
 # List recipes.
 default:
@@ -69,6 +69,31 @@ default:
 test:
     cargo test --workspace
 
+# Every crate that renders a screen, and every crate that pins one with goldens — discovered
+# from the crate targets, so a new app joins `screens` and `screens-bless` by having the
+# target, not by being remembered here.
+[private]
+_screenshot-targets:
+    @cargo metadata --no-deps --format-version 1 | {{ jq }} -r '.packages[] | . as $p | .targets[] | select(.kind == ["example"]) | select(.name | endswith("screenshots")) | "\($p.name) \(.name)"'
+
+[private]
+_goldens-packages:
+    @cargo metadata --no-deps --format-version 1 | {{ jq }} -r '.packages[] | select(any(.targets[]; .kind == ["test"] and .name == "goldens")) | .name'
+
+# Which rendered screens nothing pins. A crate can render a picture and have no golden behind
+# it — and then a layout change there is checked by no one. `screens` and `screens-bless` both
+# end by naming those crates, so the hole is stated every time rather than being an absence.
+[private]
+[script]
+_goldens-coverage:
+    naked="$(comm -23 <(just --justfile {{ justfile() }} _screenshot-targets | cut -d" " -f1 | sort -u) \
+                      <(just --justfile {{ justfile() }} _goldens-packages | sort -u) | paste -sd" ")"
+    if [ -n "$naked" ]; then
+      echo "⚠ renders a screen, but no goldens pin it: $naked"
+    else
+      echo "✅ every crate that renders a screen has goldens behind it"
+    fi
+
 # Render every screen the TFT can show to target/screens/*.png — the four Observation
 # states, and the RGB colour-check bands. The pixels come from `plant_display::render`,
 # the SAME function the ST7789 adapter calls on the board, drawn into a host
@@ -79,13 +104,12 @@ test:
 # glass is wired. For THAT question: `just run-bin display-colour-check`, and look.
 [doc('render every screen to target/screens/*.png — the layout, not the glass')]
 [group('host')]
+[script]
 screens:
-    cargo run --quiet -p plant-display --example plant-screenshots
-    cargo run --quiet -p pomodoro-display --example pomodoro-screenshots
-    cargo run --quiet -p host-display --example host-screenshots
-    cargo run --quiet -p orientation-display --example orientation-screenshots
-    cargo run --quiet -p plume-display --example plume-screenshots
-    cargo run --quiet -p buddy-display --example buddy-screenshots
+    while read -r pkg example; do
+      cargo run --quiet -p "$pkg" --example "$example"
+    done < <(just --justfile {{ justfile() }} _screenshot-targets)
+    just --justfile {{ justfile() }} _goldens-coverage
 
 # Re-bless the golden screens from the current render — host-monitor and the buddy. The
 # `goldens` tests (part of `just test`) render every state and fail if the picture drifts
@@ -94,9 +118,12 @@ screens:
 # the same function the test checks, so a blessed golden and a checked render match.
 [doc('accept the current render as the new golden screens')]
 [group('host')]
+[script]
 screens-bless:
-    BLESS_GOLDENS=1 cargo test -p host-display --test goldens
-    BLESS_GOLDENS=1 cargo test -p buddy-display --test goldens
+    while read -r pkg; do
+      BLESS_GOLDENS=1 cargo test -p "$pkg" --test goldens
+    done < <(just --justfile {{ justfile() }} _goldens-packages)
+    just --justfile {{ justfile() }} _goldens-coverage
 
 # Regenerate platform-display/src/sprite/generated.rs from the vendored ClaudePix frames
 # (babashka; no JS, no network). The generator re-hashes every preset and refuses to emit
@@ -106,12 +133,12 @@ screens-bless:
 [doc('regenerate the vendored ClaudePix sprite tables (babashka)')]
 [group('host')]
 sprites:
-    {{bb}} platform/platform-display/gen/generate.clj
+    {{ bb }} platform/platform-display/gen/generate.clj
 
 # Fail if generated.rs has drifted from gen/frames.json. Part of `just ci`.
 [group('host')]
 sprites-check:
-    {{bb}} platform/platform-display/gen/generate.clj --check
+    {{ bb }} platform/platform-display/gen/generate.clj --check
 
 # Render every vendored sprite to target/screens/sprites.png — six frames sampled across
 # each loop. The sprite unit tests cannot see: a transposed decode still paints a
@@ -133,7 +160,7 @@ sprite-screens:
 [group('host')]
 [script]
 oracle:
-    venv="{{oracle_venv}}"
+    venv="{{ oracle_venv }}"
     py="$venv/bin/python"
     if ! "$py" -c "import aioesphomeapi" 2>/dev/null; then
       base="$(command -v python3.12 || command -v python3)"
@@ -150,7 +177,7 @@ oracle:
 # Lint the host domain (every host crate), warnings as errors.
 [group('host')]
 lint:
-    cargo clippy --workspace -- -D warnings
+    cargo clippy --workspace --all-targets -- -D warnings
 
 # ---- Bridge (the Linux BLE central — needs BlueZ; the device test needs the stick) ----
 
@@ -165,7 +192,7 @@ lint:
 [group('bridge')]
 [script]
 bridge: bridge-preflight
-    sock="{{bridge_sock}}"
+    sock="{{ bridge_sock }}"
     echo "▶ bridge ↔ claude-buddy, hook socket $sock"
     echo "  waiting for the stick; it is picked up whenever it appears. Ctrl-C to stop."
     RUST_LOG="${RUST_LOG:-info}" BUDDY_BRIDGE_SOCK="$sock" cargo run --release -p buddy-bridge
@@ -174,8 +201,8 @@ bridge: bridge-preflight
 # check exists because its absence produced a silent hang or a mystery failure, not a message.
 [doc('assert everything the bridge daemon needs, before it needs it')]
 [group('bridge')]
-[script]
 [no-exit-message]
+[script]
 bridge-preflight:
     if ! ls /sys/class/bluetooth/hci* >/dev/null 2>&1; then
       echo "❌ no BlueZ adapter under /sys/class/bluetooth — is Bluetooth up?"; exit 2
@@ -189,7 +216,7 @@ bridge-preflight:
     fi
     # A daemon already holding the hook socket wins the bind; a second one dies on it, or worse,
     # the two fight over the adapter and neither keeps a link.
-    sock="{{bridge_sock}}"
+    sock="{{ bridge_sock }}"
     if pgrep -x buddy-bridge >/dev/null 2>&1; then
       echo "❌ a buddy-bridge is already running (socket $sock) — stop it first: pkill -x buddy-bridge"; exit 2
     fi
@@ -212,18 +239,18 @@ bridge-pair: bridge-forget bridge
 # discovery finds an advertising stick with no cache entry (which is what the old one could not
 # do — that is why this recipe used to leave the stick undiscoverable). Confirmed because the
 # way back is a trip to the glass to read six digits.
+[confirm('drop the host half of the Claude-XXXX bond? re-bonding needs the passkey on the glass.')]
 [doc('forget the host half of the Claude-XXXX bond')]
 [group('bridge')]
-[confirm('drop the host half of the Claude-XXXX bond? re-bonding needs the passkey on the glass.')]
 [script]
 bridge-forget:
-    mapfile -t addrs < <({{bluetoothctl}} devices 2>/dev/null | awk '/Claude-/{print $2}')
+    mapfile -t addrs < <({{ bluetoothctl }} devices 2>/dev/null | awk '/Claude-/{print $2}')
     if [ "${#addrs[@]}" -eq 0 ]; then echo "no Claude- bond on the host to forget"; else
-      for a in "${addrs[@]}"; do echo "forgetting $a"; {{bluetoothctl}} remove "$a" >/dev/null || true; done
+      for a in "${addrs[@]}"; do echo "forgetting $a"; {{ bluetoothctl }} remove "$a" >/dev/null || true; done
       echo "✅ host bond(s) cleared."
     fi
     echo "the DEVICE half persists across reflash — erase the stick's NVS to fully reset the bond:"
-    echo "  {{sg}} 'espflash erase-region -p {{port}} -c esp32 0x9000 0x6000'"
+    echo "  {{ sg }} 'espflash erase-region -p {{ port }} -c esp32 0x9000 0x6000'"
 
 # The device-in-the-loop proof for the bridge: the #[ignore]d test that drives the REAL
 # BluerCentral against a flashed Claude-XXXX stick — bond, heartbeat, chunked round-trip,
@@ -240,6 +267,32 @@ bridge-device: bridge-preflight
     echo "  you will be asked to enter the passkey shown on the glass, and to power-cycle the stick."
     cargo test -p buddy-bridge-shell --test device_bridge -- --ignored --nocapture
 
+# Every app must say how it is built. An app whose bin/Cargo.toml carries no
+# [package.metadata.board] cannot be built or flashed by `fw-build`/`fw-run`, and before this
+# check the only symptom was a missing recipe nobody noticed. Cheap (one `cargo metadata`, no
+# compile), so it sits in `precommit` beside hex-lint: an app that cannot be flashed cannot be
+# added silently.
+[doc('every firmware app must declare how it is built')]
+[group('architecture')]
+[group('firmware')]
+[no-exit-message]
+[script]
+[working-directory('firmware')]
+apps-check:
+    meta="$(cargo metadata --no-deps --format-version 1)"
+    apps="$(echo "$meta" | {{ jq }} -r '[.packages[] | select(.manifest_path | test("/apps/[^/]+/bin/Cargo.toml$"))] | length')"
+    bad="$(echo "$meta" | {{ jq }} -r '.packages[]
+        | select(.manifest_path | test("/apps/[^/]+/bin/Cargo.toml$"))
+        | select((.metadata.board["idf-root-crate"] | type != "string") or (.metadata.board.summary | type != "string"))
+        | .name')"
+    if [ -n "$bad" ]; then
+      echo "❌ apps-check: no usable [package.metadata.board] (needs idf-root-crate + summary):"
+      echo "$bad" | sed 's/^/     /'
+      echo "   declare it in firmware/apps/<app>/bin/Cargo.toml — see the plant-monitor one."
+      exit 1
+    fi
+    echo "✅ apps-check: all $apps app(s) declare how they are built"
+
 # Enforce the functional-core / imperative-shell split on every crate marked
 # `[package.metadata.hex-arch] role = "domain"` (led-core, plant-core, esphome-api).
 # Fails if a concrete effect — socket, file, thread, clock — leaks into a domain
@@ -247,7 +300,7 @@ bridge-device: bridge-preflight
 [doc('enforce the functional-core / imperative-shell split on domain crates')]
 [group('architecture')]
 audit:
-    {{effect_audit}} --strict --require-domain .
+    {{ effect_audit }} --strict --require-domain .
 
 # Enforce hexagonal role + bounded-context boundaries (hex-lint, ~/code/tools) on
 # BOTH workspaces: a cross-role dependency edge (e.g. the ESPHome transport or the
@@ -270,7 +323,7 @@ hex-lint:
     fail=0
     for ws in Cargo.toml firmware/Cargo.toml; do
       echo "── hex-lint $ws"
-      if {{hex_lint}} --manifest-path "$ws"; then :; else
+      if {{ hex_lint }} --manifest-path "$ws"; then :; else
         rc=$?
         case $rc in
           1) echo "❌ hex-lint: policy violation or tool error in $ws [exit 1]" ;;
@@ -297,9 +350,9 @@ hex-lint:
 # firmware/.cargo/config.toml: one rule, no silent defaults, and each app states which ESP-IDF
 # it links. ESP_IDF_SDKCONFIG_DEFAULTS appears only where the app layers Kconfig of its own.
 [private]
-[working-directory: 'firmware']
+[working-directory('firmware')]
 _app-env app:
-    @cargo metadata --no-deps --format-version 1 | {{jq}} -r --arg a '{{app}}' '\
+    @cargo metadata --no-deps --format-version 1 | {{ jq }} -r --arg a '{{ app }}' '\
         [.packages[] | select(.name == $a) | .metadata.board]                                  \
         | if length == 0 then                                                                  \
             error("\($a): no [package.metadata.board] — declare it in the app bin/Cargo.toml") \
@@ -314,35 +367,35 @@ _app-env app:
 # claude-buddy alone, because esp32-nimble does not compile at all against a BT-disabled IDF
 # (655 unresolved NimBLE symbols, not a warning). Its own recipes build it; `just ci` runs both.
 [private]
-[working-directory: 'firmware']
+[working-directory('firmware')]
 _workspace-excludes:
-    @cargo metadata --no-deps --format-version 1 | {{jq}} -r '.packages[] | select(.metadata.board.sdkconfig) | "--exclude", .name'
+    @cargo metadata --no-deps --format-version 1 | {{ jq }} -r '.packages[] | select(.metadata.board.sdkconfig) | "--exclude", .name'
 
 # The flashable apps and what each one is, from the metadata itself — so this list cannot go
 # stale the way a hand-kept one does.
 [doc('list the flashable apps and what each one is')]
 [group('firmware')]
-[working-directory: 'firmware']
+[working-directory('firmware')]
 apps:
-    @cargo metadata --no-deps --format-version 1 | {{jq}} -r '.packages[] | select(.metadata.board) | "\(.name)\n    \(.metadata.board.summary)"'
+    @cargo metadata --no-deps --format-version 1 | {{ jq }} -r '.packages[] | select(.metadata.board) | "\(.name)\n    \(.metadata.board.summary)"'
 
 # Build ONE app by name, with the ESP-IDF configuration it declares.
 [doc('build one app by name (Xtensa release), with its declared ESP-IDF config')]
 [group('firmware')]
-[working-directory: 'firmware']
 [script]
+[working-directory('firmware')]
 fw-build app:
-    mapfile -t appenv < <(just --justfile {{justfile()}} _app-env {{app}})
-    PATH="{{pyshim}}:$PATH" env "${appenv[@]}" cargo build --release -p {{app}}
+    mapfile -t appenv < <(just --justfile {{ justfile() }} _app-env {{ app }})
+    PATH="{{ pyshim }}:$PATH" env "${appenv[@]}" cargo build --release -p {{ app }}
 
 # Lint ONE app by name against the ESP-IDF configuration it declares, warnings as errors.
 [doc('lint one app by name (Xtensa release), warnings as errors')]
 [group('firmware')]
-[working-directory: 'firmware']
 [script]
+[working-directory('firmware')]
 fw-lint app:
-    mapfile -t appenv < <(just --justfile {{justfile()}} _app-env {{app}})
-    PATH="{{pyshim}}:$PATH" env "${appenv[@]}" cargo clippy --release -p {{app}} -- -D warnings
+    mapfile -t appenv < <(just --justfile {{ justfile() }} _app-env {{ app }})
+    PATH="{{ pyshim }}:$PATH" env "${appenv[@]}" cargo clippy --release -p {{ app }} --all-targets -- -D warnings
 
 # Build the firmware (release).
 #
@@ -350,11 +403,11 @@ fw-lint app:
 # derives that list from the app metadata instead of naming claude-buddy here.
 [doc('build the firmware, release (apps needing their own IDF config excluded)')]
 [group('firmware')]
-[working-directory: 'firmware']
 [script]
+[working-directory('firmware')]
 build:
-    mapfile -t excl < <(just --justfile {{justfile()}} _workspace-excludes)
-    PATH="{{pyshim}}:$PATH" cargo build --release --workspace "${excl[@]}"
+    mapfile -t excl < <(just --justfile {{ justfile() }} _workspace-excludes)
+    PATH="{{ pyshim }}:$PATH" cargo build --release --workspace "${excl[@]}"
 
 # Build just the standalone pomodoro timer (Xtensa release). It links the shared ESP-IDF the
 # workspace builds (root crate = plant-monitor); the pomodoro ELF drops the unused mdns
@@ -396,19 +449,19 @@ build-buddy: (fw-build "claude-buddy")
 
 # Type-check the firmware without linking (fast). Same exclusions as `build`.
 [group('firmware')]
-[working-directory: 'firmware']
 [script]
+[working-directory('firmware')]
 check:
-    mapfile -t excl < <(just --justfile {{justfile()}} _workspace-excludes)
-    PATH="{{pyshim}}:$PATH" cargo check --release --workspace "${excl[@]}"
+    mapfile -t excl < <(just --justfile {{ justfile() }} _workspace-excludes)
+    PATH="{{ pyshim }}:$PATH" cargo check --release --workspace "${excl[@]}"
 
 # Lint the firmware, warnings as errors. Same exclusions as `build`.
 [group('firmware')]
-[working-directory: 'firmware']
 [script]
+[working-directory('firmware')]
 lint-fw:
-    mapfile -t excl < <(just --justfile {{justfile()}} _workspace-excludes)
-    PATH="{{pyshim}}:$PATH" cargo clippy --release --workspace "${excl[@]}" -- -D warnings
+    mapfile -t excl < <(just --justfile {{ justfile() }} _workspace-excludes)
+    PATH="{{ pyshim }}:$PATH" cargo clippy --release --workspace "${excl[@]}" --all-targets -- -D warnings
 
 # Lint the Claude buddy against its own BT-enabled ESP-IDF, warnings as errors. Split from
 # `lint-fw` because the two need different IDF builds, not because the buddy is held to a
@@ -420,7 +473,7 @@ lint-buddy: (fw-lint "claude-buddy")
 # Report the firmware binary's section sizes (text/data/bss).
 [group('firmware')]
 size: build
-    {{size_bin}} {{elf}}
+    {{ size_bin }} {{ elf }}
 
 # ---- Device (needs the board on {{port}}) ----
 #
@@ -435,13 +488,13 @@ size: build
 [private]
 [script]
 _flash-cmd app bin='':
-    mapfile -t appenv < <(just --justfile {{justfile()}} _app-env {{app}})
+    mapfile -t appenv < <(just --justfile {{ justfile() }} _app-env {{ app }})
     exports=""
     for v in "${appenv[@]}"; do exports+=" $(printf '%q' "$v")"; done
     binarg=""
-    if [ -n "{{bin}}" ]; then binarg=" --bin {{bin}}"; fi
+    if [ -n "{{ bin }}" ]; then binarg=" --bin {{ bin }}"; fi
     printf 'export PATH="%s:$PATH" ESPFLASH_PORT="%s"%s; cargo run --release -p %s%s\n' \
-      '{{fw_path}}' '{{port}}' "$exports" '{{app}}' "$binarg"
+      '{{ fw_path }}' '{{ port }}' "$exports" '{{ app }}' "$binarg"
 
 # Build, flash, and monitor ONE app by name — optionally one named bin of its package, for the
 # bench tools that live beside an app. Runner is `espflash flash --monitor --non-interactive
@@ -450,12 +503,12 @@ _flash-cmd app bin='':
 # pipe/CI/agent (no crossterm input reader to fail). Ctrl-C exits.
 [doc('build, flash, and monitor one app by name (optionally one of its bins)')]
 [group('device')]
-[working-directory: 'firmware']
 [script]
+[working-directory('firmware')]
 fw-run app bin='':
-    cmd="$(just --justfile {{justfile()}} _flash-cmd {{app}} {{bin}})"
-    echo "▶ flashing {{app}} {{bin}} on {{port}}"
-    {{sg}} "$cmd"
+    cmd="$(just --justfile {{ justfile() }} _flash-cmd {{ app }} {{ bin }})"
+    echo "▶ flashing {{ app }} {{ bin }} on {{ port }}"
+    {{ sg }} "$cmd"
 
 # Build, flash, and monitor the firmware (the qhw.1 board session, automated).
 [doc('build, flash, and monitor the plant monitor')]
@@ -550,12 +603,12 @@ run-chime-selftest: (fw-run "pomodoro" "chime-selftest")
 [doc('attach a serial monitor only, no flash')]
 [group('device')]
 monitor:
-    {{sg}} '{{espflash}} monitor -p {{port}} -c {{chip}} --non-interactive'
+    {{ sg }} '{{ espflash }} monitor -p {{ port }} -c {{ chip }} --non-interactive'
 
 # Print board / flash info over serial.
 [group('device')]
 board-info:
-    {{sg}} '{{espflash}} board-info -p {{port}} -c {{chip}}'
+    {{ sg }} '{{ espflash }} board-info -p {{ port }} -c {{ chip }}'
 
 # ---- Project meta ----
 
@@ -564,6 +617,7 @@ board-info:
 fmt mode="write":
     cargo fmt --all {{ if mode == "check" { "--check" } else { "" } }}
     cd firmware && cargo fmt {{ if mode == "check" { "--check" } else { "" } }}
+    just --fmt {{ if mode == "check" { "--check" } else { "" } }}
 
 # Re-check the pinned esp-rs stack against crates.io latest.
 [group('meta')]
@@ -571,8 +625,8 @@ fmt mode="write":
 versions:
     ua="stick-c-plus just versions (i.gouss@gmail.com)"
     for c in esp-idf-svc esp-idf-hal esp-idf-sys embuild ldproxy; do
-      {{curl}} -s -H "User-Agent: $ua" "https://crates.io/api/v1/crates/$c" \
-        | {{jq}} -r --arg n "$c" '.crate | "\($n): \(.max_stable_version)  (newest \(.newest_version))"'
+      {{ curl }} -s -H "User-Agent: $ua" "https://crates.io/api/v1/crates/$c" \
+        | {{ jq }} -r --arg n "$c" '.crate | "\($n): \(.max_stable_version)  (newest \(.newest_version))"'
     done
 
 # The fast pre-commit gate: formatting + architecture, no compile (so it stays
@@ -580,7 +634,7 @@ versions:
 # build) stay in `just ci`.
 [doc('the fast pre-commit gate: formatting + architecture, no compile')]
 [group('meta')]
-precommit: (fmt "check") hex-lint
+precommit: (fmt "check") hex-lint apps-check
 
 # Install the git hooks (points core.hooksPath at .githooks). Run once per clone.
 # The pre-commit hook runs `just precommit` (fmt + hex-lint) before a commit.
@@ -594,14 +648,14 @@ setup-hooks:
 # build. hex-lint runs early — an architecture breach fails fast, before builds.
 [doc('everything CI checks: fmt, architecture, lint both worlds, test, build')]
 [group('meta')]
-ci: (fmt "check") hex-lint sprites-check lint lint-fw lint-buddy test build build-buddy
+ci: (fmt "check") hex-lint apps-check sprites-check lint lint-fw lint-buddy test build build-buddy
 
 # Remove build artifacts (host + firmware). Confirmed because a firmware clean throws away
 # the built ESP-IDF with it, and that costs minutes to put back. `just --yes clean` skips
 # the prompt for a scripted caller.
+[confirm('delete host AND firmware build artifacts? the ESP-IDF rebuild takes minutes.')]
 [doc('remove build artifacts (host + firmware)')]
 [group('meta')]
-[confirm('delete host AND firmware build artifacts? the ESP-IDF rebuild takes minutes.')]
 clean:
     cargo clean
     cd firmware && cargo clean
@@ -614,7 +668,7 @@ clean:
 [doc('verify the knowledge base against itself (links, checks, scripts)')]
 [group('kb')]
 kb *args:
-    @just --justfile {{justfile_directory()}}/kb/Justfile {{args}}
+    @just --justfile {{ justfile_directory() }}/kb/Justfile {{ args }}
 
 # ---- Beads (issue tracking) ----
 #
@@ -641,32 +695,32 @@ kb *args:
 # Ready work: open, unblocked, not deferred (br, human list — prints and exits).
 [group('beads')]
 ready:
-    {{br}} ready
+    {{ br }} ready
 
 # Blocked work and what each waits on (br, human list — prints and exits).
 [group('beads')]
 blocked:
-    {{br}} blocked
+    {{ br }} blocked
 
 # Project counts by status / type / priority (br — prints and exits).
 [group('beads')]
 stats:
-    {{br}} stats
+    {{ br }} stats
 
 # Top pick + its `br update … --status=in_progress` claim command (bv robot JSON).
 [group('beads')]
 next:
-    {{bv}} --robot-next -f json
+    {{ bv }} --robot-next -f json
 
 # Full triage — recommendations + blockers + graph health (bv, the mega-command).
 [group('beads')]
 triage:
-    {{bv}} --robot-triage -f json
+    {{ bv }} --robot-triage -f json
 
 # Parallel execution tracks: what can run concurrently right now (bv robot JSON).
 [group('beads')]
 plan:
-    {{bv}} --robot-plan -f json
+    {{ bv }} --robot-plan -f json
 
 # Flush the db → the committed .beads/issues.jsonl so beads changes can land.
 # br is non-invasive (never runs git), so stage + commit the JSONL yourself —
@@ -674,7 +728,7 @@ plan:
 [doc('flush the beads db to the committed .beads/issues.jsonl')]
 [group('beads')]
 bead-sync:
-    {{br}} sync --flush-only
+    {{ br }} sync --flush-only
     @echo "flushed → .beads/issues.jsonl  ·  commit: git add .beads/issues.jsonl && git commit -m 'beads: …'"
 
 # Graph-health gate. bv's insight metrics are lazily computed and report
@@ -682,14 +736,14 @@ bead-sync:
 # `br dep cycles` instead. Runs br diagnostics + asserts zero cycles; else fails.
 [doc('beads graph-health gate: br doctor + zero dependency cycles')]
 [group('beads')]
-[script]
 [no-exit-message]
+[script]
 bead-check:
-    {{br}} doctor
-    if {{br}} dep cycles --json | {{jq}} -e '.count == 0' >/dev/null; then
+    {{ br }} doctor
+    if {{ br }} dep cycles --json | {{ jq }} -e '.count == 0' >/dev/null; then
       echo "✅ beads: no dependency cycles"
     else
-      {{br}} dep cycles
+      {{ br }} dep cycles
       echo "❌ beads: dependency cycle(s) — break one edge with: br dep remove <child> <parent>"
       exit 1
     fi
