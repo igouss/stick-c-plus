@@ -31,6 +31,7 @@ embedded-graphics = "0.8"
 
 # Host-only; never reaches the Xtensa build (a dependent excludes dev-deps).
 [dev-dependencies]
+golden-screens = { path = "../../../platform/golden-screens" }
 # The shared host framebuffer the render tests draw into.
 platform-display = { path = "../../../platform/platform-display", features = ["testing"] }
 # A host framebuffer that saves a PNG — the screenshots example rasterizes to a file.

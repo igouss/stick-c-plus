@@ -34,7 +34,7 @@ fn main() {
         .iter()
         .map(|screen: &Screen| {
             let path: PathBuf = out_dir.join(screen.file);
-            render_png(screen.state, &path);
+            render_png(screen, &path);
             path
         })
         .collect();

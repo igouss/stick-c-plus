@@ -35,6 +35,7 @@ embedded-graphics = "0.8"
 
 # Host-only; never reaches the Xtensa build (a dependent excludes dev-deps).
 [dev-dependencies]
+golden-screens = { path = "../../../platform/golden-screens" }
 # The shared host framebuffer (feature `testing`) that the screen tests render into — the
 # same DrawTarget port the panel implements, so a render is proven against real pixels.
 platform-display = { path = "../../../platform/platform-display", features = ["testing"] }

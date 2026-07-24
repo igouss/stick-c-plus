@@ -149,12 +149,12 @@ pub fn scenes() -> Vec<Screen> {
     ]
 }
 
-/// Rasterise `state` to a PNG at [`SCALE`], through `host_display::render` — the very function
+/// Rasterise one screen to a PNG at [`SCALE`], through `host_display::render` — the very function
 /// the ST7789 adapter calls on the board — so the file is the real layout, not a drawing of
 /// it. Shared by the example and the goldens, so both produce byte-identical PNGs.
-pub fn render_png(state: HostState, path: &Path) {
+pub fn render_png(screen: &Screen, path: &Path) {
     let mut display: SimulatorDisplay<Rgb565> = SimulatorDisplay::new(SCREEN_SIZE);
-    host_display::render(&mut display, state, 0, ScreenRotation::Deg0)
+    host_display::render(&mut display, screen.state, 0, ScreenRotation::Deg0)
         .expect("a framebuffer render cannot fail");
     let settings: OutputSettings = OutputSettingsBuilder::new().scale(SCALE).build();
     display

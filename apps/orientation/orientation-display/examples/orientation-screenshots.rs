@@ -5,172 +5,38 @@
 //! ```
 //!
 //! The pixels come from `orientation_display::render` — the same function the ST7789 adapter
-//! calls on the board — drawn into a host framebuffer instead of down an SPI bus. So a
-//! reviewer looks at the real layout, not at a drawing of it.
+//! calls on the board — drawn into a host framebuffer instead of down an SPI bus. So a reviewer
+//! looks at the real layout, not at a drawing of it. The pose catalog and the rasteriser are
+//! shared with the `goldens` test (see `examples/common/scenes.rs`), so what you eyeball here is
+//! exactly what the goldens lock in.
 //!
-//! Each screen is built from a raw acceleration through the *real* `Orientation` transform and
-//! the *real* staleness rule, so a PNG that looks wrong is evidence about the domain, not just
-//! about the layout.
+//! **What these images do not show.** Everything below the `DrawTarget`: the panel's colour
+//! order, its CGRAM offset, its inversion, its backlight. A host framebuffer paints red as red
+//! however the glass is wired.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use embedded_graphics::pixelcolor::Rgb565;
-use embedded_graphics::prelude::Size;
-use embedded_graphics_simulator::{OutputSettings, OutputSettingsBuilder, SimulatorDisplay};
-use orientation_core::{Orientation, Reading, SIGNAL_TIMEOUT_MS};
-use orientation_display::{canvas_size, OrientationView, SCREEN_SIZE};
-use platform_core::{Acceleration, ScreenRotation, Tick, ONE_G_MG};
+#[path = "common/scenes.rs"]
+mod scenes;
+
+use orientation_display::SCREEN_SIZE;
+use scenes::{render_png, scenes, Screen, SCALE};
 
 /// Where the PNGs land. Under `target/`, so they are build output and git-ignored.
 const OUT_DIR: &str = "target/screens";
 
-/// The 240×135 panel is too small to read on a monitor; scale it up.
-const SCALE: u32 = 4;
-
-/// One captioned screen: the file it lands in, the reading that produces it, and how long ago
-/// that reading was confirmed.
-struct Screen {
-    file: &'static str,
-    acceleration: Acceleration,
-    /// How stale the reading is. Zero for every live pose; past [`SIGNAL_TIMEOUT_MS`] for the
-    /// one screen that shows a sensor which has stopped answering.
-    age_ms: Tick,
-    /// Which way up the picture is drawn — and therefore which of the two layouts, and which
-    /// shape of canvas.
-    rotation: ScreenRotation,
-}
-
-impl Screen {
-    /// A live landscape screen — the reading was confirmed this instant.
-    const fn live(file: &'static str, acceleration: Acceleration) -> Self {
-        Screen {
-            file,
-            acceleration,
-            age_ms: 0,
-            rotation: ScreenRotation::Deg0,
-        }
-    }
-
-    /// The same screen, drawn at `rotation`.
-    const fn at(self, rotation: ScreenRotation) -> Self {
-        Screen { rotation, ..self }
-    }
-}
-
-/// Every pose the glass can show. Adding one without adding it here means it ships
-/// un-looked-at.
-fn screens() -> Vec<Screen> {
-    vec![
-        Screen::live(
-            "orientation-01-screen-up.png",
-            Acceleration::new(0, 0, ONE_G_MG),
-        ),
-        Screen::live(
-            "orientation-02-screen-down.png",
-            Acceleration::new(0, 0, -ONE_G_MG),
-        ),
-        Screen::live(
-            "orientation-03-upright.png",
-            Acceleration::new(ONE_G_MG, 0, 0),
-        ),
-        Screen::live(
-            "orientation-04-inverted.png",
-            Acceleration::new(-ONE_G_MG, 0, 0),
-        ),
-        Screen::live(
-            "orientation-05-left-edge.png",
-            Acceleration::new(0, -ONE_G_MG, 0),
-        ),
-        Screen::live(
-            "orientation-06-right-edge.png",
-            Acceleration::new(0, ONE_G_MG, 0),
-        ),
-        // Between faces: the amber label, and two bars at rest mid-track.
-        Screen::live("orientation-07-tilted.png", Acceleration::new(0, 707, 707)),
-        // A gentle tilt that still names its face — the everyday case.
-        Screen::live(
-            "orientation-08-tilted-but-screen-up.png",
-            Acceleration::new(-342, 0, 940),
-        ),
-        // Being picked up: not gravity, so no pose is named.
-        Screen::live(
-            "orientation-09-moving.png",
-            Acceleration::new(300, -400, 1_900),
-        ),
-        // The sensor has stopped answering. The same reading as screen 01, drawn as a memory:
-        // red NO SIGNAL over the face name, and the whole readout dimmed beneath it.
-        Screen {
-            file: "orientation-10-no-signal.png",
-            acceleration: Acceleration::new(0, 0, ONE_G_MG),
-            age_ms: SIGNAL_TIMEOUT_MS,
-            rotation: ScreenRotation::Deg0,
-        },
-        // The other three quadrants. Screens 01–10 are all the panel's native landscape, which
-        // is the quadrant a board held with its USB-C port to the right reads at; each of these
-        // is drawn from the pose that actually settles to its rotation, so the gallery shows
-        // the picture a reader would really be holding rather than a rotation asserted onto an
-        // unrelated reading.
-        //
-        // A quarter turn: the board stood on its USB-C port, stick-top at the sky. The narrow
-        // canvas, so the header stacks and the bars are less than half as long.
-        Screen::live(
-            "orientation-11-portrait-stick-top-up.png",
-            Acceleration::new(ONE_G_MG, 0, 0),
-        )
-        .at(ScreenRotation::Deg270),
-        // The other quarter turn: hung the other way up, USB-C at the sky. The same layout —
-        // what differs between the two is the panel's scan order, which is below this crate,
-        // so these two PNGs are expected to be identical.
-        Screen::live(
-            "orientation-12-portrait-usb-end-up.png",
-            Acceleration::new(-ONE_G_MG, 0, 0),
-        )
-        .at(ScreenRotation::Deg90),
-        // A half turn: still landscape, read from the other side.
-        Screen::live(
-            "orientation-13-landscape-inverted.png",
-            Acceleration::new(0, ONE_G_MG, 0),
-        )
-        .at(ScreenRotation::Deg180),
-        // The narrow canvas' hardest line: `NO SIGNAL` is nine characters of the thirteen a
-        // portrait line holds, over a dimmed readout. If a field is going to run off an edge,
-        // it is this one.
-        Screen {
-            file: "orientation-14-portrait-no-signal.png",
-            acceleration: Acceleration::new(ONE_G_MG, 0, 0),
-            age_ms: SIGNAL_TIMEOUT_MS,
-            rotation: ScreenRotation::Deg270,
-        },
-    ]
-}
-
-/// Paint one screen into a fresh framebuffer and save it.
-fn capture(screen: &Screen, settings: &OutputSettings, out_dir: &Path) -> PathBuf {
-    let reading: Reading = Reading::aged(Orientation::of(screen.acceleration), screen.age_ms);
-    let view: OrientationView = OrientationView::of(&reading);
-    // Sized for the rotation, not for the panel: a landscape canvas would silently clip the
-    // right-hand third of a portrait screen and save a PNG that looked fine.
-    let canvas: Size = canvas_size(screen.rotation);
-    let mut display: SimulatorDisplay<Rgb565> = SimulatorDisplay::new(canvas);
-    orientation_display::render(&mut display, view, 0, screen.rotation)
-        .expect("a framebuffer render cannot fail");
-    let path: PathBuf = out_dir.join(screen.file);
-    display
-        .to_rgb_output_image(settings)
-        .save_png(&path)
-        .expect("save the screenshot");
-    path
-}
-
 fn main() {
     let out_dir: &Path = Path::new(OUT_DIR);
     fs::create_dir_all(out_dir).expect("create the screenshot directory");
-    let settings: OutputSettings = OutputSettingsBuilder::new().scale(SCALE).build();
 
-    let written: Vec<PathBuf> = screens()
+    let written: Vec<PathBuf> = scenes()
         .iter()
-        .map(|screen: &Screen| capture(screen, &settings, out_dir))
+        .map(|screen: &Screen| {
+            let path: PathBuf = out_dir.join(screen.file);
+            render_png(screen, &path);
+            path
+        })
         .collect();
 
     written

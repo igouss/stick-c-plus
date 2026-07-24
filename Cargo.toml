@@ -15,6 +15,7 @@ members = [
     "platform/platform-input",
     "platform/platform-health",
     "platform/platform-bench",
+    "platform/golden-screens",
     "platform/platform-display",
     "platform/platform-runtime",
     "platform/firmware-core",

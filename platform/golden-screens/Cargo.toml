@@ -1,0 +1,18 @@
+[package]
+name = "golden-screens"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Check a catalog of rendered screens against committed reference PNGs, or re-bless them — the one implementation of the golden-screen check every display crate's `goldens` test runs."
+
+[lib]
+name = "golden_screens"
+path = "src/lib.rs"
+
+# Infrastructure, not domain: this crate exists to read and write PNG files on the host, which
+# is precisely the effect a `domain` crate may not have. It is a dev-dependency only — no
+# display crate depends on it to render, only to CHECK a render — so it never reaches the
+# Xtensa build. context = "shared" because every app's display crate uses it.
+[package.metadata.hex-arch]
+role = "infra"
+context = "shared"

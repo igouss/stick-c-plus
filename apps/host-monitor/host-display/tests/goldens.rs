@@ -13,78 +13,31 @@
 //! ```
 //! Both paths raster through the shared `render_png`, so a blessed golden and a checked render
 //! are produced identically — the comparison can be exact bytes.
+//!
+//! The check itself lives in `golden-screens`, shared by every display crate.
 
-use std::fs;
 use std::path::{Path, PathBuf};
+
+use golden_screens::{verify, Golden};
 
 #[path = "../examples/common/scenes.rs"]
 mod scenes;
 
-use scenes::{render_png, scenes, Screen};
-
-/// The committed reference PNGs live beside the crate, in `goldens/`.
-fn goldens_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens")
-}
-
-/// Whether this run overwrites the goldens (`BLESS_GOLDENS` set) instead of checking them.
-fn blessing() -> bool {
-    std::env::var_os("BLESS_GOLDENS").is_some()
-}
-
 /// Render every catalogued screen and either overwrite its golden (bless) or assert it is
-/// byte-identical to the committed one. One test over the catalog: it reports **every**
-/// drifted screen at once, so a sweeping change is seen whole, not one failure at a time.
+/// byte-identical to the committed one.
 #[test]
 fn every_screen_matches_its_committed_golden() {
-    let goldens: PathBuf = goldens_dir();
-    let fresh_dir: &Path = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let goldens_dir: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens");
+    let screens: Vec<scenes::Screen> = scenes::scenes();
 
-    if blessing() {
-        fs::create_dir_all(&goldens).expect("create the goldens directory");
-    }
-
-    let mut drifted: Vec<String> = Vec::new();
-    let mut missing: Vec<String> = Vec::new();
-
-    for screen in scenes() {
-        let Screen { file, state } = screen;
-        let golden_path: PathBuf = goldens.join(file);
-
-        if blessing() {
-            render_png(state, &golden_path);
-            continue;
-        }
-
-        // Render fresh into the per-test temp dir (under target/), then compare.
-        let fresh_path: PathBuf = fresh_dir.join(file);
-        render_png(state, &fresh_path);
-        let fresh: Vec<u8> = fs::read(&fresh_path).expect("read the fresh render");
-
-        match fs::read(&golden_path) {
-            Ok(golden) if golden == fresh => {}
-            Ok(_) => drifted.push(format!(
-                "  {file}: committed {} vs new {}",
-                golden_path.display(),
-                fresh_path.display()
-            )),
-            Err(_) => missing.push(format!("  {file}: no golden at {}", golden_path.display())),
-        }
-    }
-
-    if blessing() {
-        return; // nothing to assert — we just (re)wrote the goldens.
-    }
-
-    assert!(
-        missing.is_empty(),
-        "golden screen(s) missing — bless them first with `just screens-bless`:\n{}",
-        missing.join("\n")
-    );
-    assert!(
-        drifted.is_empty(),
-        "the rendered screen(s) changed from their goldens:\n{}\n\nInspect the new render against \
-         the committed golden. If the change is intended, re-bless: `just screens-bless`.",
-        drifted.join("\n")
+    verify(
+        &goldens_dir,
+        Path::new(env!("CARGO_TARGET_TMPDIR")),
+        screens
+            .iter()
+            .map(|screen: &scenes::Screen| {
+                Golden::new(screen.file, |path: &Path| scenes::render_png(screen, path))
+            })
+            .collect::<Vec<Golden<'_>>>(),
     );
 }
