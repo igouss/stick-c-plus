@@ -26,6 +26,7 @@ members = [
     "apps/generative-art/art-core",
     "apps/generative-art/plume-core",
     "apps/generative-art/art-display",
+    "apps/generative-art/art-shell",
     "apps/buddy/buddy-core",
     "apps/buddy/buddy-wire",
     "apps/buddy/buddy-bridge-core",

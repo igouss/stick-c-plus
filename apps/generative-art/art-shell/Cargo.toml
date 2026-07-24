@@ -1,0 +1,26 @@
+[package]
+name = "art-shell"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The generative-art gallery's imperative shell: the shared selector the render loop reads and the input thread that advances it on a front-button click. Device-independent — it drives the board-generic Clock and button ports, so the whole control (a press cycles the gallery, wrapping) is verified on the host with fake peripherals and cross-compiles to esp-idf std unchanged."
+
+[lib]
+name = "art_shell"
+path = "src/lib.rs"
+
+# The gallery's imperative shell: it owns the selector cache and the input thread, yet names no
+# hardware — it drives the board-generic Clock and button ports the composition root wires the
+# real GPIO button and Monotonic clock into. driving-adapter may depend on domain (art-core,
+# platform-core) and other adapters (platform-input). context = "generative-art".
+[package.metadata.hex-arch]
+role = "driving-adapter"
+context = "generative-art"
+
+[dependencies]
+# The pure domain: the Selector the shell advances and the Sketch the render loop reads.
+art-core = { path = "../art-core" }
+# The board-generic ports the loop drives: the Clock it times the gesture pipeline against.
+platform-core = { path = "../../../platform/platform-core" }
+# The button: the levelled port and the single-button gesture Recognizer the loop folds.
+platform-input = { path = "../../../platform/platform-input" }

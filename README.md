@@ -29,8 +29,8 @@ so a new experiment is a new directory under `apps/`, not a new firmware:
    *fan*, *orbits*, and an original frond — each a pure producer of a frame from a phase, sharing
    one startup-built **sine table** and one offscreen frame blitted in a **single** SPI window.
    Its point is the platform's math and rendering under load. *Screen + one button — press to
-   move through the gallery.* (The on-board bin and button wiring land with the gallery's own
-   composition root; the host crates render every piece today.)
+   move through the gallery.* (The four other pieces render as honest "coming soon" placeholders
+   until their own commits; the front button already cycles all five on the glass.)
 6. **led-driver** — a NightDriverStrip-style **WS2812** animation driver (the repo's
    original purpose; the `led-core` effects domain lives on). *Future.*
 7. **rover** — a controllable robot. *Future; diverges in hardware.*
@@ -76,7 +76,8 @@ stick-c-plus/
 │  ├─ host-monitor/        #   host-core (Pulse frame + clamp/gap transform) · host-wire (JSON codec) · host-display · host-shell
 │  ├─ orientation/         #   orientation-core (tilt + resting face) · orientation-display · orientation-shell
 │  ├─ generative-art/      #   art-core (Sketch running order + Selector) · plume-core (the frond's
-│  │                       #     field + phase) · art-display (the gallery renderer + per-sketch raster)
+│  │                       #     field + phase) · art-display (the gallery renderer + per-sketch
+│  │                       #     raster) · art-shell (the front-button input thread + shared selector)
 │  └─ led-driver/          #   led-core (WS2812 effects)
 ├─ firmware/          # the Xtensa boundary — a detached std/ESP-IDF workspace
 │  ├─ platform/            #   board-support (BSP: AXP192, MPU6886, I2C) · adapters (ST7789 panel +
@@ -85,6 +86,7 @@ stick-c-plus/
 │  │                       #     net (shared WiFi STA + DNS resolve)
 │  └─ apps/                #   plant-monitor/{adapters, firmware-infra, bin} · host-monitor/{adapters, bin}
 │                          #     · pomodoro/bin (+ the chime-selftest bench tool) · orientation/bin
+│                          #     · generative-art/bin (the gallery)
 └─ kb/                # Knowledge base — board facts, sources, findings (kbe-style)
 ```
 
@@ -164,6 +166,7 @@ just run-chime-selftest # play every jingle through the buzzer, hear it back on 
 just run                # the plant monitor  (a.k.a. `just flash`)
 just run-host-monitor   # the homelab CPU/memory monitor (WiFi → hostpulse → per-host sparklines)
 just run-orientation    # the IMU orientation readout (X/Y/Z bars + pitch/roll + resting face)
+just run-generative-art # the button-cycled gallery of generative sketches (front button = next)
 just monitor            # serial monitor only — pty-free (espflash --non-interactive)
 ```
 

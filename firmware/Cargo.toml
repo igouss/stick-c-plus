@@ -16,6 +16,7 @@
 #   apps/host-monitor/bin/    composition-root — the host monitor (crate name "host-monitor").
 #   apps/pomodoro/bin/        composition-root — the standalone pomodoro timer.
 #   apps/orientation/bin/     composition-root — the live IMU orientation readout.
+#   apps/generative-art/bin/  composition-root — the button-cycled generative-art gallery.
 #   apps/buddy/bin/           composition-root — the Claude Code desk pet (BLE Nordic UART).
 #
 # Detached (own `[workspace]`, `exclude`d up top) so its Xtensa target and `esp`
@@ -35,6 +36,7 @@ members = [
     "apps/host-monitor/bin",
     "apps/pomodoro/bin",
     "apps/orientation/bin",
+    "apps/generative-art/bin",
     "apps/buddy/bin",
 ]
 

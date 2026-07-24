@@ -97,6 +97,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "art-shell"
+version = "0.1.0"
+dependencies = [
+ "art-core",
+ "platform-core",
+ "platform-input",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.91"
 source = "registry+https://github.com/rust-lang/crates.io-index"

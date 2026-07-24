@@ -1,0 +1,47 @@
+[package]
+name = "generative-art"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "M5StickC Plus generative-art gallery — button-cycled generative sketches on the panel, on the shared board platform."
+# The gallery is the point of this package; a bare `cargo run -p generative-art` must choose it.
+default-run = "generative-art"
+
+[[bin]]
+name = "generative-art"
+path = "src/main.rs"
+
+# The imperative shell's outermost layer: it composes adapters and owns effects, so it is the
+# one crate the effect-audit `domain` gate must never tag.
+[package.metadata.hex-arch]
+role = "composition-root"
+
+# See apps/plant-monitor/bin/Cargo.toml for what this table means. Shares the workspace ESP-IDF
+# (root crate = plant-monitor): the gallery has no network, so its ELF drops the unused mdns
+# symbols and the flashed image is offline and clean.
+[package.metadata.board]
+idf-root-crate = "plant-monitor"
+summary = "button-cycled gallery of generative sketches on the panel"
+
+[dependencies]
+# The std/ESP-IDF stack. esp-idf-svc re-exports -hal and -sys, but all three are named so the
+# version floor shows.
+esp-idf-svc = "0.52"
+esp-idf-hal = "0.46"
+esp-idf-sys = "0.37"
+log = "0.4"
+# Firmware crates (same workspace): the BSP that powers the LCD rails, and the board-generic
+# adapters — the ST7789 panel and the front G37 push-button. No sensor, no network.
+board-support = { path = "../../../platform/board-support" }
+platform-adapters = { path = "../../../platform/adapters" }
+# Host crates, referenced by path across the two workspaces. platform-runtime is the generic
+# render loop + Monotonic clock; platform-core the Tick and the ScreenRotation; the art-* crates
+# are the gallery's picture and its input — all no_std/std and cross-compile to xtensa cleanly.
+platform-core = { path = "../../../../platform/platform-core" }
+platform-runtime = { path = "../../../../platform/platform-runtime" }
+art-display = { path = "../../../../apps/generative-art/art-display" }
+art-shell = { path = "../../../../apps/generative-art/art-shell" }
+
+[build-dependencies]
+# Emits the ESP-IDF sysenv link/search flags for the final link (via ldproxy).
+embuild = "0.33"
