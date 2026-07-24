@@ -24,6 +24,8 @@ members = [
     "platform/esphome-server",
     # apps/ — one bounded context per app on the shared foundation.
     "apps/generative-art/art-core",
+    "apps/generative-art/plume-core",
+    "apps/generative-art/art-display",
     "apps/buddy/buddy-core",
     "apps/buddy/buddy-wire",
     "apps/buddy/buddy-bridge-core",
@@ -44,8 +46,6 @@ members = [
     "apps/orientation/orientation-core",
     "apps/orientation/orientation-display",
     "apps/orientation/orientation-shell",
-    "apps/plume/plume-core",
-    "apps/plume/plume-display",
     "apps/plant-monitor/plant-core",
     "apps/plant-monitor/plant-display",
     "apps/plant-monitor/plant-shell",

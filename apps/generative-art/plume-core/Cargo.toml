@@ -9,13 +9,15 @@ description = "Framework-free plume domain for the M5StickC Plus: the parametric
 name = "plume_core"
 path = "src/lib.rs"
 
-# The pure heart of the plume app: the parametric field (a point cloud as a function of an
-# animation phase) and the sine table it is computed through, no framework and no I/O.
-# context = "plume" scopes it to its own bounded context; it depends on nothing but libm's
-# sqrt for the one honest magnitude in the field.
+# The pure heart of the plume sketch: the parametric field (a point cloud as a function of an
+# animation phase) and the phase clock that animates it, no framework and no I/O. context =
+# "generative-art" — the plume is one piece in the gallery now, so its domain lives in the
+# gallery's context beside art-core, which lets the gallery's display crate project it without
+# crossing a context boundary. It depends on nothing but the shared sine table and libm's sqrt
+# for the one honest magnitude in the field.
 [package.metadata.hex-arch]
 role = "domain"
-context = "plume"
+context = "generative-art"
 
 [dependencies]
 # The startup-built sine table, now shared across every sketch in the gallery. context =

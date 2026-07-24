@@ -82,12 +82,6 @@ build-pomodoro: (fw-build "pomodoro")
 [doc('build just the orientation readout (Xtensa release)')]
 [group('firmware')]
 build-orientation: (fw-build "orientation")
-# Build just the plume (Xtensa release). Like the orientation readout it links the shared
-# ESP-IDF the workspace builds (root crate = plant-monitor); with no network the plume ELF
-# drops the unused mdns symbols, so the flashed image is offline and clean.
-[doc('build just the plume (Xtensa release)')]
-[group('firmware')]
-build-plume: (fw-build "plume")
 # Build just the host monitor (Xtensa release), with a lean mdns-free ESP-IDF. Unlike
 # `just build` (root crate = plant-monitor, which pulls the espressif/mdns managed
 # component), its `idf-root-crate = "host-monitor"` builds an IDF from host-monitor's own
@@ -207,13 +201,6 @@ run-pomodoro: (fw-run "pomodoro")
 [doc('build, flash, and monitor the live IMU orientation readout')]
 [group('device')]
 run-orientation: (fw-run "orientation")
-# Build, flash, and monitor the plume: an ambient, clock-driven feathered frond that breathes
-# on the panel, stood on its USB-C port. No sensor and no buttons — just watch it move. The
-# serial heartbeat only says it is alive; the plume has no state. `just run` puts the plant
-# monitor back.
-[doc('build, flash, and monitor the plume')]
-[group('device')]
-run-plume: (fw-run "plume")
 # Build, flash, and monitor the homelab host monitor. Fetches the bearer-gated hostpulse
 # endpoint ([host_monitor] endpoint+token in firmware/secrets.toml) and draws one row per
 # host — name, live CPU/memory %, and two scrolling sparklines — for all three hosts.

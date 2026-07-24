@@ -83,6 +83,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "art-display"
+version = "0.1.0"
+dependencies = [
+ "art-core",
+ "embedded-graphics",
+ "embedded-graphics-simulator",
+ "golden-screens",
+ "platform-core",
+ "platform-display",
+ "platform-numerics",
+ "plume-core",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.91"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1576,18 +1590,6 @@ dependencies = [
  "platform-numerics",
  "proptest",
  "tokio",
-]
-
-[[package]]
-name = "plume-display"
-version = "0.1.0"
-dependencies = [
- "embedded-graphics",
- "embedded-graphics-simulator",
- "golden-screens",
- "platform-core",
- "platform-display",
- "plume-core",
 ]
 
 [[package]]

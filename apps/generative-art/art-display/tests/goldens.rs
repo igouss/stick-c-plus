@@ -1,15 +1,15 @@
-//! Golden screens — the committed picture of the plume's breath, guarded against drift.
+//! Golden screens — the committed picture of the gallery, guarded against drift.
 //!
 //! Every still in the shared catalog (`examples/common/scenes.rs`, the same one the
-//! `plume-screenshots` example renders) is rasterised through `Plume::render` and compared
-//! byte-for-byte against a committed reference PNG under `plume-display/goldens/`. A change to
-//! the frond geometry, the colours, or the breathing maths flips the bytes and **fails this
-//! test** — so a change to the picture is never invisible; a human decides whether it is an
-//! improvement (and re-blesses) or a regression (and reverts).
+//! `gallery-screenshots` example renders) is rasterised through `Gallery::render` and compared
+//! byte-for-byte against a committed reference PNG under `art-display/goldens/`. A change to any
+//! sketch's geometry, colours, or motion flips the bytes and **fails this test** — so a change to
+//! the picture is never invisible; a human decides whether it is an improvement (and re-blesses)
+//! or a regression (and reverts).
 //!
-//! This is the only check the plume can have that looks at the picture: it has no state machine
-//! to unit-test, just a clock and some trigonometry, so pinning the shape at fixed points of the
-//! period is what stops the frond silently changing.
+//! It pins the plume's shape across its breath — the frond has no state machine to unit-test, just
+//! a clock and some trigonometry — and pins each not-yet-built sketch's placeholder, so the day a
+//! placeholder becomes a real sketch the change is a blessed golden, not a silent one.
 //!
 //! Re-bless after an *intended* change:
 //! ```sh

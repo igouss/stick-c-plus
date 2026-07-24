@@ -1457,53 +1457,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "platform-numerics"
-version = "0.1.0"
-dependencies = [
- "libm",
-]
-
-[[package]]
 name = "platform-runtime"
 version = "0.1.0"
 dependencies = [
  "log",
  "platform-core",
-]
-
-[[package]]
-name = "plume"
-version = "0.1.0"
-dependencies = [
- "board-support",
- "embuild",
- "esp-idf-hal",
- "esp-idf-svc",
- "esp-idf-sys",
- "log",
- "platform-adapters",
- "platform-core",
- "platform-runtime",
- "plume-core",
- "plume-display",
-]
-
-[[package]]
-name = "plume-core"
-version = "0.1.0"
-dependencies = [
- "libm",
- "platform-numerics",
-]
-
-[[package]]
-name = "plume-display"
-version = "0.1.0"
-dependencies = [
- "embedded-graphics",
- "platform-core",
- "platform-display",
- "plume-core",
 ]
 
 [[package]]

@@ -1,18 +1,18 @@
-//! Render the plume across one breath, to PNG.
+//! Render each screen in the gallery to PNG.
 //!
 //! ```sh
-//! just screens          # → target/screens/plume-*.png
+//! just screens          # → target/screens/art-*.png
 //! ```
 //!
-//! The pixels come from `Plume::render` — the same function the ST7789 adapter calls on the
+//! The pixels come from `Gallery::render` — the same function the ST7789 adapter calls on the
 //! board — drawn into a host framebuffer instead of down an SPI bus. So a reviewer looks at the
-//! real picture, not at a drawing of it. The still catalog and the rasteriser are shared with the
-//! `goldens` test (see `examples/common/scenes.rs`), so what you eyeball here is exactly what the
-//! goldens lock in.
+//! real picture, not a drawing of it: the plume across a breath, and each not-yet-built sketch's
+//! honest placeholder. The catalog and the rasteriser are shared with the `goldens` test (see
+//! `examples/common/scenes.rs`), so what you eyeball here is exactly what the goldens lock in.
 //!
-//! **What these images do not show.** Everything below the `DrawTarget`: the panel's colour
-//! order, its CGRAM offset, its inversion, its backlight. A host framebuffer paints green as
-//! green however the glass is wired.
+//! **What these images do not show.** Everything below the `DrawTarget`: the panel's colour order,
+//! its CGRAM offset, its inversion, its backlight. A host framebuffer paints white as white
+//! however the glass is wired — only the panel's own self-test can catch a channel swap.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 #[path = "common/scenes.rs"]
 mod scenes;
 
-use plume_display::canvas_size;
+use art_display::canvas_size;
 use scenes::{render_png, scenes, Screen, PORTRAIT, SCALE};
 
 /// Where the PNGs land. Under `target/`, so they are build output and git-ignored.
@@ -44,7 +44,7 @@ fn main() {
         .for_each(|path: &PathBuf| println!("{}", path.display()));
     let canvas = canvas_size(PORTRAIT);
     println!(
-        "\n{} plume phases at {}×{} (scaled {SCALE}×) → {OUT_DIR}/",
+        "\n{} gallery stills at {}×{} (scaled {SCALE}×) → {OUT_DIR}/",
         written.len(),
         canvas.width,
         canvas.height

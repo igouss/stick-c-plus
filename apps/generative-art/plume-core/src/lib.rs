@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 //! # plume-core
 //!
-//! The pure heart of the plume app: a slow-breathing feathered frond, drawn as a cloud of
+//! The pure heart of the plume sketch: a slow-breathing feathered frond, drawn as a cloud of
 //! points that is a function of nothing but an animation phase. No framework, no I/O, no state
 //! — frame *N* is [`plume`]`(`[`phase`]`(N))` and nothing else — so the whole thing is verified
 //! on the host and cross-compiles to Xtensa unchanged.

@@ -22,12 +22,15 @@ so a new experiment is a new directory under `apps/`, not a new firmware:
    IMU's gravity vector as three signed X/Y/Z bars, the pitch and roll in degrees, and the
    face it is resting on — laid out for whichever way up the board is being held. *Screen +
    IMU, no network, no buttons — turn it and watch.*
-5. **plume** — an ambient, clock-driven **feathered frond** that breathes on the panel: a
-   five-thousand-point parametric field (a faithful port of a *Dwitter*) animated on the phase
-   clock alone. Its point is the platform's math and rendering under load — a startup-built
-   **sine table** replaces every per-point transcendental, and each frame is plotted into a
-   one-bit offscreen frame and blitted in a **single** SPI window, not five thousand pokes.
-   *Screen only, no sensor, no network — just watch it move.*
+5. **generative-art** — a **gallery** of generative sketches, one on the panel at a time, the
+   front button cycling to the next (wrapping). The first piece is the **plume**, an ambient
+   feathered frond that breathes on the panel: a five-thousand-point parametric field (a faithful
+   port of a *Dwitter*) animated on the phase clock alone. Four more are on the way — *squares*,
+   *fan*, *orbits*, and an original frond — each a pure producer of a frame from a phase, sharing
+   one startup-built **sine table** and one offscreen frame blitted in a **single** SPI window.
+   Its point is the platform's math and rendering under load. *Screen + one button — press to
+   move through the gallery.* (The on-board bin and button wiring land with the gallery's own
+   composition root; the host crates render every piece today.)
 6. **led-driver** — a NightDriverStrip-style **WS2812** animation driver (the repo's
    original purpose; the `led-core` effects domain lives on). *Future.*
 7. **rover** — a controllable robot. *Future; diverges in hardware.*
@@ -51,6 +54,8 @@ stick-c-plus/
 ├─ platform/          # the reusable, app-agnostic foundation (context = "shared")
 │  ├─ platform-core/       #   domain          — Tick, the Clock/Screen/Backlight/Tone/AudioIn
 │  │                       #                      ports, the Animated contract, the rotation policy
+│  ├─ platform-numerics/   #   domain           — the startup-built sine table (a LUT proven within
+│  │                       #                      1e-3 of libm), shared by every generative sketch
 │  ├─ platform-input/      #   domain           — the board's three buttons as one event source:
 │  │                       #                      the levelled + latched ports, and the pure
 │  │                       #                      click / double-click / long-hold recognizer
@@ -70,7 +75,8 @@ stick-c-plus/
 │  ├─ plant-monitor/       #   plant-core (moisture) · plant-display · plant-shell
 │  ├─ host-monitor/        #   host-core (Pulse frame + clamp/gap transform) · host-wire (JSON codec) · host-display · host-shell
 │  ├─ orientation/         #   orientation-core (tilt + resting face) · orientation-display · orientation-shell
-│  ├─ plume/               #   plume-core (parametric field + sine table + phase) · plume-display
+│  ├─ generative-art/      #   art-core (Sketch running order + Selector) · plume-core (the frond's
+│  │                       #     field + phase) · art-display (the gallery renderer + per-sketch raster)
 │  └─ led-driver/          #   led-core (WS2812 effects)
 ├─ firmware/          # the Xtensa boundary — a detached std/ESP-IDF workspace
 │  ├─ platform/            #   board-support (BSP: AXP192, MPU6886, I2C) · adapters (ST7789 panel +
@@ -158,7 +164,6 @@ just run-chime-selftest # play every jingle through the buzzer, hear it back on 
 just run                # the plant monitor  (a.k.a. `just flash`)
 just run-host-monitor   # the homelab CPU/memory monitor (WiFi → hostpulse → per-host sparklines)
 just run-orientation    # the IMU orientation readout (X/Y/Z bars + pitch/roll + resting face)
-just run-plume          # the ambient feathered frond that breathes on the panel (screen only)
 just monitor            # serial monitor only — pty-free (espflash --non-interactive)
 ```
 
