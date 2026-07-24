@@ -1,0 +1,22 @@
+[package]
+name = "dma-mem"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "DMA-capable internal-RAM buffers, allocated once and leaked to 'static — the one crate that hands the SPI DMA engine memory it can actually reach."
+
+[lib]
+name = "dma_mem"
+path = "src/lib.rs"
+
+# `infra` — it wraps one ESP-IDF heap C call and nothing else. Per the hex-lint matrix `infra`
+# may depend only on `infra`, which is exactly the containment wanted: nothing domain-shaped can
+# leak in, and the `unsafe` cannot leak out. The second crate (with esp-metrics) allowed to speak
+# raw C, and the only one that hands a caller a buffer.
+[package.metadata.hex-arch]
+role = "infra"
+
+[dependencies]
+# The generated ESP-IDF bindings, for `heap_caps_malloc` and the `MALLOC_CAP_DMA` capability —
+# there is no safe wrapper for a DMA-capable allocation in esp-idf-hal or -svc (checked).
+esp-idf-sys = "0.37"

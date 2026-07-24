@@ -45,7 +45,7 @@ use embedded_hal::spi::MODE_0;
 use esp_idf_hal::delay::Ets;
 use esp_idf_hal::gpio::{AnyIOPin, Gpio13, Gpio15, Gpio18, Gpio23, Gpio5, Output, PinDriver};
 use esp_idf_hal::spi::config::{Config as SpiConfig, DriverConfig as SpiDriverConfig};
-use esp_idf_hal::spi::{SpiDeviceDriver, SpiDriver, SPI2};
+use esp_idf_hal::spi::{Dma, SpiDeviceDriver, SpiDriver, SPI2};
 use esp_idf_hal::units::FromValueType;
 use mipidsi::models::ST7789;
 use mipidsi::options::{ColorInversion, ColorOrder, Orientation, Rotation};
@@ -203,23 +203,77 @@ impl Panel {
         dc: Gpio23<'static>,
         rst: Gpio18<'static>,
     ) -> Result<Self, St7789Error> {
+        // The SPI interface borrows a pixel-batch buffer for its whole life. A StaticCell hands
+        // it a 'static buffer with no allocator and no leaked Box — initialised once here (a
+        // second `Panel::new` would panic). No DMA: the CPU feeds the FIFO, which is ample for
+        // the text-and-sprite apps a 4 KiB batch serves.
+        let buffer: &'static mut [u8] = SPI_BUFFER.init([0u8; BUFFER_LEN]);
+        Self::build(spi, sclk, mosi, cs, dc, rst, Dma::Disabled, buffer)
+    }
+
+    /// Bring up the panel with **SPI DMA** and a caller-supplied pixel-batch buffer.
+    ///
+    /// The sibling of [`new`](Self::new) for an app that repaints the *whole* panel every frame
+    /// — a generative-art sketch — where the ceiling is the blit, not the math. Two things move
+    /// the frame time:
+    ///
+    /// - **DMA on.** Each SPI write crosses the bus as a hardware-fed burst rather than the CPU
+    ///   hand-feeding the FIFO word by word.
+    /// - **`buffer` is the caller's**, sized to a whole frame and — critically — allocated in
+    ///   **DMA-capable** RAM (see [`dma_mem`](https://docs.rs)/`dma-mem`). mipidsi gathers the
+    ///   entire picture into it and flushes it as **one** DMA transaction: one CGRAM window, one
+    ///   burst, instead of the ~16 a 4 KiB batch pays for. A non-DMA-capable buffer of this size
+    ///   does not merely run slow — the DMA engine reads memory it cannot reach and the board
+    ///   double-faults before the first frame, which is why the buffer is injected rather than
+    ///   allocated here: only the composition root knows how to ask for DMA memory.
+    ///
+    /// `buffer.len()` becomes the DMA transfer-size cap, so it must be a multiple of 4 (the
+    /// engine's word) — a whole-frame `Rgb565` buffer (`w·h·2`) always is.
+    pub fn new_dma(
+        spi: SPI2<'static>,
+        sclk: Gpio13<'static>,
+        mosi: Gpio15<'static>,
+        cs: Gpio5<'static>,
+        dc: Gpio23<'static>,
+        rst: Gpio18<'static>,
+        buffer: &'static mut [u8],
+    ) -> Result<Self, St7789Error> {
+        debug_assert!(
+            buffer.len() % 4 == 0 && !buffer.is_empty(),
+            "a DMA transfer size must be a non-zero multiple of 4"
+        );
+        let dma: Dma = Dma::Auto(buffer.len());
+        Self::build(spi, sclk, mosi, cs, dc, rst, dma, buffer)
+    }
+
+    /// The shared bring-up both constructors run: build the SPI device with `dma`, drive DC/RST,
+    /// hand mipidsi the `buffer`, and run the ST7789 init. The only difference between a plain and
+    /// a DMA panel is the two arguments threaded here; everything downstream — the offsets, the
+    /// inversion, the RGB order, the one clearing blit — is identical, so it is written once.
+    #[allow(clippy::too_many_arguments)]
+    fn build(
+        spi: SPI2<'static>,
+        sclk: Gpio13<'static>,
+        mosi: Gpio15<'static>,
+        cs: Gpio5<'static>,
+        dc: Gpio23<'static>,
+        rst: Gpio18<'static>,
+        dma: Dma,
+        buffer: &'static mut [u8],
+    ) -> Result<Self, St7789Error> {
         let bus: BusDevice = SpiDeviceDriver::new_single(
             spi,
             sclk,
             mosi,
             None::<AnyIOPin>, // write-only panel: no MISO.
             Some(cs),
-            &SpiDriverConfig::new(),
+            &SpiDriverConfig::new().dma(dma),
             &SpiConfig::new().baudrate(SPI_HZ.Hz()).data_mode(MODE_0),
         )
         .map_err(|e| fault("spi", e))?;
         let dc: Dc = PinDriver::output(dc).map_err(|e| fault("dc pin", e))?;
         let rst: Rst = PinDriver::output(rst).map_err(|e| fault("rst pin", e))?;
 
-        // The SPI interface borrows a pixel-batch buffer for its whole life. A
-        // StaticCell hands it a 'static buffer with no allocator and no leaked Box —
-        // initialised once here (a second Panel::new would panic).
-        let buffer: &'static mut [u8] = SPI_BUFFER.init([0u8; BUFFER_LEN]);
         let interface: Interface = SpiInterface::new(bus, dc, buffer);
 
         let mut delay: Ets = Ets;

@@ -8,7 +8,8 @@
 #                                              PanelScreen, buttons, buzzer); every app.
 #   platform/board-support/   infra          — M5StickC Plus BSP (AXP192, I2C); every app.
 #   platform/net/             infra          — shared WiFi STA + DNS resolve; every networked app.
-#   platform/esp-metrics/     infra          — heap counters; the ONE crate allowed `unsafe`.
+#   platform/esp-metrics/     infra          — heap counters; a crate allowed `unsafe`.
+#   platform/dma-mem/         infra          — DMA-capable buffers; a crate allowed `unsafe`.
 #   apps/plant-monitor/adapters/     driven-adapter — the plant adc + probe-power adapters.
 #   apps/plant-monitor/firmware-infra/ infra        — ESPHome mDNS advertiser (plant only).
 #   apps/plant-monitor/bin/   composition-root — the plant-monitor (crate name "plant-monitor").
@@ -28,6 +29,7 @@ members = [
     "platform/board-support",
     "platform/net",
     "platform/esp-metrics",
+    "platform/dma-mem",
     "platform/esp-entropy",
     "apps/plant-monitor/adapters",
     "apps/plant-monitor/firmware-infra",

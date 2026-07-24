@@ -34,6 +34,10 @@ log = "0.4"
 # adapters — the ST7789 panel and the front G37 push-button. No sensor, no network.
 board-support = { path = "../../../platform/board-support" }
 platform-adapters = { path = "../../../platform/adapters" }
+# DMA-capable memory for the panel's whole-frame batch buffer: every frame is a full-screen
+# blit, so the gallery drives the panel with SPI DMA (Panel::new_dma) and this hands the DMA
+# engine a buffer it can actually reach.
+dma-mem = { path = "../../../platform/dma-mem" }
 # Host crates, referenced by path across the two workspaces. platform-runtime is the generic
 # render loop + Monotonic clock; platform-core the Tick and the ScreenRotation; the art-* crates
 # are the gallery's picture and its input — all no_std/std and cross-compile to xtensa cleanly.

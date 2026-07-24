@@ -36,7 +36,7 @@
 //! long enough to power them on, then releases it: there is no power-watch here to keep reading
 //! VBUS, so once the rails are up the panel and the button are the app's only I/O.
 
-use art_display::{Gallery, GalleryView, FRAME_MS};
+use art_display::{Gallery, GalleryView, FRAME_MS, SCREEN_SIZE};
 use art_shell::{spawn_input, SharedSelector, INPUT_CONFIG};
 use board_support::{internal_i2c, Axp192};
 use esp_idf_hal::delay::FreeRtos;
@@ -77,16 +77,26 @@ fn main() {
     drop(axp);
     info!("AXP192: LCD/TFT rails up");
 
+    // Every frame here is a full-screen blit, so the panel is driven with SPI DMA: mipidsi
+    // gathers the whole picture into one batch buffer and flushes it as a single DMA burst. That
+    // buffer must live in DMA-capable RAM — a whole `Rgb565` frame's worth (w·h·2 bytes) — or the
+    // DMA engine reads memory it cannot reach and the board double-faults before the first frame.
+    // `dma_mem` is the one place that asks ESP-IDF for such memory; a null means it did not fit.
+    const FRAME_BYTES: usize = (SCREEN_SIZE.width * SCREEN_SIZE.height * 2) as usize;
+    let batch_buffer: &'static mut [u8] =
+        dma_mem::dma_buffer(FRAME_BYTES).expect("DMA-capable panel batch buffer");
+
     // The panel, wrapped as a generic Screen with the gallery render function. `turning`, not
     // `new`: the gallery commits to portrait, so the panel is told to scan that way once, on the
     // first frame, by a rotation source that always answers the same quarter turn.
-    let panel: Panel = Panel::new(
+    let panel: Panel = Panel::new_dma(
         peripherals.spi2,
         peripherals.pins.gpio13, // SCLK
         peripherals.pins.gpio15, // MOSI
         peripherals.pins.gpio5,  // CS
         peripherals.pins.gpio23, // DC
         peripherals.pins.gpio18, // RST
+        batch_buffer,
     )
     .expect("ST7789 panel bring-up");
 

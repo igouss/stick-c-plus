@@ -478,6 +478,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dma-mem"
+version = "0.1.0"
+dependencies = [
+ "esp-idf-sys",
+]
+
+[[package]]
 name = "either"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -917,6 +924,7 @@ dependencies = [
  "art-display",
  "art-shell",
  "board-support",
+ "dma-mem",
  "embuild",
  "esp-idf-hal",
  "esp-idf-svc",
