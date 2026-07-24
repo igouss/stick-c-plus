@@ -30,6 +30,8 @@
 //! `libm`](SinTable::sin), the field [tracks an `f64` reference](field), the phase [stays on
 //! the ring](phase).
 
+extern crate alloc;
+
 mod field;
 mod phase;
 mod trig;
