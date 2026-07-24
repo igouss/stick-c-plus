@@ -30,12 +30,13 @@
 //! `libm`](SinTable::sin), the field [tracks an `f64` reference](field), the phase [stays on
 //! the ring](phase).
 
-extern crate alloc;
-
 mod field;
 mod phase;
-mod trig;
 
 pub use field::{plume, point, FieldPoint, POINT_COUNT, START, STEP};
 pub use phase::{phase, FRAME_MS, PERIOD_FRAMES, PHASE_PER_FRAME};
-pub use trig::SinTable;
+
+// The sine table now lives in the shared platform, so every sketch in the gallery reads its
+// trigonometry from one proven copy. Re-exported here so `plume_core::SinTable` keeps working
+// for the plume's own callers.
+pub use platform_numerics::SinTable;

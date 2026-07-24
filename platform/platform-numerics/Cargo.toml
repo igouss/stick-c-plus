@@ -1,0 +1,28 @@
+[package]
+name = "platform-numerics"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Board-generic numerics for the M5StickC Plus platform: the startup-built sine table that turns a chip with no fast transcendental into one table read a lookup, proven within a small tolerance of libm across the circle. no_std, host-tested, no unsafe. Any context may depend on it."
+
+[lib]
+name = "platform_numerics"
+path = "src/lib.rs"
+
+# Pure numerics, no framework and no I/O — the sine table every animated sketch reads its
+# trigonometry from, lifted out of any one app so the whole platform shares one proven copy.
+# role = "domain": pure logic, host-testable, cross-compiles to xtensa unchanged.
+# context = "shared": the one context any crate may depend on (like platform-core).
+[package.metadata.hex-arch]
+role = "domain"
+context = "shared"
+
+[dependencies]
+# `sinf`/`cosf`/`floorf` in no_std. libm is pure computation — no allocator, no I/O — so it
+# cannot make this crate impure. It is called once, at startup, to fill the table; the hot
+# path then reads the table, which is the whole point of the optimisation.
+libm = "0.2"
+
+# Host-only. Links std and never reaches the Xtensa build (a dependent excludes it).
+[dev-dependencies]
+proptest = "1"

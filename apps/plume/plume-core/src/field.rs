@@ -31,7 +31,7 @@
 //!   one thing that is *not* a table lookup is `mag`, a genuine `sqrtf` — the honest magnitude
 //!   the field is built around.
 
-use crate::trig::SinTable;
+use platform_numerics::SinTable;
 
 /// The index the original loop counts down from — the widest `x` the field is evaluated at.
 pub const START: u32 = 10_000;
@@ -110,7 +110,7 @@ pub fn plume<'a>(t: f32, table: &'a SinTable) -> impl Iterator<Item = FieldPoint
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trig::SinTable;
+    use platform_numerics::SinTable;
     use proptest::prelude::*;
 
     /// A reference evaluation in `f64` through the standard library's real transcendentals —

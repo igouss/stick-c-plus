@@ -18,10 +18,14 @@ role = "domain"
 context = "plume"
 
 [dependencies]
+# The startup-built sine table, now shared across every sketch in the gallery. context =
+# "shared", so this dependency is not a context violation.
+platform-numerics = { path = "../../../platform/platform-numerics" }
+
 # `sqrtf` in no_std, for the one genuine magnitude in the field (`mag(k, e)`). libm is pure
 # computation: no allocator, no I/O, nothing that could make this crate impure. The sines and
-# cosines do *not* go through it on the hot path — they are read from a table this crate
-# builds once at startup, which is the whole point of the optimisation.
+# cosines do *not* go through it on the hot path — they are read from a table
+# `platform-numerics` builds once at startup, which is the whole point of the optimisation.
 libm = "0.2"
 
 # Host-only. These link std and never reach the Xtensa build (a dependent excludes them).

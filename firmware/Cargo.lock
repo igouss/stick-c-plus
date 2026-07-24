@@ -1457,6 +1457,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "platform-numerics"
+version = "0.1.0"
+dependencies = [
+ "libm",
+]
+
+[[package]]
 name = "platform-runtime"
 version = "0.1.0"
 dependencies = [
@@ -1486,6 +1493,7 @@ name = "plume-core"
 version = "0.1.0"
 dependencies = [
  "libm",
+ "platform-numerics",
 ]
 
 [[package]]
