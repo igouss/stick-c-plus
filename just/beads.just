@@ -79,6 +79,15 @@ bead-sync:
 [no-exit-message]
 [script]
 bead-check:
+    # `br` leaves .beads/.write.lock behind when it exits, and doctor calls any lock older
+    # than 300 s orphaned — so five minutes after ANY br command (including `just ready`)
+    # this gate would go red on the tool's own litter. Clear it, but only once no `br` is
+    # running: a live one holding the lock is the case the warning is actually for.
+    lock="{{ justfile_directory() }}/.beads/.write.lock"
+    if [ -e "$lock" ] && ! pgrep -x br >/dev/null 2>&1; then
+      rm -f "$lock"
+      echo "cleared an orphaned .beads/.write.lock (no br process holds it)"
+    fi
     # Exit codes are contract, not guesswork: `br doctor capabilities` documents
     # 0 healthy · 1 findings_present · >=2 refusals and tool errors.
     out="$({{ br }} doctor 2>&1)" && rc=0 || rc=$?

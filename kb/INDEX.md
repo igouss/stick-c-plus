@@ -164,6 +164,23 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
   **Behaviour is ported; the render is not** — the buddy draws the existing ClaudePix pixel
   sprites, so the note's 795 text-art poses are upstream history, not the render path (see
   its scope banner).
+- `guide` [buddy-permission-hook](guides/buddy-permission-hook.md) — the headline loop
+  end to end: a PreToolUse hook blocks each Claude Code tool call while the stick decides
+  (**A approves, B denies**), and Claude Code honours the button. Cold-start pairing,
+  installing the hook, the config knobs, recovering an out-of-sync bond — and the
+  load-bearing part, **proving the fail-safe by breaking it**.
+- `finding` [buddy-bridge-bonding-gotchas](findings/buddy-bridge-bonding-gotchas.md)
+  — `high` · four traps that each *look* like a broken BLE link, on BlueZ 5.87. Revised
+  the same day it was written: trap 2 was first blamed on `bluetoothctl` stealing the
+  adapter and was really a `uuids:` discovery filter in **our own** code hiding the stick
+  — and the recovery this finding originally prescribed made the stick permanently
+  undiscoverable. Read the banner before following the procedure.
+
+- `finding` [sub-tick-sleeps-busy-wait-on-esp-idf](findings/sub-tick-sleeps-busy-wait-on-esp-idf.md)
+  — `high` · with `CONFIG_FREERTOS_HZ = 100` one tick is **10 ms**, and a `thread::sleep`
+  shorter than that cannot block on the scheduler — it busy-waits, starves the idle task and
+  trips the 5 s task watchdog with `IDLE1 (CPU 1)`. Reads as a pause in the source and behaves
+  as a spin loop on the metal. 10 ms is the floor for every thread period.
 
 ## Display — assets
 
@@ -181,6 +198,10 @@ them — so each cluster reads as a lineage. Skim here, read the files. See
   paints and said so, then the missing stage found it — a paint carrying a **turn**
   costs 59.6 ms against 21.5 ms settled, 19 of 19 real turns over budget. Corrects the
   previous experiment's *reading* (the paint was doing more work, not waiting).
+- `finding` [mipidsi-derives-the-cgram-window-per-orientation](findings/mipidsi-derives-the-cgram-window-per-orientation.md)
+  — `high` · mipidsi 0.10 computes the rotation-dependent CGRAM window itself. Set
+  `display_offset` to the panel's **native-portrait** window once and every orientation comes
+  out right; measuring and tabulating per-rotation offsets by hand double-counts them.
 - `finding` [mipidsi-rectangle-fill-costs-an-address-window](findings/mipidsi-rectangle-fill-costs-an-address-window.md)
   — `high` · a `Rectangle` fill costs a `CASET`/`RASET`/`RAMWR` window setup, so cost
   scales with the *fill count*, not the pixel count. Payload arithmetic says 5.9 ms and
