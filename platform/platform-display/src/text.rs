@@ -97,6 +97,12 @@ where
 ///
 /// `width` must be less than [`LINE_CAP`]; content that would exceed [`LINE_CAP`] is refused
 /// as [`RenderError::LineOverflow`] rather than silently truncated.
+///
+/// A value wider than `width` is refused as [`RenderError::FieldOverflow`]. The field is the
+/// caller's claim on a rectangle — what a backdrop leaves a hole for, and what a golden pins —
+/// so a value that does not fit would be glyphs painted outside the claim, over a neighbour or
+/// past the edge of a panel onto the screen beneath it. Refusing puts that mistake at the call
+/// site, where the field width is chosen, instead of on the glass.
 pub fn text_field<D>(
     target: &mut D,
     origin: Point,
@@ -122,12 +128,18 @@ where
         FieldAlign::Left => {
             line.write_fmt(content)
                 .map_err(|_| RenderError::LineOverflow)?;
+            if line.len() > width {
+                return Err(RenderError::FieldOverflow);
+            }
         }
         FieldAlign::Centred => {
             let mut value: Line = Line::new();
             value
                 .write_fmt(content)
                 .map_err(|_| RenderError::LineOverflow)?;
+            if value.len() > width {
+                return Err(RenderError::FieldOverflow);
+            }
             // Half the slack leads, and the remainder falls to the trailing pad below — so an
             // odd gap widens the right side rather than shifting the value off the glyph grid.
             let lead: usize = width.saturating_sub(value.len()) / 2;
@@ -238,6 +250,50 @@ mod tests {
             painted(FieldAlign::Left, full).pixels(),
             painted(FieldAlign::Centred, full).pixels()
         );
+    }
+
+    /// One character past the field is refused, in both alignments — the boundary, because a
+    /// field that holds `WIDTH` and refuses `WIDTH + 1` is the whole contract, and the
+    /// off-by-one is the one that actually happens.
+    ///
+    /// This is the bug that shipped: a twelve-character title in an eleven-column panel was
+    /// drawn in full, its last glyph landing outside the panel and onto the screen underneath.
+    /// It was fixed once by shortening that one string, which left every other caller able to do
+    /// the same thing. Refusing here is what makes it not happen again.
+    #[test]
+    fn a_value_wider_than_its_field_is_refused_in_either_alignment() {
+        let over: &str = "LONG BREAKS";
+        assert_eq!(over.len(), WIDTH + 1);
+        for align in [FieldAlign::Left, FieldAlign::Centred] {
+            let mut fb: Framebuffer = Framebuffer::new();
+            let refused = text_field(
+                &mut fb,
+                ORIGIN,
+                Rgb565::WHITE,
+                WIDTH,
+                align,
+                format_args!("{over}"),
+            );
+            assert!(matches!(refused, Err(RenderError::FieldOverflow)));
+            assert_eq!(fb.lit_pixels(), 0, "a refused field paints nothing at all");
+        }
+    }
+
+    /// A zero-width field holds nothing, so every value overflows it — the degenerate case a
+    /// layout arithmetic slip produces, and the one that must not paint at the origin anyway.
+    #[test]
+    fn a_field_of_no_columns_refuses_every_value() {
+        let mut fb: Framebuffer = Framebuffer::new();
+        let refused = text_field(
+            &mut fb,
+            ORIGIN,
+            Rgb565::WHITE,
+            0,
+            FieldAlign::Left,
+            format_args!("X"),
+        );
+        assert!(matches!(refused, Err(RenderError::FieldOverflow)));
+        assert_eq!(fb.lit_pixels(), 0);
     }
 
     /// **The reason the padding is split rather than moved.** A centred short value must

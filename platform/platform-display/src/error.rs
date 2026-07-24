@@ -22,6 +22,15 @@ pub enum RenderError<E> {
     /// A formatted line exceeded the stack line buffer. See the type docs: the
     /// content this crate renders cannot reach this, and a test proves it.
     LineOverflow,
+    /// A value was wider than the field its caller declared.
+    ///
+    /// Distinct from [`LineOverflow`](RenderError::LineOverflow), which is about the buffer's
+    /// capacity: this one is about the *contract*. A field is the caller's promise that it paints
+    /// these pixels and no others — the promise a backdrop leaves a hole for and a golden pins.
+    /// A value that does not fit is not a narrower value, it is glyphs drawn somewhere the caller
+    /// never claimed, over whatever else was already there. Refused rather than truncated, so the
+    /// mistake surfaces at the call site instead of on the glass.
+    FieldOverflow,
 }
 
 impl<E: fmt::Display> fmt::Display for RenderError<E> {
@@ -29,6 +38,7 @@ impl<E: fmt::Display> fmt::Display for RenderError<E> {
         match self {
             RenderError::Draw(err) => write!(f, "draw target rejected the write: {err}"),
             RenderError::LineOverflow => f.write_str("a rendered line overflowed its buffer"),
+            RenderError::FieldOverflow => f.write_str("a value was wider than its field"),
         }
     }
 }
