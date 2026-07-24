@@ -101,6 +101,13 @@ pub const MIN_YIELD: Duration = Duration::from_millis(10);
 /// atomic load ten times a second and bounds the wake latency below what a thumb can feel.
 pub const DARK_PERIOD: Duration = Duration::from_millis(100);
 
+/// How often the loop reports the frame rate it is actually holding, in milliseconds.
+///
+/// Only *painted* frames are counted, so a still screen — which paints once and then suppresses
+/// — reports nothing: a resting device stays silent. While a creature animates, one line every
+/// five seconds carries the achieved fps and the real paint cost without a log entry per frame.
+pub const FPS_REPORT_PERIOD: Tick = 5_000;
+
 /// The display thread's stack, in bytes.
 ///
 /// On-device this sizes a FreeRTOS task stack, so it is set explicitly. embedded-graphics
@@ -122,6 +129,8 @@ pub struct DisplayConfig {
     pub animation_period: Duration,
     /// The interval between checks while the glass is dark and nothing is painted.
     pub dark_period: Duration,
+    /// How long a window of painted frames the loop aggregates before it logs the frame rate.
+    pub fps_report_period: Tick,
     /// The display thread's stack size, in bytes.
     pub stack_size: usize,
 }
@@ -132,6 +141,7 @@ impl Default for DisplayConfig {
             period: RENDER_PERIOD,
             animation_period: ANIMATION_PERIOD,
             dark_period: DARK_PERIOD,
+            fps_report_period: FPS_REPORT_PERIOD,
             stack_size: DISPLAY_STACK_SIZE,
         }
     }
@@ -144,6 +154,86 @@ impl DisplayConfig {
         match glass {
             Some(shown) if shown.state.is_animated() => self.animation_period,
             _ => self.period,
+        }
+    }
+}
+
+/// A rolling frame-rate meter over a window of painted frames.
+///
+/// Fed each painted frame's finish time and paint cost, it aggregates a window and hands back a
+/// [`FrameStats`] the moment the window has elapsed, then starts a fresh one — so the loop can
+/// report the frame rate it is really holding with one log line every few seconds rather than a
+/// line per frame. Suppressed ticks are never offered to it, so a still screen reports nothing.
+///
+/// It carries no clock: the loop feeds it the tick it already read, which keeps the whole rule a
+/// pure function of its inputs and testable without a thread or a real clock.
+#[derive(Clone, Copy)]
+struct FrameMeter {
+    window_start: Tick,
+    frames: u32,
+    busy_ms: u64,
+    peak_ms: u64,
+}
+
+/// What a meter reports when its window closes: how many frames it painted, over how long, and
+/// how dear each paint was (the mean and the worst).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct FrameStats {
+    frames: u32,
+    span_ms: Tick,
+    busy_ms: u64,
+    peak_ms: u64,
+}
+
+impl FrameMeter {
+    /// A fresh window opening at `now` with nothing recorded.
+    fn start(now: Tick) -> Self {
+        FrameMeter {
+            window_start: now,
+            frames: 0,
+            busy_ms: 0,
+            peak_ms: 0,
+        }
+    }
+
+    /// Record a painted frame that finished at `now` costing `took`; return a [`FrameStats`] and
+    /// reopen the window once `window` milliseconds have elapsed since it opened, else `None`.
+    fn painted(&mut self, now: Tick, took: Duration, window: Tick) -> Option<FrameStats> {
+        let ms: u64 = took.as_millis() as u64;
+        self.frames += 1;
+        self.busy_ms += ms;
+        self.peak_ms = self.peak_ms.max(ms);
+        let span: Tick = now.saturating_sub(self.window_start);
+        if span < window {
+            return None;
+        }
+        let stats: FrameStats = FrameStats {
+            frames: self.frames,
+            span_ms: span,
+            busy_ms: self.busy_ms,
+            peak_ms: self.peak_ms,
+        };
+        *self = FrameMeter::start(now);
+        Some(stats)
+    }
+}
+
+impl FrameStats {
+    /// Frames painted per second across the window — the frame rate the panel actually held.
+    fn fps(&self) -> f32 {
+        if self.span_ms == 0 {
+            0.0
+        } else {
+            self.frames as f32 * 1_000.0 / self.span_ms as f32
+        }
+    }
+
+    /// Mean paint cost over the window, in milliseconds — the headroom under the tick budget.
+    fn mean_paint_ms(&self) -> f32 {
+        if self.frames == 0 {
+            0.0
+        } else {
+            self.busy_ms as f32 / self.frames as f32
         }
     }
 }
@@ -261,15 +351,17 @@ fn render_loop<S, D, F, R, C>(
     C: Clock,
 {
     let mut glass: Glass<S> = None;
+    let mut meter: FrameMeter = FrameMeter::start(clock.now());
     while !stop.load(Ordering::Relaxed) {
         if !lit.is_lit() {
             glass = None;
             thread::sleep(config.dark_period.max(MIN_YIELD));
             continue;
         }
+        let now: Tick = clock.now();
         let before: Glass<S> = glass;
         let started: Instant = Instant::now();
-        glass = render_once(&mut display, &mut source, &mut rotation, clock.now(), glass);
+        glass = render_once(&mut display, &mut source, &mut rotation, now, glass);
         let budget: Duration = config.tick_period(glass);
 
         // A paint that outruns its own tick means the creature cannot keep its timing: the
@@ -279,6 +371,24 @@ fn render_loop<S, D, F, R, C>(
         // cost it is rather than as a failure. Both logs sit outside the timed region.
         let painted: bool = glass != before;
         let took: Duration = started.elapsed();
+
+        // The frame rate the panel is actually holding — one line every window, over painted
+        // frames only, so an animating creature reports its cadence and a still screen stays
+        // quiet. Read the tick once more here rather than reuse `now`: the paint's own cost has
+        // passed, and the window is measured against wall time, not the pre-paint instant.
+        if painted {
+            if let Some(stats) = meter.painted(clock.now(), took, config.fps_report_period) {
+                info!(
+                    "platform-display: {:.1} fps over {} frames, paint {:.1} ms avg / {} ms peak \
+                     (budget {budget:?})",
+                    stats.fps(),
+                    stats.frames,
+                    stats.mean_paint_ms(),
+                    stats.peak_ms,
+                );
+            }
+        }
+
         match report_for(painted, turned(before, glass), took, budget) {
             PaintReport::Quiet => {}
             PaintReport::OverBudget => {
@@ -674,6 +784,74 @@ mod tests {
         );
     }
 
+    /// Zero closed windows: frames inside the window produce no report — the loop stays quiet
+    /// until the window has elapsed, so it is one line per window and not one per frame.
+    #[test]
+    fn a_meter_is_quiet_until_its_window_elapses() {
+        let mut meter: FrameMeter = FrameMeter::start(0);
+        assert_eq!(meter.painted(10, Duration::from_millis(12), 5_000), None);
+        assert_eq!(meter.painted(4_990, Duration::from_millis(12), 5_000), None);
+    }
+
+    /// One closed window reports the frames it saw. Thirty paints on a 33 ms cadence cross a
+    /// ~1 s window, and the report carries all thirty.
+    #[test]
+    fn a_closed_window_reports_the_frames_it_saw() {
+        let mut meter: FrameMeter = FrameMeter::start(0);
+        let mut last: Option<FrameStats> = None;
+        for frame in 1..=30u64 {
+            last = meter.painted(frame * 33, Duration::from_millis(12), 990);
+        }
+        let stats: FrameStats = last.expect("the window closes on the frame that reaches it");
+        assert_eq!(stats.frames, 30);
+        assert_eq!(stats.peak_ms, 12);
+    }
+
+    /// Many paints aggregate; the peak is the worst single paint, and closing the window opens a
+    /// fresh one that counts from zero rather than re-reporting immediately.
+    #[test]
+    fn the_peak_is_the_worst_paint_and_the_window_reopens() {
+        let mut meter: FrameMeter = FrameMeter::start(0);
+        assert_eq!(meter.painted(2_000, Duration::from_millis(10), 5_000), None);
+        assert_eq!(meter.painted(4_000, Duration::from_millis(40), 5_000), None); // the peak
+        let stats: FrameStats = meter
+            .painted(6_000, Duration::from_millis(10), 5_000)
+            .expect("the window closed");
+        assert_eq!(stats.frames, 3);
+        assert_eq!(stats.peak_ms, 40);
+        assert_eq!(
+            meter.painted(6_500, Duration::from_millis(10), 5_000),
+            None,
+            "a reopened window counts from zero"
+        );
+    }
+
+    /// The reported rate is frames-over-span and the mean paint is busy-over-frames.
+    #[test]
+    fn fps_and_mean_paint_are_computed_from_the_window() {
+        let stats: FrameStats = FrameStats {
+            frames: 30,
+            span_ms: 1_000,
+            busy_ms: 300,
+            peak_ms: 20,
+        };
+        assert!((stats.fps() - 30.0).abs() < 0.01);
+        assert!((stats.mean_paint_ms() - 10.0).abs() < 0.01);
+    }
+
+    /// An empty or zero-span window divides by nothing and reports a zero rate, never a NaN.
+    #[test]
+    fn an_empty_window_has_a_zero_rate() {
+        let empty: FrameStats = FrameStats {
+            frames: 0,
+            span_ms: 0,
+            busy_ms: 0,
+            peak_ms: 0,
+        };
+        assert_eq!(empty.fps(), 0.0);
+        assert_eq!(empty.mean_paint_ms(), 0.0);
+    }
+
     #[test]
     fn the_first_paint_shows_the_state() {
         let (mut screen, shown): (FakeScreen, _) = FakeScreen::new();
@@ -956,6 +1134,7 @@ mod tests {
             period: Duration::from_millis(1),
             animation_period: Duration::from_millis(1),
             dark_period: Duration::from_millis(1),
+            fps_report_period: FPS_REPORT_PERIOD,
             stack_size: 256 * 1024,
         };
         let source = {
@@ -1023,6 +1202,7 @@ mod tests {
             period: Duration::from_millis(1),
             animation_period: Duration::from_millis(1),
             dark_period: Duration::from_millis(1),
+            fps_report_period: FPS_REPORT_PERIOD,
             stack_size: 256 * 1024,
         };
         let mut switch: BacklightSwitch<OkBacklight> =
