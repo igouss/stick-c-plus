@@ -23,6 +23,7 @@ members = [
     "platform/esphome-api",
     "platform/esphome-server",
     # apps/ — one bounded context per app on the shared foundation.
+    "apps/generative-art/art-core",
     "apps/buddy/buddy-core",
     "apps/buddy/buddy-wire",
     "apps/buddy/buddy-bridge-core",

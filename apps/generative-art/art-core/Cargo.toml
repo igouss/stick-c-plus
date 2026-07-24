@@ -1,0 +1,28 @@
+[package]
+name = "art-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Framework-free domain of the generative-art gallery: the Sketch running order and the Selector that a button advances, wrapping. Pure identity and pure state — the picture is the display crate's business, the running order is the domain's — so the cycle is proven on the host, not discovered on the glass. no_std, host-tested, no unsafe."
+
+[lib]
+name = "art_core"
+path = "src/lib.rs"
+
+# The pure heart of the gallery: which sketch is on the glass and how a press advances it. No
+# pixels, no framework, no I/O. context = "generative-art" scopes it to its own bounded context.
+[package.metadata.hex-arch]
+role = "domain"
+context = "generative-art"
+
+# Host-only. These link std and never reach the Xtensa build (a dependent excludes them).
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run under the default
+# harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false
