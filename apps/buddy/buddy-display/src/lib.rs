@@ -53,6 +53,7 @@
 extern crate alloc;
 
 mod approval;
+mod backdrop;
 mod clock;
 mod creature;
 mod home;

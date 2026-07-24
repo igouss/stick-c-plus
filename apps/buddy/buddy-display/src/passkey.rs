@@ -15,10 +15,11 @@
 
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
+use embedded_graphics::primitives::Rectangle;
 use platform_display::{text_field, FieldAlign, Magnified, RenderError, FONT};
 
+use crate::backdrop;
 use crate::layout::Layout;
-use crate::page;
 use crate::palette;
 
 /// Digits in a BLE passkey — the range the Bluetooth spec fixes at `000000..=999999`.
@@ -86,24 +87,13 @@ where
     // is nothing beside the number to align it against.
     let digits_row: usize = layout.rows / 2;
 
-    page::blank(target, layout, 0, layout.rows)?;
-    text_field(
-        target,
-        layout.row_origin(0),
-        palette::TITLE,
-        layout.cols,
-        FieldAlign::Centred,
-        format_args!("PAIRING"),
-    )?;
-
     // The digits, several times body size, through a magnifying target — so the field padding,
     // the overflow check and the glyph rendering are the same code every other row uses.
     //
     // The field is `PASSKEY_DIGITS` wide rather than `layout.cols`: a full-width field would be
     // several times the canvas once magnified. The number is a fixed six characters, so the field
     // is exactly the value and the centring is done here, in target space, where the magnified
-    // width is known. `page::blank` above has already cleared the row, so nothing is relying on
-    // the padding to erase a previous value.
+    // width is known — the padding still erases a previous value in place.
     let scale: u32 = digit_scale(layout.canvas);
     let across: u32 = layout.canvas.width.saturating_sub(DIGIT_SPAN * scale) / 2;
     // Grown about its own centre line, so the digits stay on the row the layout chose rather
@@ -113,6 +103,31 @@ where
         across as i32,
         (layout.row_origin(digits_row).y - lift).max(0),
     );
+    let digits_span: Size = Size::new(DIGIT_SPAN * scale, FONT.character_size.height * scale);
+
+    // The background everywhere the three things are not — the title, the big number, the hint —
+    // and then each of them, once. A full-screen clear first would blank the passkey before
+    // rewriting it, and the one screen an owner is reading digits off is the last one that may
+    // blink while they do.
+    backdrop::behind(
+        target,
+        layout.canvas_rect(),
+        [
+            layout.full_row(0),
+            Rectangle::new(digits_origin, digits_span),
+            layout.full_row(layout.rows - 1),
+        ],
+        palette::BACKGROUND,
+    )?;
+    text_field(
+        target,
+        layout.row_origin(0),
+        palette::TITLE,
+        layout.cols,
+        FieldAlign::Centred,
+        format_args!("PAIRING"),
+    )?;
+
     let mut big: Magnified<'_, D> = Magnified::new(target, scale, digits_origin);
     text_field(
         &mut big,

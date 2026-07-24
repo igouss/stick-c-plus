@@ -17,9 +17,10 @@
 
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
-use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use platform_display::{text_field, RenderError, FONT};
+use embedded_graphics::primitives::Rectangle;
+use platform_display::{text_field, RenderError};
 
+use crate::backdrop;
 use crate::layout::Layout;
 use crate::palette;
 use crate::view::{Entry, Transcript};
@@ -129,15 +130,12 @@ where
     if rows == 0 {
         return Ok(());
     }
-    let top: i32 = layout.row_y(first_row);
-    let height: u32 =
-        (layout.row_y(first_row + rows - 1) + FONT.character_size.height as i32 - top) as u32;
-    let at: Point = Point::new(layout.scroll_x() + 3, top);
-
-    Rectangle::new(at, Size::new(TRACK_WIDTH, height))
-        .into_styled(PrimitiveStyle::with_fill(palette::SCROLL_TRACK))
-        .draw(target)
-        .map_err(RenderError::Draw)?;
+    // The rows the band spans, as one region — the height is the layout's arithmetic, not this
+    // renderer's. Only the width is the bar's own: it is a fixed track beside the text, not a
+    // full-width row.
+    let band: Rectangle = layout.rows_rect(first_row, rows);
+    let height: u32 = band.size.height;
+    let at: Point = Point::new(layout.scroll_x() + 3, band.top_left.y);
 
     // Nothing behind the band means the thumb is the whole track: all of the story is on the
     // glass. `shown >= total` rather than `total == 0` so an empty transcript takes this branch
@@ -147,10 +145,18 @@ where
     } else {
         ((height as u64 * shown as u64 / total as u64) as u32).max(MIN_THUMB)
     };
-    Rectangle::new(at, Size::new(TRACK_WIDTH, thumb.min(height)))
-        .into_styled(PrimitiveStyle::with_fill(palette::SCROLL_THUMB))
-        .draw(target)
-        .map_err(RenderError::Draw)
+    let thumb: Rectangle = Rectangle::new(at, Size::new(TRACK_WIDTH, thumb.min(height)));
+
+    // The thumb, then the track *around* it — not a full track with the thumb painted over.
+    // The band repaints on every animation frame, so a thumb drawn over its own track would be
+    // 250 pixels blinking at the creature's cadence, for the whole life of the screen.
+    backdrop::fill(target, thumb, palette::SCROLL_THUMB)?;
+    backdrop::behind(
+        target,
+        Rectangle::new(at, Size::new(TRACK_WIDTH, height)),
+        [thumb],
+        palette::SCROLL_TRACK,
+    )
 }
 
 #[cfg(test)]

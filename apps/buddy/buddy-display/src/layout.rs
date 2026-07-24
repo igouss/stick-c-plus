@@ -24,6 +24,7 @@
 //! on the band it made narrower. What does not change is the content.
 
 use embedded_graphics::prelude::*;
+use embedded_graphics::primitives::Rectangle;
 use platform_core::ScreenRotation;
 use platform_display::{FieldAlign, FONT, LINE_CAP, SCREEN_SIZE};
 
@@ -123,6 +124,58 @@ impl Layout {
             self.status_origin.x,
             self.status_origin.y + ROW_PITCH * index as i32,
         )
+    }
+
+    /// The pixels an opaque field of `cols` characters on `row` covers.
+    ///
+    /// What a text field paints for itself, and therefore exactly what a
+    /// [`backdrop`](crate::backdrop) must leave alone: a screen clears the pixels *between* its
+    /// rows, never the rows it is about to write, because clearing a row it then draws into is
+    /// what the eye reads as a flicker.
+    pub fn row_rect(&self, row: usize, cols: usize) -> Rectangle {
+        Rectangle::new(
+            self.row_origin(row),
+            Size::new(
+                FONT.character_size.width * cols as u32,
+                FONT.character_size.height,
+            ),
+        )
+    }
+
+    /// The band a full-width text row covers — the shape nearly every declared band actually is.
+    ///
+    /// [`row_rect`](Self::row_rect) with the width implied, so a screen saying "this whole row is
+    /// mine" does not repeat `layout.cols` at every call and cannot quietly get it wrong.
+    pub fn full_row(&self, row: usize) -> Rectangle {
+        self.row_rect(row, self.cols)
+    }
+
+    /// Every row of this grid, full width — what an overlay's panel claims, in one phrase.
+    pub fn all_rows(&self) -> impl Iterator<Item = Rectangle> + '_ {
+        (0..self.rows).map(|row: usize| self.full_row(row))
+    }
+
+    /// The full-width region `rows` grid rows starting at `first` occupy, gaps included.
+    ///
+    /// [`row_rect`](Self::row_rect) spans one row and as many characters as a field holds; this
+    /// spans whole rows and the whole width, which is the *area* a backdrop is painted into
+    /// rather than a band it must leave alone. A renderer whose bands straddle two rows — a meter
+    /// that did not fit beside its label — needs the pair as one region.
+    pub fn rows_rect(&self, first: usize, rows: usize) -> Rectangle {
+        let top: i32 = self.row_y(first);
+        let bottom: i32 = self.row_y(first + rows - 1) + FONT.character_size.height as i32;
+        Rectangle::new(
+            Point::new(self.left, top),
+            Size::new(
+                FONT.character_size.width * self.cols as u32,
+                (bottom - top) as u32,
+            ),
+        )
+    }
+
+    /// The whole canvas, as an area a backdrop is painted into.
+    pub fn canvas_rect(&self) -> Rectangle {
+        Rectangle::new(Point::zero(), self.canvas)
     }
 
     /// The same layout, one character in on every side — the grid an overlay's panel draws on.

@@ -22,6 +22,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use platform_display::{text_field, FieldAlign, RenderError};
 
+use crate::backdrop;
 use crate::layout::Layout;
 use crate::page;
 use crate::palette;
@@ -53,10 +54,17 @@ where
     }
 }
 
-/// Paint the panel — its background, then its border — and return the inset grid to draw on.
+/// Paint the panel — its border, and its background everywhere its own rows are not — and return
+/// the inset grid to draw on.
 ///
-/// The background fill is what hides the screen underneath; without it the overlay's text would
-/// be drawn *through* a creature. The border is drawn after, so the fill cannot eat it.
+/// The background is what hides the screen underneath; without it the overlay's text would be
+/// drawn *through* a creature. But it is painted **around** the rows rather than under them: an
+/// overlay sits over the home screen, which repaints on the creature's animation clock, so a
+/// panel that cleared itself and then wrote its text would blink its whole contents twenty times
+/// a second for as long as the menu was open.
+///
+/// Every row of the inset grid is written by the caller — [`page::lines`] blanks the ones its
+/// text does not reach — so the whole row band is spoken for, and the backdrop owes it nothing.
 fn frame<D>(
     target: &mut D,
     layout: &Layout,
@@ -66,15 +74,21 @@ where
     D: DrawTarget<Color = Rgb565>,
 {
     let (at, size): (Point, Size) = layout.panel();
-    Rectangle::new(at, size)
-        .into_styled(PrimitiveStyle::with_fill(palette::BACKGROUND))
-        .draw(target)
-        .map_err(RenderError::Draw)?;
+    let inner: Layout = layout.inset();
+
     Rectangle::new(at, size)
         .into_styled(PrimitiveStyle::with_stroke(border, 1))
         .draw(target)
         .map_err(RenderError::Draw)?;
-    Ok(layout.inset())
+
+    // Inside the border, never over it: the ring is one pixel and the backdrop starts after it.
+    let interior: Rectangle = Rectangle::new(
+        at + Point::new(1, 1),
+        Size::new(size.width.saturating_sub(2), size.height.saturating_sub(2)),
+    );
+    backdrop::behind(target, interior, inner.all_rows(), palette::BACKGROUND)?;
+
+    Ok(inner)
 }
 
 /// The settings menu: a title, then a window of entries with the cursor highlighted.
@@ -232,7 +246,9 @@ where
         palette::DANGER,
         inner.cols,
         inner.align,
-        format_args!("FORGET BOND?"),
+        // A question, because the buttons underneath are YES and NO. The object is on the line
+        // below; the upright panel holds eleven characters, and "FORGET BOND?" is twelve.
+        format_args!("FORGET?"),
     )?;
     page::lines(
         target,

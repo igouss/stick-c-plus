@@ -22,16 +22,32 @@ use embedded_graphics::prelude::*;
 
 use crate::SCREEN_SIZE;
 
-/// A canvas of `Rgb565`, plus a count of writes that fell outside it.
+/// A canvas of `Rgb565`, plus a count of writes that fell outside it and a count of the ones
+/// that repainted a pixel this frame had already painted a different colour.
 ///
 /// The canvas is [`SCREEN_SIZE`] by default and any size on request. A screen drawn at a
 /// quarter turn paints into a canvas with the panel's dimensions swapped, and its
 /// [`escaped`](Framebuffer::escaped) count only means "nothing was clipped" if the canvas it
 /// is counted against is the one that screen is actually drawn on.
+///
+/// ## The flicker counter
+///
+/// There is no framebuffer between this crate and the glass: every write reaches the panel, and
+/// the eye sees each one. So a renderer that clears a region and then draws into it shows the
+/// owner the cleared state — for a whole SPI transfer, once per repaint. That is exactly what
+/// *flicker* is, and [`overpainted`](Framebuffer::overpainted) counts it: a pixel written twice
+/// in one frame with two different colours. Writing the same colour twice is invisible and is
+/// not counted; it is waste, not a defect.
+///
+/// The count is per **frame**, so a test that renders twice into one canvas calls
+/// [`start_frame`](Framebuffer::start_frame) between the renders — the second render legitimately
+/// repaints what the first one left.
 pub struct Framebuffer {
     size: Size,
     pixels: Vec<Rgb565>,
     escaped: usize,
+    painted: Vec<bool>,
+    overpainted: usize,
 }
 
 impl Framebuffer {
@@ -48,7 +64,21 @@ impl Framebuffer {
             size,
             pixels: vec![Rgb565::BLACK; area],
             escaped: 0,
+            painted: vec![false; area],
+            overpainted: 0,
         }
+    }
+
+    /// Begin a new frame: forget which pixels this one has painted, and reset the flicker count.
+    ///
+    /// Only a test that renders more than once into the same canvas needs it. A second render is
+    /// *meant* to repaint what the first one left — that is erase-in-place, not flicker — and
+    /// without this the two frames would be judged as one.
+    pub fn start_frame(&mut self) {
+        self.painted
+            .iter_mut()
+            .for_each(|seen: &mut bool| *seen = false);
+        self.overpainted = 0;
     }
 
     /// Every pixel, row-major — the whole picture, for comparing two renders.
@@ -88,6 +118,23 @@ impl Framebuffer {
         self.escaped
     }
 
+    /// How many pixels this frame has painted at all, whatever colour.
+    ///
+    /// The complement of [`overpainted`](Framebuffer::overpainted): together they say a region
+    /// was covered *and* covered once — which is the whole claim behind "this renderer owns its
+    /// band", and a claim [`lit_pixels`](Framebuffer::lit_pixels) cannot make, because a pixel
+    /// deliberately painted background is indistinguishable from one never painted at all.
+    pub fn painted(&self) -> usize {
+        self.painted.iter().filter(|seen: &&bool| **seen).count()
+    }
+
+    /// How many pixels this frame painted a second time in a different colour — every one of
+    /// them a flicker the owner would see, because there is no framebuffer between here and the
+    /// glass. A renderer that paints each region once, opaquely, scores zero.
+    pub fn overpainted(&self) -> usize {
+        self.overpainted
+    }
+
     /// Store one pixel, or record that it escaped the canvas.
     fn put(&mut self, at: Point, colour: Rgb565) {
         let inside: bool = at.x >= 0
@@ -99,6 +146,10 @@ impl Framebuffer {
             return;
         }
         let index: usize = at.y as usize * self.size.width as usize + at.x as usize;
+        if self.painted[index] && self.pixels[index] != colour {
+            self.overpainted += 1;
+        }
+        self.painted[index] = true;
         self.pixels[index] = colour;
     }
 }
@@ -175,6 +226,47 @@ mod tests {
     #[test]
     fn a_default_canvas_is_the_panels_size() {
         assert_eq!(Framebuffer::new().size(), SCREEN_SIZE);
+    }
+
+    /// Zero, one, many for the flicker counter: a pixel painted once is not a flicker, the same
+    /// colour written again is invisible and is not one either, and a *different* colour over a
+    /// pixel this frame already painted is exactly one.
+    #[test]
+    fn only_a_second_colour_on_the_same_pixel_counts_as_a_flicker() {
+        let mut fb: Framebuffer = Framebuffer::new();
+        let at: Point = Point::new(3, 4);
+
+        fb.draw_iter([Pixel(at, Rgb565::WHITE)])
+            .expect("memory writes cannot fail");
+        assert_eq!(fb.overpainted(), 0, "one paint is not a flicker");
+
+        fb.draw_iter([Pixel(at, Rgb565::WHITE)])
+            .expect("memory writes cannot fail");
+        assert_eq!(fb.overpainted(), 0, "the same colour twice is invisible");
+
+        fb.draw_iter([Pixel(at, Rgb565::BLACK), Pixel(at, Rgb565::WHITE)])
+            .expect("memory writes cannot fail");
+        assert_eq!(
+            fb.overpainted(),
+            2,
+            "clear-then-draw is two visible changes"
+        );
+    }
+
+    /// A second render into the same canvas is erase-in-place, not flicker — so the counter is
+    /// per frame, and `start_frame` is what separates them.
+    #[test]
+    fn a_new_frame_forgets_what_the_previous_one_painted() {
+        let mut fb: Framebuffer = Framebuffer::new();
+        let at: Point = Point::new(1, 1);
+
+        fb.draw_iter([Pixel(at, Rgb565::WHITE)])
+            .expect("memory writes cannot fail");
+        fb.start_frame();
+        fb.draw_iter([Pixel(at, Rgb565::BLACK)])
+            .expect("memory writes cannot fail");
+
+        assert_eq!(fb.overpainted(), 0);
     }
 
     /// A turned canvas counts escapes against *its own* edges, not the panel's. Without this

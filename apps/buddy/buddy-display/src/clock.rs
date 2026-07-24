@@ -1,8 +1,11 @@
-//! The charging clock: what the glass shows when the buddy is docked and nothing is happening.
+//! The clock: the time, and how the board is powered.
 //!
-//! A stick on a charger is furniture, and furniture may as well be a clock. The persona still
-//! runs underneath — `buddy_core::charging_mood` writes the mood directly while docked — but the
-//! *picture* is the time, because that is the thing an idle desk object is asked for.
+//! A screen the owner walks to, not one a charger imposes: a stick that hid its creature behind a
+//! clock the moment it was plugged in spent the glass on a fact the owner already had. The
+//! persona still runs underneath while docked — `buddy_core::charging_mood` writes the mood
+//! directly — but the *picture* here is the time, because that is what an idle desk object is
+//! asked for. The one thing that does put this screen up unasked is a battery about to die
+//! (`buddy_core::CRITICAL_BATTERY_PCT`), which is the fact the owner cannot see coming.
 //!
 //! Both ways up, deliberately. A charging stick is as often stood on its USB-C port as laid flat,
 //! and this is the one screen whose whole job is to be read from across the desk.
@@ -11,8 +14,8 @@ use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use platform_display::{text_field, FieldAlign, RenderError};
 
+use crate::backdrop;
 use crate::layout::Layout;
-use crate::page;
 use crate::palette;
 use crate::view::ClockView;
 
@@ -30,7 +33,15 @@ where
 {
     let time_row: usize = layout.rows / 2 - 1;
 
-    page::blank(target, layout, 0, layout.rows)?;
+    // The background everywhere the two rows are not, and then the rows — each pixel painted
+    // exactly once. A full-screen clear first would blank the time before rewriting it, which on
+    // a panel with no framebuffer is a visible blink of the whole glass on every repaint.
+    backdrop::behind(
+        target,
+        layout.canvas_rect(),
+        [layout.full_row(time_row), layout.full_row(time_row + 1)],
+        palette::BACKGROUND,
+    )?;
     text_field(
         target,
         layout.row_origin(time_row),

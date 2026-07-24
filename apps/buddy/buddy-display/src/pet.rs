@@ -15,8 +15,10 @@
 
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
+use embedded_graphics::primitives::Rectangle;
 use platform_display::{text_field, RenderError, FONT};
 
+use crate::backdrop;
 use crate::layout::Layout;
 use crate::meter::{meter, width};
 use crate::page;
@@ -120,22 +122,42 @@ fn gauge<D>(
 where
     D: DrawTarget<Color = Rgb565>,
 {
+    let band_height: u32 = FONT.character_size.height;
     let beside_x: i32 = layout.left + (FONT.character_size.width * LABEL_COLS as u32) as i32;
     let fits_beside: bool = beside_x as u32 + width(cells) <= layout.canvas.width;
-    // Nudged down within the row so an 8 px meter sits on the text's midline rather than on its
-    // cap height, which is what makes a label and its meter read as one reading.
-    let drop: i32 = (FONT.character_size.height as i32 - crate::meter::CELL as i32) / 2;
 
-    let (at, used): (Point, usize) = if fits_beside {
-        (Point::new(beside_x, layout.row_y(row) + drop), 1)
+    let label_band: Rectangle = layout.row_rect(row, LABEL_COLS);
+    let at: Point = if fits_beside {
+        Point::new(beside_x, layout.row_y(row))
     } else {
-        (Point::new(layout.left, layout.row_y(row + 1) + drop), 2)
+        Point::new(layout.left, layout.row_y(row + 1))
     };
-    // Blank FIRST, then the label, then the meter. The rows a gauge occupies are only partly
-    // covered by a padded text field — the pixels beside the label and beyond the meter belong
-    // to whatever was drawn here before — so they are cleared before anything is painted over
-    // them. Blanking afterwards erased the meter, which is exactly the bug a golden caught.
-    page::blank(target, layout, row, used)?;
+    let meter_band: Rectangle = Rectangle::new(at, Size::new(width(cells), band_height));
+
+    // The label and the meter are each opaque over their own band, so the background is painted
+    // only AROUND them — never underneath, which would show the owner a cleared row before the
+    // reading arrived. Beside the label the two bands are adjacent and merge into one band on one
+    // row; stacked, they are two bands a row apart — which is the order `backdrop::behind` wants
+    // either way. One branch decides the rows used and the bands together, because they are the
+    // same decision: a third band later must not be able to change one and not the other.
+    let (bands, used): (&[Rectangle], usize) = if fits_beside {
+        (
+            &[Rectangle::new(
+                label_band.top_left,
+                Size::new(label_band.size.width + meter_band.size.width, band_height),
+            )],
+            1,
+        )
+    } else {
+        (&[label_band, meter_band], 2)
+    };
+    backdrop::behind(
+        target,
+        layout.rows_rect(row, used),
+        bands.iter().copied(),
+        palette::BACKGROUND,
+    )?;
+
     text_field(
         target,
         layout.row_origin(row),
@@ -144,7 +166,7 @@ where
         platform_display::FieldAlign::Left,
         format_args!("{label}"),
     )?;
-    meter(target, at, cells, usize::from(lit), colour)?;
+    meter(target, at, band_height, cells, usize::from(lit), colour)?;
     Ok(used)
 }
 
