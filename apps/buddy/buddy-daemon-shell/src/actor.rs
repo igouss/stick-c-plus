@@ -147,7 +147,10 @@ impl Daemon {
 /// The actor loop: own the [`Coordinator`], the waiting hooks, and the current outbound channel;
 /// serialize every input through this one task.
 async fn run(mut rx: mpsc::UnboundedReceiver<Input>) {
-    let mut coordinator: Coordinator = Coordinator::new();
+    // The owner's home, read once here — the one place in the daemon that may touch the
+    // environment — so every hint on the glass shows `~/code/…` rather than spending a third of
+    // its forty-eight characters on a prefix every directory on the machine shares.
+    let mut coordinator: Coordinator = Coordinator::with_home(std::env::var("HOME").ok());
     // The oneshot back to each waiting hook, keyed by the id its ReplyHook effect names.
     let mut pending: HashMap<HookId, oneshot::Sender<DaemonReply>> = HashMap::new();
     // The current link session's outbound sink, if bonded.

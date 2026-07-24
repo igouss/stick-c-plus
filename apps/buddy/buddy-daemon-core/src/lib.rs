@@ -53,6 +53,8 @@
 
 pub mod coordinator;
 pub mod effect;
+pub mod hint;
 
 pub use coordinator::Coordinator;
 pub use effect::{Effect, HookId};
+pub use hint::shorten;

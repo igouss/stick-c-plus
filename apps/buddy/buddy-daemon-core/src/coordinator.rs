@@ -13,6 +13,7 @@
 //! place a snapshot line is built, a bare keepalive that clears a live prompt is unrepresentable.
 
 use crate::effect::{Effect, HookId};
+use crate::hint::shorten;
 use buddy_permission::{DaemonReply, GatedSnapshot, HookRequest, Ledger, SessionEvent, SessionId};
 use buddy_wire::{
     serialize_owner, serialize_snapshot, serialize_time, Decision, PermissionResponse, Prompt,
@@ -32,12 +33,28 @@ pub struct Coordinator {
     pending: HashMap<String, (HookId, SessionId)>,
     /// Whether a link is currently bonded — the gate on whether a hook can be asked at all.
     bonded: bool,
+    /// The owner's home directory, as the shell found it — shortened to `~` in every hint so the
+    /// glass spends its forty-eight characters on the part of a path that identifies it. `None`
+    /// on a host with no home to speak of, and then a path is shown whole.
+    home: Option<String>,
 }
 
 impl Coordinator {
-    /// A fresh coordinator: no sessions, no pending prompts, nothing bonded.
+    /// A fresh coordinator: no sessions, no pending prompts, nothing bonded, and no home to
+    /// shorten paths by. See [`with_home`](Self::with_home).
     pub fn new() -> Self {
         Coordinator::default()
+    }
+
+    /// The same, told where the owner's home is so a hint can be shortened to `~/…`.
+    ///
+    /// Injected rather than read: this crate touches no environment, and a test says what the
+    /// home is instead of inheriting whoever ran it.
+    pub fn with_home(home: Option<String>) -> Self {
+        Coordinator {
+            home,
+            ..Coordinator::default()
+        }
     }
 
     /// The link came up: mark bonded and emit the handshake IN ORDER — the time sync, the owner
@@ -96,7 +113,7 @@ impl Coordinator {
             SessionEvent::AwaitingApproval(Prompt {
                 id: id.clone(),
                 tool: req.tool_name.clone(),
-                hint: req.cwd.clone(),
+                hint: shorten(&req.cwd, self.home.as_deref()),
             }),
         );
         self.pending.insert(id, (hook, session));
@@ -217,6 +234,37 @@ mod tests {
             permission_mode: "default".to_string(),
             transcript_path: "/tmp/t.jsonl".to_string(),
         }
+    }
+
+    /// The hint the glass would show for a hook raised in `cwd`, on a daemon whose owner's home
+    /// is `home`.
+    fn hint_shown(cwd: &str, home: Option<&str>) -> String {
+        let mut coordinator: Coordinator = Coordinator::with_home(home.map(str::to_string));
+        coordinator.on_link_up(EPOCH, TZ, OWNER);
+        let request: HookRequest = HookRequest {
+            cwd: cwd.to_string(),
+            ..a_request("s1", "Bash")
+        };
+        coordinator.on_hook(HookId(1), &request);
+        coordinator
+            .ledger
+            .outstanding_prompt()
+            .expect("the hook raised a prompt")
+            .hint
+            .clone()
+    }
+
+    /// The hint reaches the glass shortened: the owner's home is a `~`, and a path outside it is
+    /// shown whole. The glass has forty-eight characters and a home prefix is the third of them
+    /// that says nothing.
+    #[test]
+    fn a_hint_under_the_owners_home_is_shortened() {
+        assert_eq!(
+            hint_shown("/home/pat/code/m5", Some("/home/pat")),
+            "~/code/m5"
+        );
+        assert_eq!(hint_shown("/etc", Some("/home/pat")), "/etc");
+        assert_eq!(hint_shown("/home/pat/code/m5", None), "/home/pat/code/m5");
     }
 
     /// The serialized line of a `SendLink` effect, or `None` for a `ReplyHook`.
