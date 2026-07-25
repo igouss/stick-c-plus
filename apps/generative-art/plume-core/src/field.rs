@@ -31,6 +31,7 @@
 //!   one thing that is *not* a table lookup is `mag`, a genuine `sqrtf` — the honest magnitude
 //!   the field is built around.
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use platform_numerics::SinTable;
@@ -131,13 +132,16 @@ struct Precomputed {
     /// The magnitude `d = |(k, e)|` — the field's one `sqrtf`, paid once. Reused three ways a
     /// frame: in `c = d − t`, and (already folded into `swirl_base`) the swirl, and `y`'s `d·39`.
     d: f32,
-    /// Whether this point is drawn fat — `k² > 15`, the barbs' bright spine.
-    wide: bool,
 }
 
-/// The `t`-independent results at index `i`, evaluated with the exact operations and grouping
-/// [`point`] uses, so reassembling them in [`PlumeField::frame`] reproduces [`point`] bit for bit.
-fn precompute(i: u32, table: &SinTable) -> Precomputed {
+/// The `t`-independent results at index `i`, plus whether the point is drawn fat (`k² > 15`, the
+/// barbs' bright spine). Evaluated with the exact operations and grouping [`point`] uses, so
+/// reassembling them in [`PlumeField::frame`] reproduces [`point`] bit for bit.
+///
+/// The `wide` flag rides out separately rather than in [`Precomputed`] because a `bool` there pads
+/// the four-`f32` record from 16 to 20 bytes — 4 wasted bytes per point, ~20 KiB across the field.
+/// [`PlumeField`] packs it into a bitset instead; see [`new`](PlumeField::new).
+fn precompute(i: u32, table: &SinTable) -> (Precomputed, bool) {
     let x: f32 = i as f32;
     let y: f32 = x * (1.0 / 235.0);
 
@@ -145,13 +149,13 @@ fn precompute(i: u32, table: &SinTable) -> Precomputed {
     let e: f32 = y * (1.0 / 8.0) - 20.0;
     let d: f32 = libm::sqrtf(k * k + e * e);
 
-    Precomputed {
+    let point: Precomputed = Precomputed {
         swirl_base: e * 14.0 - d * 3.0,
         a: 3.0 * table.sin(k * 2.0) + 0.3 / k,
         b: table.sin(y * (1.0 / 19.0)) * k,
         d,
-        wide: k * k > 15.0,
-    }
+    };
+    (point, k * k > 15.0)
 }
 
 /// The frond as [`plume`], but built for the panel: the per-index invariants are precomputed
@@ -161,21 +165,40 @@ fn precompute(i: u32, table: &SinTable) -> Precomputed {
 /// The saving is exactly the loop-invariant hoist the hardware brief calls for, and it changes
 /// nothing on the glass: [`frame`](Self::frame) regroups the *same* operations in the *same*
 /// order as [`point`], so it returns a bit-identical cloud (proven in the tests). It holds
-/// [`POINT_COUNT`] precomputed points on the heap — a small `f32` record each — cheap to sweep
-/// and, like every panel-sized buffer here, never a stack temporary.
+/// [`POINT_COUNT`] precomputed points on the heap — four `f32` each, 16 bytes — plus a one-bit-a-point
+/// `wide` bitset beside them, and like every panel-sized buffer here, never a stack temporary.
 pub struct PlumeField {
+    /// The four-`f32` per-index invariants, one per point, at positions `0..POINT_COUNT`.
     points: Vec<Precomputed>,
+    /// The `wide` flag for each point, packed one bit per point (position `j`'s bit is
+    /// `wide[j >> 5] & (1 << (j & 31))`). Kept out of [`Precomputed`] so that record stays a tight
+    /// 16 bytes rather than a 20-byte padded one — ~20 KiB saved across the field, the headroom the
+    /// double buffer's second frame needs.
+    wide: Vec<u32>,
 }
 
 impl PlumeField {
     /// Pay for the frond's per-index invariants once: the six-lookups-a-point,
     /// `sqrtf`-and-division cost of [`point`] is spent here, at construction, and never again on
-    /// the render path.
+    /// the render path. The `wide` flag each point yields is packed into the bitset as it is built.
     pub fn new(table: &SinTable) -> Self {
-        let points: Vec<Precomputed> = (1..=POINT_COUNT)
-            .map(|n: u32| precompute(n * STEP, table))
-            .collect();
-        Self { points }
+        let count: usize = POINT_COUNT as usize;
+        let mut points: Vec<Precomputed> = Vec::with_capacity(count);
+        let mut wide: Vec<u32> = vec![0u32; count.div_ceil(u32::BITS as usize)];
+        for j in 0..count {
+            let (point, is_wide): (Precomputed, bool) = precompute((j as u32 + 1) * STEP, table);
+            points.push(point);
+            if is_wide {
+                wide[j >> 5] |= 1 << (j & 31);
+            }
+        }
+        Self { points, wide }
+    }
+
+    /// Whether the point at position `i` is drawn fat, read from the packed [`wide`](Self::wide)
+    /// bitset — the `k² > 15` flag [`precompute`] set at construction.
+    fn is_wide(&self, i: usize) -> bool {
+        self.wide[i >> 5] & (1 << (i & 31)) != 0
     }
 
     /// The frond at phase `t`: the same [`POINT_COUNT`] points [`plume`] yields, reassembled from
@@ -209,9 +232,11 @@ impl PlumeField {
         table: &'a SinTable,
     ) -> impl Iterator<Item = FieldPoint> + 'a {
         let t2: f32 = 2.0 * t;
-        self.points[start..start + len]
-            .iter()
-            .map(move |p: &Precomputed| point_from(p, t, t2, table))
+        // Iterate positions, not a `&Precomputed` slice, so each point can also read its `wide` bit
+        // from the packed bitset beside the record. Out-of-range `start + len` still panics on the
+        // `points` index, as documented.
+        (start..start + len)
+            .map(move |i: usize| point_from(&self.points[i], self.is_wide(i), t, t2, table))
     }
 
     /// Fill `out` with the frond's points at indices `[start, start + out.len())`, at phase `t` —
@@ -236,14 +261,14 @@ impl PlumeField {
 /// `t2 = 2t` is passed in rather than recomputed, so a sweep hoists the doubling out of the loop
 /// once; the three genuinely phase-dependent lookups (the swirl, and `c`'s sine and cosine) are
 /// all that remain per point.
-fn point_from(p: &Precomputed, t: f32, t2: f32, table: &SinTable) -> FieldPoint {
+fn point_from(p: &Precomputed, wide: bool, t: f32, t2: f32, table: &SinTable) -> FieldPoint {
     let swirl: f32 = table.sin(p.swirl_base + t2);
     let q: f32 = p.a + p.b * (9.0 + 2.0 * swirl);
     let c: f32 = p.d - t;
     FieldPoint {
         x: q + 50.0 * table.cos(c) + 200.0,
         y: q * table.sin(c) + p.d * 39.0 - 475.0,
-        wide: p.wide,
+        wide,
     }
 }
 
