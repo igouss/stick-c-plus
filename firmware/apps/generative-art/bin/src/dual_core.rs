@@ -51,6 +51,11 @@ use plume_core::{PlumeField, SinTable, POINT_COUNT};
 /// does not take is one the render thread's stack can.
 const WORKER_STACK: usize = 4 * 1024;
 
+/// The far-half buffer: one slot per far-half point, `Some` for a drawable pixel and `None` where
+/// the field's degenerate index projected to nothing. Named so the channels and parking slot that
+/// pass it between the two cores read clearly rather than as a thrice-nested generic.
+type FarBuffer = Vec<Option<ScreenPoint>>;
+
 /// One frame's far-half job for the worker: the phase to evaluate at, the canvas to project onto,
 /// and the buffer to fill.
 ///
@@ -62,12 +67,11 @@ struct FarJob {
     /// The panel the far half is projected onto — constant across frames, but carried in the job so
     /// the worker projects with exactly the canvas the render thread was handed this frame.
     canvas: Size,
-    /// The far-half buffer to fill, sized `POINT_COUNT - split`, one slot per point: `Some` for a
-    /// drawable pixel, `None` where the field's degenerate index projected to nothing. Returned on
-    /// the result channel. Holding already-projected [`ScreenPoint`]s (six bytes each) rather than
-    /// canvas [`FieldPoint`]s (twelve) halves this buffer, and doing the projection here spends it on
-    /// Core1 instead of the render core.
-    far: Vec<Option<ScreenPoint>>,
+    /// The far-half buffer to fill, sized `POINT_COUNT - split`. Returned on the result channel.
+    /// Holding already-projected [`ScreenPoint`]s (six bytes each) rather than canvas
+    /// [`FieldPoint`]s (twelve) halves this buffer, and doing the projection here spends it on Core1
+    /// instead of the render core.
+    far: FarBuffer,
 }
 
 /// The firmware's [`FrondCompute`]: a render-thread half and a pinned Core1 worker, joined per
@@ -82,10 +86,10 @@ pub struct DualCoreFrond {
     /// Hand a [`FarJob`] to the worker for this frame.
     to_worker: Sender<FarJob>,
     /// Reclaim the filled far half — receiving on this is the per-frame barrier.
-    from_worker: Receiver<Vec<Option<ScreenPoint>>>,
+    from_worker: Receiver<FarBuffer>,
     /// The far buffer, parked here between frames: taken when a frame starts, returned when the
     /// worker hands it back. `Option` so it can be moved out and back without cloning.
-    far: Option<Vec<Option<ScreenPoint>>>,
+    far: Option<FarBuffer>,
     /// The worker task, kept alive for the life of the frond — dropping it would close the job
     /// channel and end the worker's loop.
     _worker: JoinHandle<()>,
@@ -102,16 +106,13 @@ impl DualCoreFrond {
         // field has been carved out — so the awkward buffer is claimed first, and the field is
         // allocated after. One `Option<ScreenPoint>` per far-half point, all `None` until a frame
         // fills it.
-        let far: Vec<Option<ScreenPoint>> = vec![None; far_len];
+        let far: FarBuffer = vec![None; far_len];
 
         let table: Arc<SinTable> = Arc::new(SinTable::new());
         let field: Arc<PlumeField> = Arc::new(PlumeField::new(&table));
 
         let (to_worker, jobs): (Sender<FarJob>, Receiver<FarJob>) = channel();
-        let (results, from_worker): (
-            Sender<Vec<Option<ScreenPoint>>>,
-            Receiver<Vec<Option<ScreenPoint>>>,
-        ) = channel();
+        let (results, from_worker): (Sender<FarBuffer>, Receiver<FarBuffer>) = channel();
 
         // Pin the worker to Core1 so it runs on the core the render loop does not. `set` configures
         // the *next* `std::thread` spawn on this thread; the config is restored to default right
@@ -161,7 +162,7 @@ fn worker_loop(
     field: Arc<PlumeField>,
     table: Arc<SinTable>,
     jobs: Receiver<FarJob>,
-    results: Sender<Vec<Option<ScreenPoint>>>,
+    results: Sender<FarBuffer>,
 ) {
     while let Ok(FarJob { t, canvas, mut far }) = jobs.recv() {
         project_far(&field, split, t, &table, canvas, &mut far);
@@ -198,8 +199,7 @@ impl FrondCompute for DualCoreFrond {
     fn evaluate(&mut self, t: f32, canvas: Size, plot: &mut dyn FnMut(ScreenPoint)) {
         // Hand this frame's far half to the worker; it starts as soon as Core1 picks it up. It
         // evaluates *and projects* its half, so the ~3000 far projections land on Core1, not here.
-        let far: Vec<Option<ScreenPoint>> =
-            self.far.take().expect("far buffer parked between frames");
+        let far: FarBuffer = self.far.take().expect("far buffer parked between frames");
         self.to_worker
             .send(FarJob { t, canvas, far })
             .expect("the plume worker is alive");
@@ -216,7 +216,7 @@ impl FrondCompute for DualCoreFrond {
 
         // The barrier: block until the worker returns the far half, plot its drawable pixels, and
         // re-park it for the next frame.
-        let far: Vec<Option<ScreenPoint>> = self
+        let far: FarBuffer = self
             .from_worker
             .recv()
             .expect("the plume worker returned its half");
