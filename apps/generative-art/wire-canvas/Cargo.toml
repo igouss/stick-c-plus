@@ -1,0 +1,36 @@
+[package]
+name = "wire-canvas"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The generative-art gallery's wire-order Canvas adapter: a full-screen drawing surface backed by a borrowed byte buffer that stores each Rgb565 pixel in the panel's big-endian wire order as it is plotted, so the finished frame streams straight to the ST7789 over DMA with no offscreen copy and no per-frame byte-swap. Implements art-display's Canvas port; the panel's byte order lives here and never reaches the domain. no_std, host-tested for byte-identity against the host Frame, no unsafe."
+
+[lib]
+name = "wire_canvas"
+path = "src/lib.rs"
+
+# The gallery's device-side output adapter: it binds art-display's Canvas port to a raw byte
+# buffer in the panel's wire order. role = "port-and-adapter"; it may depend on the port-and-adapter
+# it adapts (art-display) and the graphics port (embedded-graphics). context = "generative-art".
+# It lives beside art-display rather than in platform/adapters because it depends on the app's
+# Canvas port, and platform must never depend on an app — dependencies point inward.
+[package.metadata.hex-arch]
+role = "port-and-adapter"
+context = "generative-art"
+
+[dependencies]
+# The Canvas port this adapter implements, plus the Rgb565 the port speaks.
+art-display = { path = "../art-display" }
+# The graphics port: Rgb565 with its ToBytes wire encoding, and the Point/Size/Rectangle a
+# DrawTarget is expressed in.
+embedded-graphics = "0.8"
+
+# Host-only; never reaches the Xtensa build (a dependent excludes dev-deps).
+[dev-dependencies]
+# The host Frame this adapter is proven byte-identical to: the same plot into both must produce
+# the same picture, one as Rgb565 pixels and one as wire bytes.
+art-display = { path = "../art-display" }
+# The shared host framebuffer, to read the Frame's pixels back for the byte-identity comparison.
+platform-display = { path = "../../../platform/platform-display", features = ["testing"] }
+# Many-pixel property coverage of the byte-identity and clip invariants.
+proptest = "1"
