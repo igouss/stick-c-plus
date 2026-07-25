@@ -20,10 +20,11 @@ use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use platform_core::{ScreenRotation, Tick};
 use platform_display::SCREEN_SIZE;
-use plume_core::{phase, FieldPoint};
+use plume_core::phase;
 
 use crate::canvas::Canvas;
 use crate::frond::{FrondCompute, SerialFrond};
+use crate::sketch::plume::ScreenPoint;
 use crate::sketch::{placeholder, plume};
 use crate::view::GalleryView;
 
@@ -103,11 +104,11 @@ impl Gallery {
         use art_core::Sketch;
         match view.current() {
             Sketch::Plume => {
-                // Evaluate the frond at this frame's phase through the port (one core or two) and
-                // plot each point as it arrives — streamed, never buffered.
+                // Evaluate and project the frond at this frame's phase through the port (one core or
+                // two) and plot each drawable pixel as it arrives — streamed, never buffered.
                 let t: f32 = phase(elapsed);
-                self.frond.evaluate(t, &mut |point: FieldPoint| {
-                    plume::plot_point(canvas, point, size)
+                self.frond.evaluate(t, size, &mut |point: ScreenPoint| {
+                    plume::plot_screen(canvas, point)
                 });
             }
             Sketch::Squares => placeholder::render(canvas, Sketch::Squares, size),

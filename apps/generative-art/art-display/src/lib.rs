@@ -65,11 +65,18 @@ pub use canvas::Canvas;
 pub use frame::Frame;
 pub use frond::{FrondCompute, SerialFrond};
 pub use gallery::{canvas_size, Gallery, GROUND_COLOUR, PLUME_COLOUR};
+pub use sketch::plume::{project, ScreenPoint};
 pub use view::{GalleryView, REPAINT_MS};
 
-// The frond's point type, re-exported so a composition root that supplies a parallel
-// [`FrondCompute`] can name the cloud it fills without depending on `plume-core` directly.
+// The frond's field point and its projected panel pixel, re-exported so a composition root that
+// supplies a parallel [`FrondCompute`] can build the pipeline without depending on `plume-core` or
+// reaching into this crate's modules: it reads the field's [`FieldPoint`]s on its worker, runs
+// [`project`] to fold them onto the panel, and buffers the [`ScreenPoint`]s the port hands back.
 pub use plume_core::FieldPoint;
+
+// The canvas dimensions the port projects onto, re-exported so the composition root can name the
+// size its parallel worker projects with, without depending on `embedded-graphics` directly.
+pub use embedded_graphics::prelude::Size;
 
 // The board-generic foundation, re-exported so the panel adapter and the screenshots example
 // reach it through `art_display`.

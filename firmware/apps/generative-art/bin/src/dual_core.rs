@@ -17,46 +17,57 @@
 //! no shared mutable state, no lock, no `unsafe`. The two cores only ever read the shared field and
 //! table (both immutable [`Arc`]s).
 //!
-//! ## Only the far half is buffered
+//! ## Only the far half is buffered, and only as projected pixels
 //!
-//! The near half never lands in a buffer: the render thread evaluates it point-by-point and plots
-//! each as it goes ([`PlumeField::iter_range`]). Only the worker's far half needs a buffer, because
-//! a worker on another thread cannot borrow the render thread's frame — it must own its output. So
-//! the whole pipeline adds just that one half-frame buffer (~30 KiB) to the heap, not a second
-//! whole cloud, which is what keeps it inside the ESP32's tight memory.
+//! The near half never lands in a buffer: the render thread evaluates it point-by-point, projects
+//! each, and plots it as it goes ([`PlumeField::iter_range`] + [`project`]). Only the worker's far
+//! half needs a buffer, because a worker on another thread cannot borrow the render thread's frame —
+//! it must own its output. And what it owns is already *projected*: an `Option<ScreenPoint>` a point,
+//! six bytes each, not the twelve a canvas [`FieldPoint`] costs. So the whole pipeline adds only that
+//! one half-buffer, at half the width it once was — a saving that goes straight into the frond's
+//! point budget — and the far-half projections run on Core1 rather than the render core.
 //!
-//! ## Bit-identical to the serial path
+//! ## Identical to the serial path
 //!
-//! The split is [`PlumeField::compute_range`] over `[0, split)` and `[split, POINT_COUNT)`; a
-//! `plume-core` property proves two such ranges reassemble the whole frame bit for bit. So this
-//! evaluator produces the *identical* cloud [`SerialFrond`](art_display::SerialFrond) does — it is
-//! only a faster route to it. The plot downstream cannot tell which core drew a point.
+//! Each half is [`PlumeField::iter_range`] followed by [`project`], the same two steps
+//! [`SerialFrond`](art_display::SerialFrond) runs in one sweep; a `plume-core` property proves the
+//! two index ranges reassemble the whole field bit for bit, and both halves project through the same
+//! function, so the projected cloud is identical to the one-core path's. The plot downstream cannot
+//! tell which core drew a pixel.
 
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-use art_display::{FieldPoint, FrondCompute};
+use art_display::{project, FieldPoint, FrondCompute, ScreenPoint, Size};
 use esp_idf_hal::cpu::Core;
 use esp_idf_hal::task::thread::ThreadSpawnConfiguration;
 use plume_core::{PlumeField, SinTable, POINT_COUNT};
 
 /// The worker's stack, in bytes. It only blocks on a channel and fills a heap `Vec` through
-/// [`compute_range`](PlumeField::compute_range) — a shallow loop of `f32` locals and table lookups,
-/// no recursion and no `libm` (the `sqrtf` is paid at build, not per frame) — so 4 KiB is ample.
-/// It is kept lean on purpose: the render thread needs a 16 KiB stack of its own, and on this heap
-/// every kilobyte the worker does not take is one the render thread's stack can.
+/// [`project_far`] — a shallow loop of `f32` locals, table lookups and a projection, no recursion
+/// and no `libm` (the `sqrtf` is paid at build, not per frame) — so 4 KiB is ample. It is kept lean
+/// on purpose: the render thread needs its own stack, and on this heap every kilobyte the worker
+/// does not take is one the render thread's stack can.
 const WORKER_STACK: usize = 4 * 1024;
 
-/// One frame's far-half job for the worker: the phase to evaluate at, and the buffer to fill.
+/// One frame's far-half job for the worker: the phase to evaluate at, the canvas to project onto,
+/// and the buffer to fill.
 ///
 /// The buffer travels *with* the job and is handed back when filled, so its ownership ping-pongs
 /// between the two threads and is never shared — the property that keeps the whole pipeline safe.
 struct FarJob {
     /// The animation phase to evaluate the far half at.
     t: f32,
-    /// The far-half buffer to fill, sized `POINT_COUNT - split`. Returned on the result channel.
-    far: Vec<FieldPoint>,
+    /// The panel the far half is projected onto — constant across frames, but carried in the job so
+    /// the worker projects with exactly the canvas the render thread was handed this frame.
+    canvas: Size,
+    /// The far-half buffer to fill, sized `POINT_COUNT - split`, one slot per point: `Some` for a
+    /// drawable pixel, `None` where the field's degenerate index projected to nothing. Returned on
+    /// the result channel. Holding already-projected [`ScreenPoint`]s (six bytes each) rather than
+    /// canvas [`FieldPoint`]s (twelve) halves this buffer, and doing the projection here spends it on
+    /// Core1 instead of the render core.
+    far: Vec<Option<ScreenPoint>>,
 }
 
 /// The firmware's [`FrondCompute`]: a render-thread half and a pinned Core1 worker, joined per
@@ -71,10 +82,10 @@ pub struct DualCoreFrond {
     /// Hand a [`FarJob`] to the worker for this frame.
     to_worker: Sender<FarJob>,
     /// Reclaim the filled far half — receiving on this is the per-frame barrier.
-    from_worker: Receiver<Vec<FieldPoint>>,
+    from_worker: Receiver<Vec<Option<ScreenPoint>>>,
     /// The far buffer, parked here between frames: taken when a frame starts, returned when the
     /// worker hands it back. `Option` so it can be moved out and back without cloning.
-    far: Option<Vec<FieldPoint>>,
+    far: Option<Vec<Option<ScreenPoint>>>,
     /// The worker task, kept alive for the life of the frond — dropping it would close the job
     /// channel and end the worker's loop.
     _worker: JoinHandle<()>,
@@ -86,18 +97,21 @@ impl DualCoreFrond {
         let split: usize = POINT_COUNT as usize / 2;
         let far_len: usize = POINT_COUNT as usize - split;
 
-        // Park the far buffer *before* the 100 KiB field. On the ESP32's pool-fragmented heap a
-        // 30 KiB contiguous run is easy to find while the pools are fresh, but scarce once the field
-        // has been carved out — so the awkward middle-sized buffer is claimed first, and the field
-        // (which needs a whole pool of its own) is allocated after.
-        let far: Vec<FieldPoint> = vec![FieldPoint::default(); far_len];
+        // Park the far buffer *before* the field's two halves. On the ESP32's pool-fragmented heap a
+        // mid-sized contiguous run is easy to find while the pools are fresh, but scarce once the
+        // field has been carved out — so the awkward buffer is claimed first, and the field is
+        // allocated after. One `Option<ScreenPoint>` per far-half point, all `None` until a frame
+        // fills it.
+        let far: Vec<Option<ScreenPoint>> = vec![None; far_len];
 
         let table: Arc<SinTable> = Arc::new(SinTable::new());
         let field: Arc<PlumeField> = Arc::new(PlumeField::new(&table));
 
         let (to_worker, jobs): (Sender<FarJob>, Receiver<FarJob>) = channel();
-        let (results, from_worker): (Sender<Vec<FieldPoint>>, Receiver<Vec<FieldPoint>>) =
-            channel();
+        let (results, from_worker): (
+            Sender<Vec<Option<ScreenPoint>>>,
+            Receiver<Vec<Option<ScreenPoint>>>,
+        ) = channel();
 
         // Pin the worker to Core1 so it runs on the core the render loop does not. `set` configures
         // the *next* `std::thread` spawn on this thread; the config is restored to default right
@@ -139,47 +153,78 @@ impl Default for DualCoreFrond {
     }
 }
 
-/// The worker's forever loop: block for a job, fill its far half on this core, hand the buffer
-/// back. Ends only when the job channel closes — which happens only if the frond is dropped, and
-/// it lives for the whole app.
+/// The worker's forever loop: block for a job, evaluate-and-project its far half on this core, hand
+/// the buffer back. Ends only when the job channel closes — which happens only if the frond is
+/// dropped, and it lives for the whole app.
 fn worker_loop(
     split: usize,
     field: Arc<PlumeField>,
     table: Arc<SinTable>,
     jobs: Receiver<FarJob>,
-    results: Sender<Vec<FieldPoint>>,
+    results: Sender<Vec<Option<ScreenPoint>>>,
 ) {
-    while let Ok(FarJob { t, mut far }) = jobs.recv() {
-        field.compute_range(split, t, &table, &mut far);
+    while let Ok(FarJob { t, canvas, mut far }) = jobs.recv() {
+        project_far(&field, split, t, &table, canvas, &mut far);
         if results.send(far).is_err() {
             break; // the frond was dropped; the far buffer has nowhere to go.
         }
     }
 }
 
+/// Evaluate the far half `[split, split + out.len())` at phase `t` and project each point onto
+/// `canvas`, filling `out` — `Some` for a drawable pixel, `None` where the field's degenerate index
+/// projected to nothing. This is the work Core1 does hidden under the render thread's near half; it
+/// is exactly `iter_range` followed by [`project`], the same two steps the serial path runs, so the
+/// far pixels are identical to a one-core sweep's.
+fn project_far(
+    field: &PlumeField,
+    split: usize,
+    t: f32,
+    table: &SinTable,
+    canvas: Size,
+    out: &mut [Option<ScreenPoint>],
+) {
+    let len: usize = out.len();
+    out.iter_mut()
+        .zip(field.iter_range(split, len, t, table))
+        .for_each(|(slot, point): (&mut Option<ScreenPoint>, FieldPoint)| {
+            *slot = project(point, canvas);
+        });
+}
+
 impl FrondCompute for DualCoreFrond {
-    /// Evaluate the whole cloud through `plot` using both cores: dispatch the far half to the
-    /// worker, stream the near half here meanwhile, then join and plot the worker's far half.
-    fn evaluate(&mut self, t: f32, plot: &mut dyn FnMut(FieldPoint)) {
-        // Hand this frame's far half to the worker; it starts as soon as Core1 picks it up.
-        let far: Vec<FieldPoint> = self.far.take().expect("far buffer parked between frames");
+    /// Evaluate and project the whole cloud through `plot` using both cores: dispatch the far half to
+    /// the worker, stream the near half here meanwhile, then join and plot the worker's far half.
+    fn evaluate(&mut self, t: f32, canvas: Size, plot: &mut dyn FnMut(ScreenPoint)) {
+        // Hand this frame's far half to the worker; it starts as soon as Core1 picks it up. It
+        // evaluates *and projects* its half, so the ~3000 far projections land on Core1, not here.
+        let far: Vec<Option<ScreenPoint>> =
+            self.far.take().expect("far buffer parked between frames");
         self.to_worker
-            .send(FarJob { t, far })
+            .send(FarJob { t, canvas, far })
             .expect("the plume worker is alive");
 
-        // Stream the near half on this core — straight into the plot, no buffer — while the worker
-        // fills the far half on Core1.
+        // Stream the near half on this core — evaluate, project, and plot straight through, no buffer
+        // — while the worker fills the far half on Core1.
         self.field
             .iter_range(0, self.split, t, &self.table)
-            .for_each(|point: FieldPoint| plot(point));
+            .for_each(|point: FieldPoint| {
+                if let Some(screen) = project(point, canvas) {
+                    plot(screen);
+                }
+            });
 
-        // The barrier: block until the worker returns the far half, plot it, and re-park it for the
-        // next frame.
-        let far: Vec<FieldPoint> = self
+        // The barrier: block until the worker returns the far half, plot its drawable pixels, and
+        // re-park it for the next frame.
+        let far: Vec<Option<ScreenPoint>> = self
             .from_worker
             .recv()
             .expect("the plume worker returned its half");
-        far.iter().for_each(|&point: &FieldPoint| plot(point));
+        far.iter().for_each(|slot: &Option<ScreenPoint>| {
+            if let Some(screen) = *slot {
+                plot(screen);
+            }
+        });
         self.far = Some(far);
     }
 }

@@ -74,11 +74,7 @@ fn index_of(n: u32) -> u32 {
 /// Carried by value — it is a plain result, not an object. The projection onto the panel (and
 /// the decision to keep or clip it) is the display crate's business; this crate only says where
 /// the point *is* and whether it is a fat one.
-///
-/// [`Default`] is the origin, an unlit non-wide point: it is only ever a placeholder to fill a
-/// scratch buffer with before [`PlumeField::compute_range`] overwrites every slot, so its value
-/// is never read.
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct FieldPoint {
     /// Horizontal position in canvas space. Roughly centred on 200, but a degenerate index can
     /// send it to infinity — see [`point`].
@@ -187,8 +183,8 @@ fn precompute(i: u32, table: &SinTable) -> (Precomputed, bool) {
 /// full-screen DMA buffers have already carved up the one pool big enough to hold it. Two half-sized
 /// runs fit where one whole one does not, so the point budget can climb past the
 /// single-allocation ceiling. The cut is at the midpoint, which also lines it up with the dual-core
-/// near/far split ([`compute_range`](PlumeField::compute_range)) so each core's sweep stays inside
-/// one half — but correctness does not depend on that alignment, only a hair of locality does.
+/// near/far split (two [`iter_range`](PlumeField::iter_range) sweeps) so each core's sweep stays
+/// inside one half — but correctness does not depend on that alignment, only a hair of locality does.
 const SPLIT: usize = POINT_COUNT as usize / 2;
 
 /// The frond as [`plume`], but built for the panel: the per-index invariants are precomputed
@@ -301,24 +297,10 @@ impl PlumeField {
         (start..start + len)
             .map(move |i: usize| point_from(self.precomputed_at(i), self.is_wide(i), t, t2, table))
     }
-
-    /// Fill `out` with the frond's points at indices `[start, start + out.len())`, at phase `t` —
-    /// the buffered form of [`iter_range`](Self::iter_range), for a worker that must *own* its
-    /// output because it cannot borrow the caller's frame across a thread. `out[j]` is the point at
-    /// precomputed index `start + j`; bit-identical to the matching stretch of [`frame`], so two
-    /// cores filling two ranges reassemble the one true frame (proven in the tests).
-    ///
-    /// Panics if `start + out.len()` runs past the field — a caller-side indexing bug.
-    pub fn compute_range(&self, start: usize, t: f32, table: &SinTable, out: &mut [FieldPoint]) {
-        let len: usize = out.len();
-        out.iter_mut()
-            .zip(self.iter_range(start, len, t, table))
-            .for_each(|(slot, point): (&mut FieldPoint, FieldPoint)| *slot = point);
-    }
 }
 
 /// One frame point from its precomputed invariants, at phase `t` — the exact body
-/// [`PlumeField::frame`] and [`PlumeField::compute_range`] share, so the whole and any range of it
+/// [`PlumeField::frame`] and [`PlumeField::iter_range`] share, so the whole and any range of it
 /// compute the same bits.
 ///
 /// `t2 = 2t` is passed in rather than recomputed, so a sweep hoists the doubling out of the loop
@@ -430,13 +412,13 @@ mod tests {
     }
 
     proptest! {
-        /// Many: a **split sweep is bit-identical to the whole**. Filling `[0, split)` and
-        /// `[split, POINT_COUNT)` with two [`compute_range`](PlumeField::compute_range) calls yields
-        /// exactly the bits [`frame`](PlumeField::frame) produces in one sweep — at every phase and
-        /// every split point, including the empty near half (`split = 0`) and the empty far half
-        /// (`split = POINT_COUNT`). This is the invariant the dual-core pipeline rests on: two cores
-        /// filling two ranges reassemble the one true frame, not an approximation of it. Compared
-        /// through `to_bits` so the degenerate ±∞ points match exactly.
+        /// Many: a **split sweep is bit-identical to the whole**. Two [`iter_range`](PlumeField::iter_range)
+        /// sweeps over `[0, split)` and `[split, POINT_COUNT)`, concatenated, yield exactly the bits
+        /// [`frame`](PlumeField::frame) produces in one sweep — at every phase and every split point,
+        /// including the empty near half (`split = 0`) and the empty far half (`split = POINT_COUNT`).
+        /// This is the invariant the dual-core pipeline rests on: the render thread sweeps the near
+        /// range and the worker the far range, and the two reassemble the one true frame, not an
+        /// approximation of it. Compared through `to_bits` so the degenerate ±∞ points match exactly.
         #[test]
         fn a_split_sweep_is_bit_identical_to_the_whole(
             t in 0.0f32..core::f32::consts::TAU,
@@ -445,12 +427,12 @@ mod tests {
             let table: SinTable = SinTable::new();
             let field: PlumeField = PlumeField::new(&table);
 
-            let mut out: Vec<FieldPoint> = alloc::vec![FieldPoint::default(); POINT_COUNT as usize];
-            let (near, far): (&mut [FieldPoint], &mut [FieldPoint]) = out.split_at_mut(split);
-            field.compute_range(0, t, &table, near);
-            field.compute_range(split, t, &table, far);
+            let near: Vec<FieldPoint> = field.iter_range(0, split, t, &table).collect();
+            let far: Vec<FieldPoint> =
+                field.iter_range(split, POINT_COUNT as usize - split, t, &table).collect();
+            let reassembled: Vec<FieldPoint> = near.into_iter().chain(far).collect();
 
-            for (whole, part) in field.frame(t, &table).zip(out.iter()) {
+            for (whole, part) in field.frame(t, &table).zip(reassembled.iter()) {
                 prop_assert_eq!(whole.x.to_bits(), part.x.to_bits(), "x differs at t={}, split={}", t, split);
                 prop_assert_eq!(whole.y.to_bits(), part.y.to_bits(), "y differs at t={}, split={}", t, split);
                 prop_assert_eq!(whole.wide, part.wide, "wide differs at t={}, split={}", t, split);
