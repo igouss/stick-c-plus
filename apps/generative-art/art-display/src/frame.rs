@@ -28,6 +28,8 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::Rectangle;
 use platform_display::{RenderError, SCREEN_SIZE};
 
+use crate::canvas::Canvas;
+
 /// The largest frame the panel ever needs: its full area, either way up. Sized once so a rotation
 /// change reuses the buffer rather than reallocating.
 const MAX_PIXELS: usize = (SCREEN_SIZE.width * SCREEN_SIZE.height) as usize;
@@ -90,18 +92,6 @@ impl Frame {
         self.pixels[index] = colour;
     }
 
-    /// The active canvas as a contiguous row-major `Rgb565` slice — exactly the pixels [`blit`]
-    /// streams, in the order it streams them.
-    ///
-    /// The seam for a panel adapter that pushes the frame to the glass *itself* — swapping to the
-    /// wire's byte order and bursting it over DMA — rather than draw through the generic
-    /// [`blit`](Self::blit)/[`DrawTarget`] path. Same bytes, same order; only who moves them, and
-    /// how fast, differs. Host renderers keep using [`blit`], so both paths stay one picture.
-    pub fn pixels(&self) -> &[Rgb565] {
-        let count: usize = (self.width * self.height) as usize;
-        &self.pixels[..count]
-    }
-
     /// Stream the whole active canvas to `target` as one contiguous fill — the single transaction
     /// the whole module exists to make possible.
     pub fn blit<D>(&self, target: &mut D) -> Result<(), RenderError<D::Error>>
@@ -143,6 +133,19 @@ impl DrawTarget for Frame {
             .into_iter()
             .for_each(|Pixel(coord, colour): Pixel<Rgb565>| self.set(coord.x, coord.y, colour));
         Ok(())
+    }
+}
+
+impl Canvas for Frame {
+    /// The host adapter's plot: forwards to the inherent [`set`](Frame::set) over the `Rgb565`
+    /// buffer. The wire order the panel wants is the firmware adapter's concern, never this one's.
+    fn set(&mut self, x: i32, y: i32, colour: Rgb565) {
+        Frame::set(self, x, y, colour);
+    }
+
+    /// The host adapter's flood: forwards to the inherent [`reset`](Frame::reset).
+    fn reset(&mut self, size: Size, background: Rgb565) {
+        Frame::reset(self, size, background);
     }
 }
 

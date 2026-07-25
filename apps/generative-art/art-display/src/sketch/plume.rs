@@ -21,7 +21,7 @@ use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::{RgbColor, Size};
 use plume_core::FieldPoint;
 
-use crate::frame::Frame;
+use crate::canvas::Canvas;
 
 /// The colour the lit frond is drawn in. White, faithful to the source's translucent-white dots.
 pub const PLUME_COLOUR: Rgb565 = Rgb565::WHITE;
@@ -65,7 +65,11 @@ pub fn project(point: FieldPoint, canvas: Size) -> Option<(i32, i32)> {
 /// One point at a time so a caller can stream a core's half straight from
 /// [`iter_range`](plume_core::PlumeField::iter_range) with no intermediate buffer — the plume's
 /// answer to the ESP32's tight heap.
-pub fn plot_point(frame: &mut Frame, point: FieldPoint, canvas: Size) {
+///
+/// Generic over the [`Canvas`] so the same plot lands the frond in a host [`Frame`](crate::Frame)
+/// for the goldens and in the firmware's wire-order buffer on the glass — the point does not know
+/// which, and cannot draw them differently.
+pub fn plot_point<C: Canvas>(frame: &mut C, point: FieldPoint, canvas: Size) {
     if let Some((x, y)) = project(point, canvas) {
         frame.set(x, y, PLUME_COLOUR);
         if point.wide {
@@ -77,6 +81,7 @@ pub fn plot_point(frame: &mut Frame, point: FieldPoint, canvas: Size) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frame::Frame;
 
     /// The 135×240 portrait canvas the plume is drawn on.
     const PORTRAIT: Size = Size::new(135, 240);

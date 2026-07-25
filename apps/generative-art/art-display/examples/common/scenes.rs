@@ -15,7 +15,7 @@
 use std::path::Path;
 
 use art_core::Sketch;
-use art_display::{canvas_size, Gallery, GalleryView};
+use art_display::{canvas_size, Frame, Gallery, GalleryView};
 use embedded_graphics::pixelcolor::Rgb565;
 // The stills are sampled by *phase*-frame, not by the repaint cadence: a whole `FRAME_MS` is one
 // step of the source's motion, and on that boundary the continuous [`plume_core::phase`] lands
@@ -80,19 +80,22 @@ fn slug(sketch: Sketch) -> &'static str {
     }
 }
 
-/// Rasterise one still to a PNG at [`SCALE`], through `Gallery::render` — the very function the
-/// ST7789 adapter calls on the board — so the file is the real picture, not a drawing of it.
-/// Shared by the example and the goldens, so both produce byte-identical PNGs.
+/// Rasterise one still to a PNG at [`SCALE`], through `Gallery::paint_into` then a blit — the same
+/// paint the ST7789 adapter drives on the board, into the same [`Frame`] the host uses — so the
+/// file is the real picture, not a drawing of it. Shared by the example and the goldens, so both
+/// produce byte-identical PNGs.
 pub fn render_png(screen: &Screen, path: &Path) {
     let mut display: SimulatorDisplay<Rgb565> = SimulatorDisplay::new(canvas_size(PORTRAIT));
-    Gallery::new()
-        .render(
-            &mut display,
-            GalleryView::new(screen.sketch),
-            screen.elapsed,
-            PORTRAIT,
-        )
-        .expect("a framebuffer render cannot fail");
+    let mut frame: Frame = Frame::new();
+    Gallery::new().paint_into(
+        &mut frame,
+        GalleryView::new(screen.sketch),
+        screen.elapsed,
+        PORTRAIT,
+    );
+    frame
+        .blit(&mut display)
+        .expect("a framebuffer blit cannot fail");
     let settings: OutputSettings = OutputSettingsBuilder::new().scale(SCALE).build();
     display
         .to_rgb_output_image(&settings)

@@ -15,7 +15,7 @@ use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use platform_display::{text_field, FieldAlign};
 
-use crate::frame::Frame;
+use crate::canvas::Canvas;
 
 /// The dim grey the "coming soon" line is drawn in — quieter than the accent title above it.
 const SUBTITLE_COLOUR: Rgb565 = Rgb565::new(10, 20, 10);
@@ -48,10 +48,12 @@ fn title(sketch: Sketch) -> (&'static str, Rgb565) {
 
 /// Draw `sketch`'s placeholder into `frame`, which the caller has already reset to the ground.
 ///
-/// Drawing into a [`Frame`] cannot fail below the graphics port; the only errors `text_field` can
-/// return are a field or line that does not fit, which would be a layout mistake fixed here rather
-/// than a condition to handle — so they are asserted, not propagated.
-pub fn render(frame: &mut Frame, sketch: Sketch, canvas: Size) {
+/// Generic over the [`Canvas`], so a placeholder draws the same into a host [`Frame`](crate::Frame)
+/// and the firmware's wire-order buffer. Drawing into a canvas cannot fail below the graphics port
+/// (its error is [`Infallible`](core::convert::Infallible)); the only errors `text_field` can return
+/// are a field or line that does not fit, which would be a layout mistake fixed here rather than a
+/// condition to handle — so they are asserted, not propagated.
+pub fn render<C: Canvas>(frame: &mut C, sketch: Sketch, canvas: Size) {
     let (name, accent): (&str, Rgb565) = title(sketch);
     let centre_x: i32 = (canvas.width as i32 - FIELD_WIDTH as i32 * 10) / 2;
 
@@ -78,6 +80,7 @@ pub fn render(frame: &mut Frame, sketch: Sketch, canvas: Size) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frame::Frame;
     use crate::gallery::{canvas_size, GROUND_COLOUR};
     use platform_core::ScreenRotation;
     use platform_display::testing::Framebuffer;

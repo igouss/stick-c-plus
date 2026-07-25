@@ -11,9 +11,14 @@
 //! the [`Selector`](art_core::Selector) says when it changes; this crate decides what each piece
 //! looks like and how the picture reaches the panel.
 //!
-//! - [`Gallery`] — the renderer. Holds the frond-compute port, a scratch cloud, and the offscreen
-//!   frame across frames; [`render`](Gallery::render) dispatches on the selected sketch, draws it
-//!   into the frame, and blits the frame in one window.
+//! - [`Gallery`] — the renderer. Holds only the frond-compute port across frames;
+//!   [`paint_into`](Gallery::paint_into) dispatches on the selected sketch and plots it into a
+//!   [`Canvas`] the caller supplies, so the one full-screen buffer lives at the composition root,
+//!   not here.
+//! - [`Canvas`] — the drawing-surface port a sketch plots into: [`Frame`] is the host adapter (an
+//!   `Rgb565` buffer it blits to any [`DrawTarget`](embedded_graphics::prelude::DrawTarget)); the
+//!   firmware supplies a wire-order adapter that streams straight over DMA. The port is `Rgb565`, so
+//!   the panel's byte order never reaches this crate.
 //! - [`FrondCompute`] — the port under the plume's evaluation: turn an animation phase into the
 //!   frond's point cloud. [`SerialFrond`] is the one-core default; the firmware injects a two-core
 //!   implementation via [`Gallery::with_frond`], a strictly faster route to the identical cloud.
@@ -29,11 +34,11 @@
 //!
 //! Every sketch is a full-screen picture that changes each frame. Drawing each cell or dot
 //! straight onto the panel would be thousands of tiny addressed SPI writes a frame — unwatchable.
-//! So each sketch is plotted into one offscreen [`Frame`](frame::Frame) of `Rgb565` in RAM, and
-//! the whole frame is streamed to the panel as a **single** contiguous window. The picture
-//! crosses the wire the way a video frame does: one fill, not thousands of pokes. Rewriting the
-//! whole frame each time is also what makes the animation self-erasing — nothing of the last
-//! frame survives, so a moving picture never smears.
+//! So each sketch is plotted into one full-screen [`Canvas`] in RAM, and the whole canvas is
+//! streamed to the panel as a **single** contiguous window. The picture crosses the wire the way a
+//! video frame does: one fill, not thousands of pokes. Rewriting the whole canvas each time is also
+//! what makes the animation self-erasing — nothing of the last frame survives, so a moving picture
+//! never smears.
 //!
 //! ## Not every piece is built yet
 //!
@@ -49,12 +54,15 @@
 
 extern crate alloc;
 
+mod canvas;
 mod frame;
 mod frond;
 mod gallery;
 mod sketch;
 mod view;
 
+pub use canvas::Canvas;
+pub use frame::Frame;
 pub use frond::{FrondCompute, SerialFrond};
 pub use gallery::{canvas_size, Gallery, GROUND_COLOUR, PLUME_COLOUR};
 pub use view::{GalleryView, REPAINT_MS};
@@ -67,6 +75,6 @@ pub use plume_core::FieldPoint;
 // reach it through `art_display`.
 pub use platform_display::{RenderError, SCREEN_SIZE};
 
-// The pixel type [`Gallery::paint`] hands back — re-exported so a composition root that takes
-// those pixels to a panel can name their type without depending on embedded-graphics itself.
+// The pixel type the [`Canvas`] port speaks — re-exported so a composition root building a wire-order
+// [`Canvas`] adapter can name its colour without depending on `embedded-graphics` directly.
 pub use embedded_graphics::pixelcolor::Rgb565;
