@@ -1,0 +1,35 @@
+[package]
+name = "squares-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Framework-free squares domain for the M5StickC Plus: a grid of nested-square frames that breathe and flip sign in a diagonal wave, as a pure function of an animation phase. A faithful port of a Dwitter — each cell's breath is one table sine of a per-cell phase offset — with every value f32 for the ESP32's single-precision FPU. no_std, host-tested, no unsafe."
+
+[lib]
+name = "squares_core"
+path = "src/lib.rs"
+
+# The pure heart of the squares sketch: the grid of breathing cells as a function of a phase,
+# and the phase clock that animates it. No pixels, no framework, no I/O — the picture the grid
+# makes is the display crate's business. context = "generative-art" — one piece in the gallery,
+# beside art-core and plume-core. It depends on nothing but the shared sine table.
+[package.metadata.hex-arch]
+role = "domain"
+context = "generative-art"
+
+[dependencies]
+# The startup-built sine table, shared across every sketch in the gallery. context = "shared",
+# so this dependency is not a context violation.
+platform-numerics = { path = "../../../platform/platform-numerics" }
+
+# Host-only. These link std and never reach the Xtensa build (a dependent excludes them).
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run under the default
+# harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false

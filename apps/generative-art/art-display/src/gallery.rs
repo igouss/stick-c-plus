@@ -10,7 +10,7 @@
 //! renderer, two adapters, one picture.
 //!
 //! The dispatch is a single exhaustive match on the selected [`Sketch`]: each arm draws one piece.
-//! Today only the plume is rasterised for real; the other four draw their honest
+//! Today the plume and the squares are rasterised for real; the other three draw their honest
 //! [`placeholder`](crate::sketch::placeholder). Because the match is exhaustive, adding a sketch to
 //! the running order forces a new arm here — a new piece cannot be silently left undrawn.
 
@@ -20,12 +20,13 @@ use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use platform_core::{ScreenRotation, Tick};
 use platform_display::SCREEN_SIZE;
+use platform_numerics::SinTable;
 use plume_core::phase;
 
 use crate::canvas::Canvas;
 use crate::frond::{FrondCompute, SerialFrond};
 use crate::sketch::plume::ScreenPoint;
-use crate::sketch::{placeholder, plume};
+use crate::sketch::{placeholder, plume, squares};
 use crate::view::GalleryView;
 
 /// The colour the plume's frond is drawn in — re-exported from the plume sketch so a caller
@@ -64,6 +65,11 @@ pub struct Gallery {
     /// firmware's two-core implementation when injected via [`with_frond`](Self::with_frond). Held
     /// for the life of the app because a parallel implementation owns a persistent worker.
     frond: Box<dyn FrondCompute>,
+    /// The sine table the non-plume sketches read their trigonometry from, built once and shared by
+    /// every sketch that breathes on a table sine (the squares' grid, and the colour sketches to
+    /// come). The plume carries its own inside its [`frond`](Self::frond) port, which owns it for
+    /// the worker thread; this is the one the render thread lends the rest.
+    table: SinTable,
 }
 
 impl Gallery {
@@ -73,9 +79,12 @@ impl Gallery {
     }
 
     /// Build the renderer around a frond-compute port — the seam the firmware uses to inject its
-    /// two-core evaluation.
+    /// two-core evaluation — and the shared sine table the other sketches read.
     pub fn with_frond(frond: Box<dyn FrondCompute>) -> Self {
-        Self { frond }
+        Self {
+            frond,
+            table: SinTable::new(),
+        }
     }
 
     /// Draw the selected sketch into `canvas`: flood the ground, then dispatch on the selected
@@ -111,7 +120,7 @@ impl Gallery {
                     plume::plot_screen(canvas, point)
                 });
             }
-            Sketch::Squares => placeholder::render(canvas, Sketch::Squares, size),
+            Sketch::Squares => squares::render(canvas, &self.table, elapsed, size),
             Sketch::Fan => placeholder::render(canvas, Sketch::Fan, size),
             Sketch::Orbits => placeholder::render(canvas, Sketch::Orbits, size),
             Sketch::Willow => placeholder::render(canvas, Sketch::Willow, size),

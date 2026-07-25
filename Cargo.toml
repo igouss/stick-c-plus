@@ -25,6 +25,7 @@ members = [
     # apps/ — one bounded context per app on the shared foundation.
     "apps/generative-art/art-core",
     "apps/generative-art/plume-core",
+    "apps/generative-art/squares-core",
     "apps/generative-art/art-display",
     "apps/generative-art/wire-canvas",
     "apps/generative-art/art-shell",

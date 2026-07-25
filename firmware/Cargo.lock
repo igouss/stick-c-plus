@@ -55,10 +55,12 @@ version = "0.1.0"
 dependencies = [
  "art-core",
  "embedded-graphics",
+ "libm",
  "platform-core",
  "platform-display",
  "platform-numerics",
  "plume-core",
+ "squares-core",
 ]
 
 [[package]]
@@ -1830,6 +1832,13 @@ name = "spi-dma"
 version = "0.1.0"
 dependencies = [
  "esp-idf-sys",
+]
+
+[[package]]
+name = "squares-core"
+version = "0.1.0"
+dependencies = [
+ "platform-numerics",
 ]
 
 [[package]]

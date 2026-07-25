@@ -90,10 +90,12 @@ dependencies = [
  "embedded-graphics",
  "embedded-graphics-simulator",
  "golden-screens",
+ "libm",
  "platform-core",
  "platform-display",
  "platform-numerics",
  "plume-core",
+ "squares-core",
 ]
 
 [[package]]
@@ -1959,6 +1961,16 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "squares-core"
+version = "0.1.0"
+dependencies = [
+ "cucumber",
+ "platform-numerics",
+ "proptest",
+ "tokio",
 ]
 
 [[package]]

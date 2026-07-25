@@ -23,6 +23,8 @@ context = "generative-art"
 art-core = { path = "../art-core" }
 # The plume domain: the field the plume sketch projects, its phase clock, and FRAME_MS.
 plume-core = { path = "../plume-core" }
+# The squares domain: the breathing grid the squares sketch rasterises, and its phase clock.
+squares-core = { path = "../squares-core" }
 # The board-generic kernel: the Animated contract the view implements, Tick, and the
 # ScreenRotation that decides the canvas shape.
 platform-core = { path = "../../../platform/platform-core" }
@@ -33,6 +35,9 @@ platform-numerics = { path = "../../../platform/platform-numerics" }
 platform-display = { path = "../../../platform/platform-display" }
 # The graphics port (DrawTarget) plus the Point/Rgb565/Rectangle the frame is blitted through.
 embedded-graphics = "0.8"
+# `roundf` in no_std: the sketches' rect fills round fractional corners to pixel bounds. libm is
+# pure computation — no allocator, no I/O — so it does not make this crate impure.
+libm = "0.2"
 
 # Host-only; never reaches the Xtensa build (a dependent excludes dev-deps).
 [dev-dependencies]
