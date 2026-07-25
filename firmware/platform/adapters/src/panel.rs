@@ -39,6 +39,7 @@
 //! a genuinely coloured pixel shipped — the red `FAULT` line — and it would have been
 //! caught on day one by drawing three bands instead of two text rows.
 
+use embedded_graphics::pixelcolor::raw::ToBytes;
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use embedded_hal::spi::MODE_0;
@@ -68,8 +69,22 @@ const PANEL_H: u16 = SCREEN_SIZE.width as u16;
 const OFFSET_X: u16 = 52;
 /// CGRAM row offset of the visible window in the native portrait orientation.
 const OFFSET_Y: u16 = 40;
-/// The display SPI clock — the factory `SPI_FREQUENCY`.
-const SPI_HZ: u32 = 27_000_000;
+/// The display SPI clock.
+///
+/// The factory driver asks for 27 MHz, which the ESP32 SPI master actually synthesises as 80 MHz
+/// ÷3 = 26.7 MHz — right at the ceiling esp-idf enforces for *full-duplex* transfers, above which
+/// it warns that reads are unreliable. This panel never reads (no MISO), so [`build`] declares the
+/// device `write_only`; that drops the read-timing limit and lets us take the next clean divider,
+/// 80 MHz ÷2 = **40 MHz**, which roughly halves a full-frame blit — the binding cost for a sketch
+/// that repaints all 32 400 pixels every frame.
+///
+/// 40 MHz, not higher, because the board wires SCLK/MOSI to GPIO 13/15, which route through the
+/// GPIO matrix rather than the SPI2 IOMUX pins; the matrix adds a little skew that caps reliable
+/// *output* near 40 MHz. 80 MHz would need the IOMUX pins this board did not bring out, so it is
+/// off the table without a hardware change — the ceiling here is the wiring, not the controller.
+/// Every app shares this one panel and so the faster bus; none is harmed (a text app just finishes
+/// its few writes sooner).
+const SPI_HZ: u32 = 40_000_000;
 /// The pixel-batch buffer `mipidsi`'s SPI interface gathers writes into.
 ///
 /// Every batch costs a bus transaction, so this sets how many of them a frame pays for:
@@ -88,6 +103,24 @@ const BUFFER_LEN: usize = 4096;
 /// A `StaticCell` gives it a truly `static` home — no allocator, no leaked `Box` —
 /// initialised exactly once when the single display is built.
 static SPI_BUFFER: StaticCell<[u8; BUFFER_LEN]> = StaticCell::new();
+
+/// The ST7789 "memory write" (RAMWR) command. It resets the RAM address pointer to the origin of
+/// the window last set by CASET/RASET and takes pixel data until the next command. mipidsi issues
+/// it inside every `fill_contiguous`; [`FastPanel::blit`] issues it directly, once per frame, over
+/// a window armed once at bring-up.
+const RAMWR: u8 = 0x2C;
+
+/// The init-time pixel-batch buffer a [`FastPanel`] hands mipidsi for its one-time bring-up.
+///
+/// Small on purpose: it carries only the init command stream and the single clear that arms the
+/// CGRAM window, both at boot. The animation path never touches it — that streams straight out of
+/// the caller's whole-frame DMA buffer — so its size costs a few extra one-time writes and nothing
+/// per frame.
+const FAST_INIT_BUFFER_LEN: usize = 512;
+
+/// The `FastPanel` init batch buffer's `static` home, claimed once (a second `FastPanel::new`
+/// would panic — the board has one display).
+static FAST_INIT_BUFFER: StaticCell<[u8; FAST_INIT_BUFFER_LEN]> = StaticCell::new();
 
 type BusDevice = SpiDeviceDriver<'static, SpiDriver<'static>>;
 type Dc = PinDriver<'static, Output>;
@@ -211,45 +244,10 @@ impl Panel {
         Self::build(spi, sclk, mosi, cs, dc, rst, Dma::Disabled, buffer)
     }
 
-    /// Bring up the panel with **SPI DMA** and a caller-supplied pixel-batch buffer.
-    ///
-    /// The sibling of [`new`](Self::new) for an app that repaints the *whole* panel every frame
-    /// — a generative-art sketch — where the ceiling is the blit, not the math. Two things move
-    /// the frame time:
-    ///
-    /// - **DMA on.** Each SPI write crosses the bus as a hardware-fed burst rather than the CPU
-    ///   hand-feeding the FIFO word by word.
-    /// - **`buffer` is the caller's**, sized to a whole frame and — critically — allocated in
-    ///   **DMA-capable** RAM (see [`dma_mem`](https://docs.rs)/`dma-mem`). mipidsi gathers the
-    ///   entire picture into it and flushes it as **one** DMA transaction: one CGRAM window, one
-    ///   burst, instead of the ~16 a 4 KiB batch pays for. A non-DMA-capable buffer of this size
-    ///   does not merely run slow — the DMA engine reads memory it cannot reach and the board
-    ///   double-faults before the first frame, which is why the buffer is injected rather than
-    ///   allocated here: only the composition root knows how to ask for DMA memory.
-    ///
-    /// `buffer.len()` becomes the DMA transfer-size cap, so it must be a multiple of 4 (the
-    /// engine's word) — a whole-frame `Rgb565` buffer (`w·h·2`) always is.
-    pub fn new_dma(
-        spi: SPI2<'static>,
-        sclk: Gpio13<'static>,
-        mosi: Gpio15<'static>,
-        cs: Gpio5<'static>,
-        dc: Gpio23<'static>,
-        rst: Gpio18<'static>,
-        buffer: &'static mut [u8],
-    ) -> Result<Self, St7789Error> {
-        debug_assert!(
-            buffer.len() % 4 == 0 && !buffer.is_empty(),
-            "a DMA transfer size must be a non-zero multiple of 4"
-        );
-        let dma: Dma = Dma::Auto(buffer.len());
-        Self::build(spi, sclk, mosi, cs, dc, rst, dma, buffer)
-    }
-
-    /// The shared bring-up both constructors run: build the SPI device with `dma`, drive DC/RST,
-    /// hand mipidsi the `buffer`, and run the ST7789 init. The only difference between a plain and
-    /// a DMA panel is the two arguments threaded here; everything downstream — the offsets, the
-    /// inversion, the RGB order, the one clearing blit — is identical, so it is written once.
+    /// The shared bring-up: build the SPI device with `dma`, drive DC/RST, hand mipidsi the
+    /// `buffer`, and run the ST7789 init. Written once so a plain [`Panel`] and a [`FastPanel`]
+    /// share the delicate part — the offsets, the inversion, the RGB order, the one clearing blit
+    /// — and differ only in the `dma` and `buffer` threaded here.
     #[allow(clippy::too_many_arguments)]
     fn build(
         spi: SPI2<'static>,
@@ -268,7 +266,16 @@ impl Panel {
             None::<AnyIOPin>, // write-only panel: no MISO.
             Some(cs),
             &SpiDriverConfig::new().dma(dma),
-            &SpiConfig::new().baudrate(SPI_HZ.Hz()).data_mode(MODE_0),
+            // `write_only(true)` is not a hint, it is the truth — the panel has no MISO, so this
+            // adapter never reads. It sets `SPI_DEVICE_NO_DUMMY`, which drops the dummy read cycles
+            // and, with them, esp-idf's full-duplex "reads are unreliable above 26.7 MHz" clock
+            // limit that otherwise rejects `SPI_HZ` outright (a failed `spi_bus_add_device`). We
+            // never read, so that limit does not apply to us; this is how a write-only panel is
+            // allowed the faster bus.
+            &SpiConfig::new()
+                .baudrate(SPI_HZ.Hz())
+                .data_mode(MODE_0)
+                .write_only(true),
         )
         .map_err(|e| fault("spi", e))?;
         let dc: Dc = PinDriver::output(dc).map_err(|e| fault("dc pin", e))?;
@@ -371,6 +378,131 @@ impl Panel {
     pub fn colour_check(&mut self) -> Result<(), St7789Error> {
         platform_display::colour_bands(&mut self.target)
             .map_err(|err| render_fault("colour bands", err))
+    }
+
+    /// Drop below mipidsi: consume the panel and hand back the raw SPI device, DC and reset pins.
+    ///
+    /// Everything mipidsi did — the init sequence, the offsets, the colour order, the armed
+    /// window — has already happened and is state on the controller and the pins, not in the
+    /// `Display` wrapper; releasing it keeps all of that and takes back the bus for a direct blit
+    /// path. Used only by [`FastPanel::new`]. The reset pin is `Some` because [`build`](Self::build)
+    /// always configures it.
+    fn into_parts(self) -> (BusDevice, Dc, Rst) {
+        let (interface, _model, rst): (Interface, _, Option<Rst>) = self.target.release();
+        let (spi, dc): (BusDevice, Dc) = interface.release();
+        (spi, dc, rst.expect("build always configures the reset pin"))
+    }
+}
+
+/// The panel driven **below mipidsi** for a full-frame-every-frame app — a generative-art sketch.
+///
+/// A plain [`Panel`] renders each picture through mipidsi's `fill_contiguous`, which is the right
+/// tool for text and a sprite over a static background: it sets the window, then converts and
+/// streams the pixels one at a time. For a sketch that repaints all 32 400 pixels every frame that
+/// per-pixel gather is the whole cost — measured at ~59 ms of a 78 ms frame, dwarfing both the
+/// math and the DMA transfer, and unfixable from above because it is inherent to the iterator.
+///
+/// So this drops below it. The insight that makes it *safe* rather than a reimplementation:
+/// `fill_contiguous` is exactly `set_address_window` + [`RAMWR`] + a per-pixel byte stream, and
+/// the gallery's window never changes (it is pinned portrait). So [`new`](Self::new) lets mipidsi
+/// do the delicate bring-up and arm the full-screen window **once**, then reclaims the bus; and
+/// [`blit`](Self::blit) re-issues only [`RAMWR`] and streams a whole frame — the *same* bytes, in
+/// the *same* order, into the *same* window as `fill_contiguous`, with the per-pixel gather
+/// replaced by a tight big-endian swap and one DMA burst. Same picture, provably; only faster.
+pub struct FastPanel {
+    /// The raw SPI device, reclaimed from mipidsi after init. Built DMA-configured, so a
+    /// whole-frame write crosses the bus as one hardware-fed burst.
+    spi: BusDevice,
+    /// The data/command pin: low for a command byte, high for pixel data.
+    dc: Dc,
+    /// The reset pin, held for the panel's life so the controller stays initialised. Never
+    /// toggled after bring-up — hence the leading underscore.
+    _rst: Rst,
+    /// The caller's DMA-capable, whole-frame buffer: each blit swaps the frame into it in the
+    /// wire's byte order and streams it in one DMA transaction.
+    buffer: &'static mut [u8],
+}
+
+impl FastPanel {
+    /// Bring the panel up through mipidsi, pin it to `rotation`, then reclaim the bus for a
+    /// direct DMA blit path.
+    ///
+    /// `buffer` is the caller's whole-frame, **DMA-capable** buffer (`w·h·2` bytes; see the
+    /// `dma-mem` crate). It must be a non-empty multiple of 4 — a `Rgb565` frame always is. Its
+    /// length caps the DMA transfer size, so the whole frame goes out in one transaction. Requires
+    /// the AXP192 LCD/TFT rails already powered.
+    ///
+    /// `rotation` is applied once here — the app that uses a `FastPanel` is committing to a fixed
+    /// orientation (there is no per-frame turn below mipidsi), which is exactly a pinned-portrait
+    /// sketch gallery.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        spi: SPI2<'static>,
+        sclk: Gpio13<'static>,
+        mosi: Gpio15<'static>,
+        cs: Gpio5<'static>,
+        dc: Gpio23<'static>,
+        rst: Gpio18<'static>,
+        rotation: ScreenRotation,
+        buffer: &'static mut [u8],
+    ) -> Result<Self, St7789Error> {
+        debug_assert!(
+            !buffer.is_empty() && buffer.len().is_multiple_of(4),
+            "a DMA transfer size must be a non-zero multiple of 4"
+        );
+        // Run the delicate ST7789 bring-up through mipidsi with DMA on, using a small init batch
+        // buffer — the animation path never uses it. `buffer.len()` becomes the DMA transfer cap.
+        let init_batch: &'static mut [u8] = FAST_INIT_BUFFER.init([0u8; FAST_INIT_BUFFER_LEN]);
+        let mut panel: Panel = Panel::build(
+            spi,
+            sclk,
+            mosi,
+            cs,
+            dc,
+            rst,
+            Dma::Auto(buffer.len()),
+            init_batch,
+        )?;
+        // Turn to the app's rotation. `set_rotation` clears, which sets the CGRAM address window
+        // to the full screen for that orientation — the exact window `fill_contiguous` would set
+        // each frame. From here nothing else drives the bus, so that window persists and each
+        // blit only re-issues RAMWR.
+        panel.set_rotation(rotation)?;
+        let (spi, dc, rst): (BusDevice, Dc, Rst) = panel.into_parts();
+        Ok(Self {
+            spi,
+            dc,
+            _rst: rst,
+            buffer,
+        })
+    }
+
+    /// Push a whole `Rgb565` frame to the glass as one DMA burst.
+    ///
+    /// `pixels` is a row-major canvas the size of the armed window (the panel's full portrait
+    /// area). It is swapped into the DMA buffer in the ST7789's big-endian byte order — the order
+    /// mipidsi's `fill_contiguous` sends — then a [`RAMWR`] resets the write pointer to the window
+    /// origin and the whole buffer streams out in one transaction. Same window, same bytes, same
+    /// order as the generic path; only the per-pixel gather is gone.
+    pub fn blit(&mut self, pixels: &[Rgb565]) -> Result<(), St7789Error> {
+        let bytes: usize = pixels.len() * 2;
+        debug_assert!(
+            bytes <= self.buffer.len(),
+            "a frame larger than the DMA buffer"
+        );
+        // Swap each pixel to big-endian into the DMA buffer — a tight loop, no per-pixel trait
+        // dispatch or bounds re-checking, which is the whole point over mipidsi's iterator.
+        for (slot, &colour) in self.buffer.chunks_exact_mut(2).zip(pixels) {
+            slot.copy_from_slice(&colour.to_be_bytes());
+        }
+        // Command: RAMWR with DC low; then the pixel burst with DC high.
+        self.dc.set_low().map_err(|e| fault("dc low", e))?;
+        self.spi.write(&[RAMWR]).map_err(|e| fault("ramwr", e))?;
+        self.dc.set_high().map_err(|e| fault("dc high", e))?;
+        self.spi
+            .write(&self.buffer[..bytes])
+            .map_err(|e| fault("blit", e))?;
+        Ok(())
     }
 }
 
