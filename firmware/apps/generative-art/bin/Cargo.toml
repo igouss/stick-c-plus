@@ -49,6 +49,9 @@ platform-adapters = { path = "../../../platform/adapters" }
 # blit, so the gallery drives the panel with SPI DMA (Panel::new_dma) and this hands the DMA
 # engine a buffer it can actually reach.
 dma-mem = { path = "../../../platform/dma-mem" }
+# Safe reads of ESP-IDF runtime counters: here, the display thread's own stack high-water mark,
+# so its 16 KiB allotment can be sized from measurement instead of a bring-up guess.
+esp-metrics = { path = "../../../platform/esp-metrics" }
 # Host crates, referenced by path across the two workspaces. platform-runtime is the generic
 # render loop + Monotonic clock; platform-core the Tick and the ScreenRotation; the art-* crates
 # are the gallery's picture and its input — all no_std/std and cross-compile to xtensa cleanly.

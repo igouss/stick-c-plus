@@ -24,7 +24,7 @@
 
 use esp_idf_sys::{
     esp_get_free_heap_size, esp_get_minimum_free_heap_size, heap_caps_get_largest_free_block,
-    MALLOC_CAP_8BIT,
+    uxTaskGetStackHighWaterMark, MALLOC_CAP_8BIT,
 };
 
 /// Total free heap, in bytes, across every region.
@@ -58,4 +58,24 @@ pub fn largest_free_block() -> usize {
     // returns a size. `MALLOC_CAP_8BIT` is a constant from the same generated bindings, so the
     // mask is valid by construction; the call allocates nothing and dereferences nothing.
     unsafe { heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) }
+}
+
+/// The least free stack, in bytes, the **calling task** has ever had since it started.
+///
+/// A low-water mark on the calling thread's own stack — the stack analogue of
+/// [`minimum_free_heap`]. Call it *from* the task you want to size: pass a stack that is too
+/// generous and this reports how much of it was never touched, which is exactly the slack a
+/// bring-up guess can be trimmed by. The smaller the number, the closer that task has come to
+/// overflowing.
+///
+/// The returned figure is **bytes**, not words. The generic FreeRTOS header comment says
+/// "words", but that division is by `sizeof(StackType_t)`, and on this Xtensa port
+/// `StackType_t` is a single byte — so the raw count is already a byte count here. (Verified
+/// against the generated bindings, not assumed.)
+pub fn minimum_free_stack() -> usize {
+    // SAFETY: `uxTaskGetStackHighWaterMark` takes a task handle by value and returns a count. A
+    // null handle selects the calling task — it dereferences no pointer the caller owns, hands
+    // back no pointer, allocates nothing, and is safe to call from any task at any time.
+    let bytes: u32 = unsafe { uxTaskGetStackHighWaterMark(core::ptr::null_mut()) };
+    bytes as usize
 }

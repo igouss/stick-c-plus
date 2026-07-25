@@ -929,6 +929,7 @@ dependencies = [
  "esp-idf-hal",
  "esp-idf-svc",
  "esp-idf-sys",
+ "esp-metrics",
  "log",
  "platform-adapters",
  "platform-core",

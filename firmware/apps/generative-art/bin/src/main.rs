@@ -34,9 +34,9 @@
 //! throttles: the real frame time is a frame's compute-and-blit plus that yield, and the loop
 //! reports the fps it actually holds. The frond's *speed* is unaffected — [`plume_core::phase`] is
 //! a function of wall-clock time, so a faster repaint only shows more distinct pictures of the same
-//! sweep. The display thread runs at **16 KiB**, not the 8 KiB default, because it computes a full
-//! 32 400-pixel frame and swaps it into the DMA buffer each tick, deeper than the text renders the
-//! default was sized for — the plume proved that on the metal.
+//! sweep. The display thread runs at [`DISPLAY_STACK`] (8 KiB), sized from a measured high-water
+//! mark rather than a guess: painting a full 32 400-pixel frame into the DMA buffer peaks at ~3.6 KiB
+//! of stack, so 8 KiB is a safe margin and leaves the rest of the heap contiguous for the frond.
 //!
 //! ## How the frond is evaluated
 //!
@@ -76,6 +76,18 @@ use wire_canvas::WireCanvas;
 /// The quarter turn the gallery is drawn at — the board stood on its USB-C port.
 const PORTRAIT: ScreenRotation = ScreenRotation::Deg90;
 
+/// The display thread's stack, sized from measurement rather than a bring-up guess.
+///
+/// With the gallery running, [`esp_metrics::minimum_free_stack`] reported 12 736 B of the earlier
+/// 16 KiB allotment *never touched* — a true peak of ~3.6 KiB, log formatting included. The 16 KiB
+/// was inherited from the host monitor, where a network poller preempting the render mid-SPI drove
+/// the stack far deeper; this gallery has no network, so it never needed it. 8 KiB keeps a 2.2×
+/// margin over the measured peak and, more to the point, **halves the contiguous run the stack must
+/// find** on the pool-fragmented heap — that freed contiguous room is exactly what the frond's field
+/// wants for more points. The one-shot high-water line in [`GalleryScreen::show`] re-checks this on
+/// every boot; widen it if a deeper path ever appears.
+const DISPLAY_STACK: usize = 8 * 1024;
+
 /// The gallery's [`Screen`]: plot the selected sketch into the panel's idle wire buffer, then queue
 /// it to the glass while the next frame is drawn into the other.
 ///
@@ -89,7 +101,17 @@ const PORTRAIT: ScreenRotation = ScreenRotation::Deg90;
 struct GalleryScreen {
     gallery: Gallery,
     panel: FastPanel,
+    /// Frames painted so far, only to pace the stack high-water log below.
+    frames: u32,
 }
+
+/// When (which frame) the display thread logs its stack high-water mark, once, as a bring-up
+/// validation. The mark is a min-ever low-water reached within the first few frames, so one line a
+/// few seconds in — after the deepest paint has run — captures the true peak. Sampling once rather
+/// than every frame keeps the serial log quiet and avoids `uxTaskGetStackHighWaterMark` scanning the
+/// whole stack on the hot path; re-flashing after a layout change reports it fresh each boot. At
+/// ~50 fps this lands about ten seconds after start.
+const STACK_REPORT_AT_FRAME: u32 = 512;
 
 impl Screen<GalleryView> for GalleryScreen {
     type Error = St7789Error;
@@ -107,7 +129,23 @@ impl Screen<GalleryView> for GalleryScreen {
             self.gallery
                 .paint_into(&mut canvas, view, elapsed, rotation);
         }
-        self.panel.present()
+        let result: Result<(), St7789Error> = self.panel.present();
+
+        // Once, a few seconds in, report this thread's stack high-water from *this* thread —
+        // `minimum_free_stack` reads the calling task, and the render loop calls `show` on the display
+        // thread. Sampled after the frame's deepest work (paint + present) so the mark already
+        // reflects it. It validates [`DISPLAY_STACK`] every boot; the largest-DMA-block figure beside
+        // it says how much contiguous room the sizing left the frond's field.
+        self.frames = self.frames.wrapping_add(1);
+        if self.frames == STACK_REPORT_AT_FRAME {
+            info!(
+                "display stack: {} B never touched (of {DISPLAY_STACK}); heap {} B free, largest DMA block {} B",
+                esp_metrics::minimum_free_stack(),
+                dma_mem::free_default(),
+                dma_mem::largest_free_dma(),
+            );
+        }
+        result
     }
 }
 
@@ -193,7 +231,11 @@ fn main() {
     let gallery: Gallery = Gallery::with_frond(Box::new(dual_core::DualCoreFrond::new()));
     #[cfg(not(feature = "dual-core"))]
     let gallery: Gallery = Gallery::new();
-    let screen: GalleryScreen = GalleryScreen { gallery, panel };
+    let screen: GalleryScreen = GalleryScreen {
+        gallery,
+        panel,
+        frames: 0,
+    };
     // Headroom with every big buffer live — the two 12-bit wire buffers (~48 KiB each), the frond's
     // field (~100 KiB) and its table (8 KiB), plus the `dual-core` worker's far-half buffer. Packing
     // the buffers 12-bit is what let the second full-screen one fit at all: two 16-bit buffers would
@@ -233,13 +275,12 @@ fn main() {
 
     // The gallery is always animating, so it repaints as fast as its work allows. `REPAINT_MS` is
     // set at the loop's mandatory per-frame yield, so it is never itself the throttle: the real
-    // cadence is a frame's compute-and-blit plus that one-tick yield. The stack is bumped from the
-    // 8 KiB default to 16 KiB: the render thread plots a full 32 400-pixel frame into the wire canvas
-    // each tick, deeper than the text renders the default was sized for — the plume proved 8 KiB
-    // overflows on the metal.
+    // cadence is a frame's compute-and-blit plus that one-tick yield. The stack is `DISPLAY_STACK`
+    // (8 KiB), sized from the measured ~3.6 KiB high-water rather than the 16 KiB the host monitor's
+    // network preemption needed — the trim hands the frond's field back an 8 KiB contiguous run.
     let config: DisplayConfig = DisplayConfig {
         animation_period: Duration::from_millis(REPAINT_MS),
-        stack_size: 16 * 1024,
+        stack_size: DISPLAY_STACK,
         ..DisplayConfig::default()
     };
     let _display = spawn_display(
