@@ -12,11 +12,14 @@ name = "generative-art"
 path = "src/main.rs"
 
 [features]
-# Off by default. Evaluates the plume's field on both cores via a Core1 worker (see
+default = ["dual-core"]
+# On by default. Evaluates the plume's field on both cores via a Core1 worker (see
 # `src/dual_core.rs`, which is the only user of the `plume-core` dependency). Proven bit-identical
-# to the one-core path on the host, but its worker's far-half buffer plus stack currently exceed the
-# heap that the two full-screen frame buffers already fill — it lands once those buffers are unified
-# into one. See docs/plans/plume-fps-optimization-handoff.md.
+# to the one-core path on the host, and measured on the glass: 25 → 33.3 fps, paint 32 → 27 ms/frame.
+# It fits since the memory keystone unified the two full-screen frame buffers into one wire-order DMA
+# buffer, leaving heap for the worker's far-half buffer plus its 4 KiB stack (83 KiB free after all
+# three, measured). Disable with `--no-default-features` for the one-core baseline. See
+# docs/plans/plume-fps-optimization-handoff.md.
 dual-core = ["dep:plume-core"]
 
 # The imperative shell's outermost layer: it composes adapters and owns effects, so it is the
