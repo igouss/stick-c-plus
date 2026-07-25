@@ -82,46 +82,65 @@ pub fn render<C: Canvas>(canvas: &mut C, table: &SinTable, elapsed: Tick, size: 
 }
 
 /// The doubled signed area of triangle `a b c` — positive for one winding, negative for the other,
-/// zero when the three are colinear. Reused as the edge function that decides which side of an edge
-/// a pixel lies on.
+/// zero when the three are colinear. Also the edge function that decides which side of edge `a→b`
+/// a point `p` lies on, and it steps by a constant in `x` and in `y`, which is what lets the fill
+/// walk it by addition rather than recompute it per pixel.
 fn edge(a: (i32, i32), b: (i32, i32), p: (i32, i32)) -> i32 {
     (b.0 - a.0) * (p.1 - a.1) - (b.1 - a.1) * (p.0 - a.0)
 }
 
 /// Fill the triangle `verts` in `colour`, clipped to the `size`-shaped canvas.
 ///
-/// A half-plane (edge-function) fill: a pixel is inside when it sits on the same side of all three
-/// edges, which is the sign the triangle's own area gives. The scan is bounded to the triangle's
-/// bounding box **clamped to the canvas**, so a triangle projected mostly or wholly off the panel
-/// costs only the pixels it actually covers on-glass — and each surviving pixel still goes through
-/// [`Canvas::set`], which clips. A degenerate (colinear) triangle has zero area and draws nothing,
-/// which is exactly the source's fully-folded sliver.
+/// A half-plane fill walked by **integer addition only** — no multiply, divide, or `roundf` in the
+/// loop, all of which are slow on this soft-divide FPU (a per-row `f32` scanline fill measured
+/// *slower* than this despite touching fewer pixels). The three edge functions are linear, so each
+/// steps by a constant across a row and down a column; the fill seeds them at the bounding box's
+/// corner and increments. A pixel is inside when all three are non-negative, tested in one branch by
+/// OR-ing them and checking the sign bit. The triangle is first wound so its interior is the
+/// non-negative side. The scan is the bounding box **clamped to the canvas**, so a triangle the
+/// fill-height crop throws off the panel costs only the pixels it covers on-glass; a degenerate
+/// (colinear) triangle has zero area and draws nothing — the source's fully-shut fold.
 fn fill_triangle<C: Canvas>(canvas: &mut C, verts: [(i32, i32); 3], size: Size, colour: Rgb565) {
     let [a, b, c]: [(i32, i32); 3] = verts;
     let area: i32 = edge(a, b, c);
     if area == 0 {
         return; // colinear — a shut fold, nothing to fill.
     }
+    // Wind counter-clockwise (positive area) so a point is inside when every edge function is
+    // non-negative; swapping two vertices flips the winding.
+    let [a, b, c]: [(i32, i32); 3] = if area < 0 { [a, c, b] } else { [a, b, c] };
 
     let min_x: i32 = a.0.min(b.0).min(c.0).max(0);
     let max_x: i32 = a.0.max(b.0).max(c.0).min(size.width as i32 - 1);
     let min_y: i32 = a.1.min(b.1).min(c.1).max(0);
     let max_y: i32 = a.1.max(b.1).max(c.1).min(size.height as i32 - 1);
+    if min_x > max_x || min_y > max_y {
+        return; // wholly off the panel after clipping.
+    }
+
+    // Each edge function's step per pixel across (`_dx`) and down (`_dy`), and its value at the
+    // clamped top-left corner. `edge(u, v, p)` increases by `u.y - v.y` per `+x` and by `v.x - u.x`
+    // per `+y`, so a whole triangle is filled with adds after these three seeds.
+    let corner: (i32, i32) = (min_x, min_y);
+    let (mut w0_row, w0_dx, w0_dy): (i32, i32, i32) = (edge(b, c, corner), b.1 - c.1, c.0 - b.0);
+    let (mut w1_row, w1_dx, w1_dy): (i32, i32, i32) = (edge(c, a, corner), c.1 - a.1, a.0 - c.0);
+    let (mut w2_row, w2_dx, w2_dy): (i32, i32, i32) = (edge(a, b, corner), a.1 - b.1, b.0 - a.0);
 
     for y in min_y..=max_y {
+        let (mut w0, mut w1, mut w2): (i32, i32, i32) = (w0_row, w1_row, w2_row);
         for x in min_x..=max_x {
-            let p: (i32, i32) = (x, y);
-            // Inside when all three edge functions share the triangle's winding sign (inclusive, so
-            // shared edges are painted rather than cracked).
-            let inside: bool = if area > 0 {
-                edge(b, c, p) >= 0 && edge(c, a, p) >= 0 && edge(a, b, p) >= 0
-            } else {
-                edge(b, c, p) <= 0 && edge(c, a, p) <= 0 && edge(a, b, p) <= 0
-            };
-            if inside {
+            // Inside when none of the three edge functions is negative: OR-ing them puts a set sign
+            // bit iff any is negative, so one non-negative test covers all three.
+            if (w0 | w1 | w2) >= 0 {
                 canvas.set(x, y, colour);
             }
+            w0 += w0_dx;
+            w1 += w1_dx;
+            w2 += w2_dx;
         }
+        w0_row += w0_dy;
+        w1_row += w1_dy;
+        w2_row += w2_dy;
     }
 }
 
