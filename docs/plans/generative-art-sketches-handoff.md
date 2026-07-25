@@ -1,9 +1,21 @@
-# Handoff — the `generative-art` gallery: flash it, then build the four remaining sketches
+# Handoff — the `generative-art` gallery: two sketches left (orbits, willow)
+
+> **STATUS 2026-07-25 (SESSION 9).** The skeleton is flashed and verified, and **two of the four
+> sketches are built, on glass, and merged to `main`**: **squares** (Dwitter A — breathing
+> nested-square frames, 100 fps) and **fan** (Dwitter B — folding hue-by-distance triangles, 50 fps
+> after an integer edge-stepping fill). Each is a vertical slice: a `*-core` domain crate
+> (`squares-core`, `fan-core`) with proptest + cucumber, a rasteriser under
+> `art-display/src/sketch/`, and a real arm in the `Gallery` match; a shared `colour` module turns a
+> domain hue into `Rgb565`. The selector gained a `starting_at(sketch)` seam and the firmware a
+> `START_SKETCH` constant, so a flash can open straight onto the piece under development (it is back
+> at `Sketch::Plume` for release). **Remaining: orbits and willow.** The fill lesson paid for on the
+> metal — keep floating point and division out of the per-pixel path on this soft-divide FPU;
+> step linear edge functions by integer addition (see the `fan:` fill commit).
 
 You are picking up mid-stream on the **stick-c-plus** board platform (M5StickC Plus, Rust,
-std/ESP-IDF, hexagonal/ECB). The gallery **skeleton is built and on-glass-ready**; your job is
-to (1) **verify it on the metal**, then (2) fill in the four unbuilt sketches, one commit each,
-then (3) the DMA/dual-core pipeline and the docs.
+std/ESP-IDF, hexagonal/ECB). The gallery **skeleton is built and on-glass-ready**; the plume,
+squares and fan are real, and your job is to fill in the **two remaining sketches** — **orbits**
+then **willow** — one commit each, then close out the docs.
 
 Read these first, in order:
 - `CLAUDE.md` (laconic voice, hexagonal/ECB, no unsafe, Gherkin, distrust convenient greens).

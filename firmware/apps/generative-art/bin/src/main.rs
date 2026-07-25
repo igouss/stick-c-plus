@@ -81,7 +81,7 @@ const PORTRAIT: ScreenRotation = ScreenRotation::Deg90;
 /// flash lands it straight on the glass to be eyeballed without cycling the button there; the
 /// running order and the button are unchanged either way. Set back to [`Sketch::Plume`] before the
 /// branch merges.
-const START_SKETCH: Sketch = Sketch::Fan;
+const START_SKETCH: Sketch = Sketch::Plume;
 
 /// The display thread's stack, sized from measurement rather than a bring-up guess.
 ///
