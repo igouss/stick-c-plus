@@ -16,8 +16,15 @@ pub struct SharedSelector {
 impl SharedSelector {
     /// A fresh gallery, showing the first piece.
     pub fn new() -> Self {
+        Self::starting_at(Sketch::Plume)
+    }
+
+    /// A shared selector opening on a chosen piece rather than the first — the seam the composition
+    /// root opens the gallery on the sketch under development, so it lands on the glass at boot
+    /// without a button press. Wraps [`Selector::starting_at`]; the running order is unchanged.
+    pub fn starting_at(sketch: Sketch) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(Selector::new())),
+            inner: Arc::new(Mutex::new(Selector::starting_at(sketch))),
         }
     }
 
@@ -53,6 +60,16 @@ mod tests {
     #[test]
     fn a_fresh_shared_selector_shows_the_plume() {
         assert_eq!(SharedSelector::new().current(), Sketch::Plume);
+    }
+
+    /// Opening on a chosen piece shows that piece — the seam the composition root uses to boot the
+    /// gallery straight onto the sketch under development.
+    #[test]
+    fn opening_on_a_chosen_piece_shows_that_piece() {
+        assert_eq!(
+            SharedSelector::starting_at(Sketch::Fan).current(),
+            Sketch::Fan
+        );
     }
 
     /// One click: advancing steps to the next sketch.

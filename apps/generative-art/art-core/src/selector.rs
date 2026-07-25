@@ -21,9 +21,17 @@ pub struct Selector {
 impl Selector {
     /// A fresh gallery, showing the first piece — the plume the standalone app used to be.
     pub const fn new() -> Self {
-        Self {
-            current: Sketch::Plume,
-        }
+        Self::starting_at(Sketch::Plume)
+    }
+
+    /// A gallery opening on a chosen piece rather than the first.
+    ///
+    /// The seam a composition root uses to open the gallery directly on a given sketch — the piece
+    /// under development, say, so it lands on the glass at boot without a button press. The running
+    /// order is unchanged: [`advance`](Self::advance) still steps to `sketch.next()`. [`new`](Self::new)
+    /// is `starting_at(Sketch::Plume)`, the gallery's release default.
+    pub const fn starting_at(sketch: Sketch) -> Self {
+        Self { current: sketch }
     }
 
     /// The sketch on the glass right now.
@@ -52,6 +60,16 @@ mod tests {
     #[test]
     fn a_fresh_gallery_shows_the_plume() {
         assert_eq!(Selector::new().current(), Sketch::Plume);
+    }
+
+    /// Opening on a chosen piece shows that piece, and its wrap still follows the running order —
+    /// the seam the composition root opens the sketch-under-development on lands where it says.
+    #[test]
+    fn opening_on_a_chosen_piece_shows_that_piece() {
+        let mut gallery: Selector = Selector::starting_at(Sketch::Orbits);
+        assert_eq!(gallery.current(), Sketch::Orbits);
+        gallery.advance();
+        assert_eq!(gallery.current(), Sketch::Orbits.next());
     }
 
     /// One press: the gallery steps to the second piece.

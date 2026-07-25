@@ -60,7 +60,7 @@
 mod dual_core;
 
 use art_display::{Gallery, GalleryView, REPAINT_MS, SCREEN_SIZE};
-use art_shell::{spawn_input, SharedSelector, INPUT_CONFIG};
+use art_shell::{spawn_input, SharedSelector, Sketch, INPUT_CONFIG};
 use board_support::{internal_i2c, Axp192};
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::i2c::I2cDriver;
@@ -75,6 +75,13 @@ use wire_canvas::WireCanvas;
 
 /// The quarter turn the gallery is drawn at — the board stood on its USB-C port.
 const PORTRAIT: ScreenRotation = ScreenRotation::Deg90;
+
+/// The piece the gallery opens on at boot. [`Sketch::Plume`] for release — the gallery's designed
+/// first piece. While a new sketch is under development it is pointed at that sketch instead, so a
+/// flash lands it straight on the glass to be eyeballed without cycling the button there; the
+/// running order and the button are unchanged either way. Set back to [`Sketch::Plume`] before the
+/// branch merges.
+const START_SKETCH: Sketch = Sketch::Squares;
 
 /// The display thread's stack, sized from measurement rather than a bring-up guess.
 ///
@@ -254,7 +261,9 @@ fn main() {
     // the gesture pipeline and the animation clock are measured on one time base.
     let clock: Monotonic = Monotonic::start();
     // The selector: the input thread advances it on a click, the render loop reads it each frame.
-    let selector: SharedSelector = SharedSelector::new();
+    // Opens on [`START_SKETCH`] — the plume for release, or the sketch under development so a flash
+    // lands it on the glass without a button press.
+    let selector: SharedSelector = SharedSelector::starting_at(START_SKETCH);
 
     // Input: poll the front button, advance the gallery on a click. Held for the life of main —
     // dropping it would only detach the thread, which already runs forever.

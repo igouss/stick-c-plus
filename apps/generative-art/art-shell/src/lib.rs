@@ -27,3 +27,7 @@ pub use input::{
     spawn_input, Command, InputTask, GESTURES, INPUT_CONFIG, INPUT_STACK_SIZE, POLL_PERIOD,
 };
 pub use shared::SharedSelector;
+
+// The gallery's running order, re-exported so the composition root can name the piece it opens on
+// (see [`SharedSelector::starting_at`]) without depending on `art-core` directly.
+pub use art_core::Sketch;
