@@ -52,6 +52,9 @@ dma-mem = { path = "../../../platform/dma-mem" }
 platform-core = { path = "../../../../platform/platform-core" }
 platform-runtime = { path = "../../../../platform/platform-runtime" }
 art-display = { path = "../../../../apps/generative-art/art-display" }
+# The gallery's wire-order Canvas adapter: the one DMA-capable buffer the gallery plots straight
+# into and the panel streams, replacing the separate offscreen frame + per-frame byte-swap.
+wire-canvas = { path = "../../../../apps/generative-art/wire-canvas" }
 art-shell = { path = "../../../../apps/generative-art/art-shell" }
 # The plume's field, needed only to build the two-core frond evaluator (the `dual-core` feature):
 # the composition root wires a Core1 worker over `PlumeField::compute_range` and injects it behind
