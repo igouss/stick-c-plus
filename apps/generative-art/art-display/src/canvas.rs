@@ -15,7 +15,7 @@
 //!
 //! A [`Canvas`] is a [`DrawTarget`] first — so the not-yet-built sketches can lay their placeholder
 //! text through `embedded-graphics` — with two additions the gallery leans on every frame: a fast
-//! per-pixel [`set`](Canvas::set) for the plume's six thousand dots (an iterator of one-pixel
+//! per-pixel [`set`](Canvas::set) for the plume's seven and a half thousand dots (an iterator of one-pixel
 //! `draw_iter` calls would pay dispatch on each), and a [`reset`](Canvas::reset) that both sizes the
 //! surface to the active canvas and floods it with the ground.
 

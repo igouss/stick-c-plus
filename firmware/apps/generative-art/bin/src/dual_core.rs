@@ -1,6 +1,6 @@
 //! The two-core frond evaluator: fill the plume's cloud on both ESP32 cores at once.
 //!
-//! The plume's dominant per-frame cost is evaluating ~6000 points of table trigonometry. The
+//! The plume's dominant per-frame cost is evaluating ~7500 points of table trigonometry. The
 //! render loop runs on one core; the other (APP/Core1) would otherwise idle. This adapter is the
 //! firmware's implementation of [`FrondCompute`](art_display::FrondCompute): it splits the cloud in
 //! two and evaluates the halves on the two cores concurrently, so a frame's evaluation costs about

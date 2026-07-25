@@ -7,7 +7,7 @@ Feature: The plume field
 
   Scenario: the frond is the subsampled point budget
     Given the plume clock at 0 milliseconds
-    Then the frond is made of 6000 points
+    Then the frond is made of 7500 points
 
   Scenario: a well-behaved point sits on the canvas
     Given the plume clock at 0 milliseconds

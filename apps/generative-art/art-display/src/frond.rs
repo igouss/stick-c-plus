@@ -3,7 +3,7 @@
 //! The plume is two halves — *evaluate-and-project* the parametric field into a cloud of drawable
 //! [`ScreenPoint`]s, then *plot* that cloud onto the panel. The plot is a bare pixel set
 //! ([`plume::plot_screen`](crate::sketch::plume::plot_screen)); the evaluation-and-projection is the
-//! frame's dominant cost, ~6000 points of table trigonometry and a scale-and-offset each. This port
+//! frame's dominant cost, ~7500 points of table trigonometry and a scale-and-offset each. This port
 //! is the seam under that work, so *how* the cloud is computed **and projected** is a decision the
 //! composition root makes, not the renderer:
 //!

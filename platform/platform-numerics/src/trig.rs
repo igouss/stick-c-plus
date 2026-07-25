@@ -1,7 +1,7 @@
 //! The sine table — the plume's answer to a chip with no fast transcendental.
 //!
-//! The field ([`crate::field`]) evaluates six sines and cosines per point, six thousand
-//! points a frame: thirty-six thousand transcendentals every repaint. `libm::sinf` is honest but
+//! The field ([`crate::field`]) evaluates six sines and cosines per point, seven and a half thousand
+//! points a frame: forty-five thousand transcendentals every repaint. `libm::sinf` is honest but
 //! it is *software* — the ESP32's FPU multiplies and adds in hardware but has no sine — so
 //! computing them the obvious way spends the whole frame budget inside libm.
 //!
@@ -16,7 +16,7 @@
 //! index, so a rotate-by-a-fixed-angle recurrence could produce them with no table at all.
 //! But the other four are *data-dependent* — they turn on `d`, on the phase `t`, on `k`
 //! itself — and a recurrence cannot touch them. A table serves all six through one code path,
-//! and, unlike a recurrence stepped five thousand times a frame, it cannot drift: entry
+//! and, unlike a recurrence stepped seven and a half thousand times a frame, it cannot drift: entry
 //! *n* is exactly `sin(2πn/N)` every frame, forever.
 //!
 //! ## Why linear interpolation
@@ -96,7 +96,7 @@ impl SinTable {
         // complement that is the correct non-negative residue even for a negative angle
         // (`-1 & MASK == LEN - 1`). This deletes the per-lookup `f32 → i64` conversion and 64-bit
         // `rem_euclid`, both software-emulated on this FPU-without-integer-divide Xtensa core;
-        // measured at six lookups a point over five thousand points, they were the bulk of a
+        // measured at six lookups a point over seven and a half thousand points, they were the bulk of a
         // frame's compute. Masking only the low bits, the cast's sign-extension is irrelevant, so
         // this reads the same on the 32-bit target and the 64-bit host.
         let lo: usize = (whole as i32) as usize & MASK;

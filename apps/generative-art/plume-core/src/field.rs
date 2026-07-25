@@ -23,10 +23,11 @@
 //! the computation rather than the shape of the glass:
 //!
 //! - **Fewer points.** The original plots ten thousand; on a canvas a fifth of the area most of
-//!   them land on a pixel another already lit. [`POINT_COUNT`] is six thousand — three fifths of the
-//!   original, subsampled uniformly across the whole index range ([`index_of`]) — the densest frond
-//!   the ESP32's heap holds beside the two full-screen DMA buffers and the dual-core far buffer,
-//!   and faithful to the ten-thousand render the frond was checked against.
+//!   them land on a pixel another already lit. [`POINT_COUNT`] is seven thousand five hundred —
+//!   three quarters of the original, subsampled uniformly across the whole index range
+//!   ([`index_of`]) — the densest frond the ESP32 sustains at 50 fps beside the two full-screen DMA
+//!   buffers and the dual-core far buffer, and faithful to the ten-thousand render the frond was
+//!   checked against.
 //! - **Table trigonometry, `f32` throughout.** Every `sin`/`cos` is read from the
 //!   [`SinTable`](crate::SinTable); every value is single-precision, for the ESP32's FPU. The
 //!   one thing that is *not* a table lookup is `mag`, a genuine `sqrtf` — the honest magnitude
@@ -43,18 +44,18 @@ pub const START: u32 = 10_000;
 /// How many points make up one frame of the frond.
 ///
 /// This is the point-budget optimisation in one number. The original *Dwitter* plots [`START`] (ten
-/// thousand); this renders six thousand of them, subsampled uniformly across the whole index range
-/// by [`index_of`]. On the 135×240 panel the dropped points overwhelmingly collided with a kept one,
-/// so the picture is the same creature for three fifths of the transcendentals and dots.
+/// thousand); this renders seven thousand five hundred of them, subsampled uniformly across the whole
+/// index range by [`index_of`]. On the 135×240 panel the dropped points overwhelmingly collided with
+/// a kept one, so the picture is the same creature for three quarters of the transcendentals and dots.
 ///
-/// The count is a memory edge, not a round number: it is the densest frond that fits the ESP32's
-/// heap beside the two full-screen DMA buffers and the dual-core far buffer, and it is bounded by two
-/// separate walls the rest of this module is built to push back. The *contiguous* wall — one `Vec`
-/// of the whole field being a run the pool-fragmented heap cannot place — is lifted by chunking the
-/// field into [`CHUNK_LEN`]-point runs. The *throughput* wall is the paint budget: past roughly
-/// eight thousand points a frame's compute-and-plot crosses the 20 ms that holds 50 fps. So the
-/// budget is set at the fullest frond that stays under both, checked on the glass.
-pub const POINT_COUNT: u32 = 6_000;
+/// The count is a throughput edge, not a round number: it is the densest frond that holds 50 fps, and
+/// it is bounded by two separate walls the rest of this module is built to push back. The
+/// *contiguous* wall — one `Vec` of the whole field being a run the pool-fragmented heap cannot place
+/// — is lifted by chunking the field into [`CHUNK_LEN`]-point runs. The *throughput* wall is the
+/// paint budget: past roughly eight thousand points a frame's compute-and-plot crosses the 20 ms that
+/// holds 50 fps. So the budget is set at the fullest frond that stays under both with headroom for
+/// jitter — measured on the glass at a 17.9 ms median paint, 19.1 ms worst case, no frame over 20.
+pub const POINT_COUNT: u32 = 7_500;
 
 /// The field index of the `n`-th plotted point, for `n` in `1..=POINT_COUNT`.
 ///
