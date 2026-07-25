@@ -90,10 +90,16 @@ impl SinTable {
         let whole: f32 = libm::floorf(index);
         let frac: f32 = index - whole;
 
-        // `whole` is reduced onto the ring before indexing. `rem_euclid` keeps a negative
-        // angle's index non-negative, and the mask is a no-op safety net that also proves to
-        // the compiler the index is in bounds.
-        let lo: usize = (whole as i64).rem_euclid(LEN as i64) as usize & MASK;
+        // Reduce the integer part onto the ring with a power-of-two mask, not `rem_euclid`. The
+        // table spans a whole turn in `LEN` entries and `LEN` is a power of two, so the ring
+        // index is the low `BITS` bits of `floor(index)`, which `& MASK` extracts — and in two's
+        // complement that is the correct non-negative residue even for a negative angle
+        // (`-1 & MASK == LEN - 1`). This deletes the per-lookup `f32 → i64` conversion and 64-bit
+        // `rem_euclid`, both software-emulated on this FPU-without-integer-divide Xtensa core;
+        // measured at six lookups a point over five thousand points, they were the bulk of a
+        // frame's compute. Masking only the low bits, the cast's sign-extension is irrelevant, so
+        // this reads the same on the 32-bit target and the 64-bit host.
+        let lo: usize = (whole as i32) as usize & MASK;
         let hi: usize = (lo + 1) & MASK;
 
         self.samples[lo] * (1.0 - frac) + self.samples[hi] * frac
@@ -142,10 +148,14 @@ mod tests {
     }
 
     proptest! {
-        /// Many: across the whole circle the interpolated lookup tracks `libm::sinf` within
-        /// tolerance. This is the property the module docs promise and the render loop trusts.
+        /// Many: across a wide span of angles the interpolated lookup tracks `libm::sinf` within
+        /// tolerance. The range reaches ±2000 rad on purpose — the field feeds this angles that
+        /// grow with the phase `t` (roughly `2t`, hundreds of radians after minutes of running),
+        /// so the reduction is proven exactly where the animation drives it, not just near the
+        /// origin. The mask reduction must agree with the true sine over the whole span; a
+        /// regression there would band or tear a long-running frond.
         #[test]
-        fn the_table_tracks_libm_across_the_circle(theta in -100.0f32..100.0) {
+        fn the_table_tracks_libm_across_the_circle(theta in -2000.0f32..2000.0) {
             let table: SinTable = SinTable::new();
             prop_assert!((table.sin(theta) - libm::sinf(theta)).abs() < TOLERANCE);
             prop_assert!((table.cos(theta) - libm::cosf(theta)).abs() < TOLERANCE);
