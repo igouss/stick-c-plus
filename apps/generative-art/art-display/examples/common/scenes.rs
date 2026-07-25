@@ -15,10 +15,15 @@
 use std::path::Path;
 
 use art_core::Sketch;
-use art_display::{canvas_size, Gallery, GalleryView, FRAME_MS};
+use art_display::{canvas_size, Gallery, GalleryView};
 use embedded_graphics::pixelcolor::Rgb565;
+// The stills are sampled by *phase*-frame, not by the repaint cadence: a whole `FRAME_MS` is one
+// step of the source's motion, and on that boundary the continuous [`plume_core::phase`] lands
+// exactly on the source's value — so each still is a canonical frame of the sweep, not an
+// interpolated in-between.
 use embedded_graphics_simulator::{OutputSettings, OutputSettingsBuilder, SimulatorDisplay};
 use platform_core::{ScreenRotation, Tick};
+use plume_core::FRAME_MS;
 
 /// The 135×240 panel is small on a monitor; scale it up.
 pub const SCALE: u32 = 3;

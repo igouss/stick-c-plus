@@ -10,14 +10,16 @@
 use art_core::Sketch;
 use platform_core::{Animated, Tick};
 
-/// The gallery's animation cadence, in milliseconds per frame — a 30 fps target.
+/// The gallery's repaint cadence target, in milliseconds — the *ceiling* on how often the loop
+/// repaints, not the animation's speed.
 ///
-/// The render loop repaints on this period and the view's [`frame_index`](GalleryView::frame_index)
-/// counts it, so one repaint is one frame. A sketch's *own* motion is a function of the elapsed
-/// clock, not of this cadence, so repainting faster or slower changes only smoothness, never
-/// speed. It sits well clear of the 10 ms FreeRTOS tick floor, so a frame's sleep yields rather
-/// than busy-waits.
-pub const FRAME_MS: Tick = 33;
+/// Set at (not below) the render loop's `MIN_YIELD`, the one-tick yield every frame must give the
+/// scheduler. So this target never itself throttles the gallery: the loop repaints as fast as a
+/// frame's real work plus that mandatory yield allows, which for a full-screen sketch is the true
+/// ceiling. A sketch's *own* motion is [`plume_core::phase`], a continuous function of the elapsed
+/// clock, so repainting faster changes only smoothness, never speed — the faster the repaint, the
+/// more distinct pictures of the same sweep reach the glass.
+pub const REPAINT_MS: Tick = 10;
 
 /// The gallery's view: the sketch currently on the glass.
 ///
@@ -66,11 +68,15 @@ impl Animated for GalleryView {
         true
     }
 
-    /// Which frame is due after `elapsed_ms`: one per [`FRAME_MS`]. The index strictly increases
-    /// with time, so the loop's `(state, frame)` pair changes every frame and the panel repaints —
-    /// which for a continuous animation is exactly what is wanted.
+    /// Which frame is due after `elapsed_ms`: the elapsed millisecond itself. The gallery is a
+    /// *continuous* animation — every distinct moment is a distinct picture (see
+    /// [`plume_core::phase`]) — so the finest honest frame number is time itself. The render loop
+    /// suppresses a repaint only when this `(state, frame)` pair is unchanged; keying it on the
+    /// millisecond means a repaint is suppressed only when no time has passed, never merely because
+    /// two repaints fell inside some coarser frame window. That is what lets the glass show every
+    /// distinct picture the work-bound loop can produce, rather than throttling to a fixed cadence.
     fn frame_index(&self, elapsed_ms: Tick) -> usize {
-        (elapsed_ms / FRAME_MS) as usize
+        elapsed_ms as usize
     }
 }
 
@@ -112,14 +118,15 @@ mod tests {
         assert_eq!(GalleryView::default().frame_index(0), 0);
     }
 
-    /// One, then many: the frame index advances once per frame period and keeps climbing, so
-    /// consecutive frames never suppress each other.
+    /// One, then many: the frame index is the elapsed millisecond, so it advances the instant the
+    /// clock does and never collapses two distinct moments into one — every millisecond of the
+    /// continuous animation is its own repaintable frame.
     #[test]
-    fn the_frame_index_advances_once_per_frame() {
+    fn the_frame_index_is_the_elapsed_millisecond() {
         let view: GalleryView = GalleryView::default();
-        assert_eq!(view.frame_index(FRAME_MS - 1), 0);
-        assert_eq!(view.frame_index(FRAME_MS), 1);
-        assert_eq!(view.frame_index(2 * FRAME_MS), 2);
+        assert_eq!(view.frame_index(1), 1);
+        assert_eq!(view.frame_index(2), 2);
+        assert_eq!(view.frame_index(999), 999);
     }
 
     /// A fresh view opens on the plume, so the gallery's first glass matches its first selector

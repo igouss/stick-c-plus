@@ -11,16 +11,19 @@
 //! the [`Selector`](art_core::Selector) says when it changes; this crate decides what each piece
 //! looks like and how the picture reaches the panel.
 //!
-//! - [`Gallery`] — the renderer. Holds the sine table and the offscreen frame across frames;
-//!   [`render`](Gallery::render) dispatches on the selected sketch, draws it into the frame, and
-//!   blits the frame in one window.
+//! - [`Gallery`] — the renderer. Holds the frond-compute port, a scratch cloud, and the offscreen
+//!   frame across frames; [`render`](Gallery::render) dispatches on the selected sketch, draws it
+//!   into the frame, and blits the frame in one window.
+//! - [`FrondCompute`] — the port under the plume's evaluation: turn an animation phase into the
+//!   frond's point cloud. [`SerialFrond`] is the one-core default; the firmware injects a two-core
+//!   implementation via [`Gallery::with_frond`], a strictly faster route to the identical cloud.
 //! - [`GalleryView`] — the app state the render loop shows. It carries the *selected sketch*, so
 //!   a button press that changes the sketch changes the view's [`anchor`](platform_core::Animated::anchor)
 //!   and the render loop resets the animation clock — the new piece starts from the beginning of
 //!   its own motion rather than mid-breath.
 //! - [`canvas_size`] — the shape of the canvas a given rotation draws on.
-//! - [`FRAME_MS`] — the gallery's animation cadence, so the view and the composition root agree
-//!   on how one repaint maps to one frame.
+//! - [`REPAINT_MS`] — the gallery's repaint-cadence ceiling, so the composition root drives the
+//!   loop as fast as a frame's work allows rather than at a fixed rate.
 //!
 //! ## One transaction a frame, not five thousand
 //!
@@ -47,13 +50,23 @@
 extern crate alloc;
 
 mod frame;
+mod frond;
 mod gallery;
 mod sketch;
 mod view;
 
+pub use frond::{FrondCompute, SerialFrond};
 pub use gallery::{canvas_size, Gallery, GROUND_COLOUR, PLUME_COLOUR};
-pub use view::{GalleryView, FRAME_MS};
+pub use view::{GalleryView, REPAINT_MS};
+
+// The frond's point type, re-exported so a composition root that supplies a parallel
+// [`FrondCompute`] can name the cloud it fills without depending on `plume-core` directly.
+pub use plume_core::FieldPoint;
 
 // The board-generic foundation, re-exported so the panel adapter and the screenshots example
 // reach it through `art_display`.
 pub use platform_display::{RenderError, SCREEN_SIZE};
+
+// The pixel type [`Gallery::paint`] hands back — re-exported so a composition root that takes
+// those pixels to a panel can name their type without depending on embedded-graphics itself.
+pub use embedded_graphics::pixelcolor::Rgb565;

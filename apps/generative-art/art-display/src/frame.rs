@@ -90,6 +90,18 @@ impl Frame {
         self.pixels[index] = colour;
     }
 
+    /// The active canvas as a contiguous row-major `Rgb565` slice — exactly the pixels [`blit`]
+    /// streams, in the order it streams them.
+    ///
+    /// The seam for a panel adapter that pushes the frame to the glass *itself* — swapping to the
+    /// wire's byte order and bursting it over DMA — rather than draw through the generic
+    /// [`blit`](Self::blit)/[`DrawTarget`] path. Same bytes, same order; only who moves them, and
+    /// how fast, differs. Host renderers keep using [`blit`], so both paths stay one picture.
+    pub fn pixels(&self) -> &[Rgb565] {
+        let count: usize = (self.width * self.height) as usize;
+        &self.pixels[..count]
+    }
+
     /// Stream the whole active canvas to `target` as one contiguous fill — the single transaction
     /// the whole module exists to make possible.
     pub fn blit<D>(&self, target: &mut D) -> Result<(), RenderError<D::Error>>

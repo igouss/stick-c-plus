@@ -11,13 +11,16 @@
 //! [`placeholder`](crate::sketch::placeholder). Because the match is exhaustive, adding a sketch
 //! to the running order forces a new arm here — a new piece cannot be silently left undrawn.
 
+use alloc::boxed::Box;
+
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use platform_core::{ScreenRotation, Tick};
 use platform_display::{RenderError, SCREEN_SIZE};
-use platform_numerics::SinTable;
+use plume_core::{phase, FieldPoint};
 
 use crate::frame::Frame;
+use crate::frond::{FrondCompute, SerialFrond};
 use crate::sketch::{placeholder, plume};
 use crate::view::GalleryView;
 
@@ -44,34 +47,89 @@ pub const fn canvas_size(rotation: ScreenRotation) -> Size {
     }
 }
 
-/// The gallery renderer: the sine table and the offscreen frame, held for the life of the app.
+/// The gallery renderer: the frond-compute port and the offscreen frame, both held for the life of
+/// the app.
 ///
-/// Both the table's samples and the frame's pixels live on the **heap** (each owns a `Vec`), so
-/// the renderer itself is a small handle — cheap to move into the display thread's closure, and
-/// with no large buffer ever placed on a stack, which on bring-up would overflow it.
+/// The port's capital (the sine table and the precomputed field it holds) and the frame's pixels
+/// live on the **heap** (each owns a `Vec`), so the renderer itself is a small handle — cheap to
+/// move into the display thread's closure, and with no large buffer ever placed on a stack, which
+/// on bring-up would overflow it. The plume's cloud is never buffered here: it streams through the
+/// port straight into the frame a point at a time (see [`paint`](Self::paint)).
 pub struct Gallery {
-    /// The startup-built trigonometry every sketch is evaluated through.
-    table: SinTable,
+    /// How the plume's point cloud is evaluated: [`SerialFrond`] on one core by default, or the
+    /// firmware's two-core implementation when injected via [`with_frond`](Self::with_frond). Held
+    /// for the life of the app because a parallel implementation owns a persistent worker.
+    frond: Box<dyn FrondCompute>,
     /// The frame the selected sketch is plotted into and blitted from.
     frame: Frame,
 }
 
 impl Gallery {
-    /// Build the renderer: pay for the sine table once, here, and never again.
+    /// Build the renderer on the one-core default frond — the pure path every host renderer drives.
     pub fn new() -> Self {
-        Self {
-            table: SinTable::new(),
-            frame: Frame::new(),
-        }
+        Self::with_frond(|| Box::new(SerialFrond::new()))
     }
 
-    /// Render the selected sketch for the state that has been current for `elapsed` milliseconds.
+    /// Build the renderer around a frond-compute port — the seam the firmware uses to inject its
+    /// two-core evaluation.
     ///
-    /// The sequence is: flood the frame with the ground, dispatch on the selected sketch to plot
-    /// its picture into the frame, then blit the whole frame in one window. `elapsed` is the clock
-    /// *since this sketch became current* — the render loop resets it on a switch because the
-    /// view's [`anchor`](platform_core::Animated::anchor) is the sketch — so each piece animates
-    /// from the start of its own motion.
+    /// The port is built by the `frond` closure *after* the frame buffer, deliberately: the frame
+    /// is one of the two full-screen buffers the app needs a contiguous run for, and on the ESP32's
+    /// pool-fragmented ~300 KiB heap the big buffers must claim their runs before the smaller
+    /// scattered allocations (the field, a parallel frond's worker buffer) carve the pools up. So
+    /// the frame is allocated first, then the frond.
+    pub fn with_frond(frond: impl FnOnce() -> Box<dyn FrondCompute>) -> Self {
+        let frame: Frame = Frame::new();
+        let frond: Box<dyn FrondCompute> = frond();
+        Self { frond, frame }
+    }
+
+    /// Draw the selected sketch into the offscreen frame and return it as a contiguous
+    /// [`Rgb565`] slice — the picture, computed but not yet on any glass.
+    ///
+    /// The sequence is: flood the frame with the ground, then dispatch on the selected sketch to
+    /// plot its picture into the frame. `elapsed` is the clock *since this sketch became current*
+    /// — the render loop resets it on a switch because the view's
+    /// [`anchor`](platform_core::Animated::anchor) is the sketch — so each piece animates from the
+    /// start of its own motion.
+    ///
+    /// Split from the blit so a panel adapter can take these pixels and push them to the glass
+    /// itself (a DMA burst), while the host renderers go on through [`render`](Self::render). Both
+    /// paths compute the identical frame here; only the final move to the glass differs.
+    pub fn paint(
+        &mut self,
+        view: GalleryView,
+        elapsed: Tick,
+        rotation: ScreenRotation,
+    ) -> &[Rgb565] {
+        let canvas: Size = canvas_size(rotation);
+        self.frame.reset(canvas, GROUND_COLOUR);
+
+        use art_core::Sketch;
+        match view.current() {
+            Sketch::Plume => {
+                // Evaluate the frond at this frame's phase through the port (one core or two) and
+                // plot each point as it arrives — streamed, never buffered. `frame` is reborrowed
+                // as a disjoint field so the plot closure and the frond borrow do not contend.
+                let t: f32 = phase(elapsed);
+                let frame: &mut Frame = &mut self.frame;
+                self.frond.evaluate(t, &mut |point: FieldPoint| {
+                    plume::plot_point(frame, point, canvas)
+                });
+            }
+            Sketch::Squares => placeholder::render(&mut self.frame, Sketch::Squares, canvas),
+            Sketch::Fan => placeholder::render(&mut self.frame, Sketch::Fan, canvas),
+            Sketch::Orbits => placeholder::render(&mut self.frame, Sketch::Orbits, canvas),
+            Sketch::Willow => placeholder::render(&mut self.frame, Sketch::Willow, canvas),
+        }
+
+        self.frame.pixels()
+    }
+
+    /// Render the selected sketch and blit the whole frame to `target` in one window.
+    ///
+    /// [`paint`](Self::paint) then [`blit`](Frame::blit): the device-independent path every host
+    /// renderer (the screenshots, the goldens) drives, drawing the same code the panel does.
     pub fn render<D>(
         &mut self,
         target: &mut D,
@@ -82,18 +140,9 @@ impl Gallery {
     where
         D: DrawTarget<Color = Rgb565>,
     {
-        let canvas: Size = canvas_size(rotation);
-        self.frame.reset(canvas, GROUND_COLOUR);
-
-        use art_core::Sketch;
-        match view.current() {
-            Sketch::Plume => plume::render(&mut self.frame, &self.table, elapsed, canvas),
-            Sketch::Squares => placeholder::render(&mut self.frame, Sketch::Squares, canvas),
-            Sketch::Fan => placeholder::render(&mut self.frame, Sketch::Fan, canvas),
-            Sketch::Orbits => placeholder::render(&mut self.frame, Sketch::Orbits, canvas),
-            Sketch::Willow => placeholder::render(&mut self.frame, Sketch::Willow, canvas),
-        }
-
+        // Compute into the frame; the returned borrow ends at the semicolon, freeing the frame
+        // for the blit below.
+        let _ = self.paint(view, elapsed, rotation);
         self.frame.blit(target)
     }
 }
@@ -129,6 +178,33 @@ mod tests {
     #[test]
     fn the_plume_paints_pixels() {
         assert!(painted(Sketch::Plume, 0).lit_pixels() > 0);
+    }
+
+    /// The `paint` seam returns exactly the canvas the `render`/blit path streams — same pixels,
+    /// same order — so the panel adapter's direct DMA burst and the host blit stay one picture.
+    #[test]
+    fn paint_returns_the_pixels_the_blit_would_stream() {
+        let canvas: Size = canvas_size(PORTRAIT);
+        let mut gallery: Gallery = Gallery::new();
+        let direct: alloc::vec::Vec<Rgb565> = gallery
+            .paint(GalleryView::new(Sketch::Plume), 0, PORTRAIT)
+            .to_vec();
+
+        let mut fb: Framebuffer = Framebuffer::sized(canvas);
+        gallery
+            .render(&mut fb, GalleryView::new(Sketch::Plume), 0, PORTRAIT)
+            .expect("a framebuffer render cannot fail");
+
+        assert_eq!(
+            direct.len(),
+            (canvas.width * canvas.height) as usize,
+            "paint returns the whole canvas"
+        );
+        assert_eq!(
+            fb.pixels(),
+            direct.as_slice(),
+            "the blit streamed a different picture than paint returned"
+        );
     }
 
     /// The whole canvas is painted every frame — sketch plus ground — which is what makes the blit

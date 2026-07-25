@@ -19,9 +19,7 @@
 
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::{RgbColor, Size};
-use platform_core::Tick;
-use platform_numerics::SinTable;
-use plume_core::{phase, plume, FieldPoint};
+use plume_core::FieldPoint;
 
 use crate::frame::Frame;
 
@@ -56,19 +54,22 @@ pub fn project(point: FieldPoint, canvas: Size) -> Option<(i32, i32)> {
     Some((x as i32, y as i32))
 }
 
-/// Plot the frond of the moment into `frame`, which the caller has already reset to the ground.
+/// Plot one computed frond point into `frame`, which the caller has already reset to the ground.
 ///
-/// The sequence is: read the phase from the elapsed clock, then for every projected point of the
-/// frond light a pixel — a fat point lighting its neighbour too, the original's two-pixel dot that
-/// is the barbs' bright spine.
-pub fn render(frame: &mut Frame, table: &SinTable, elapsed: Tick, canvas: Size) {
-    let t: f32 = phase(elapsed);
-    for point in plume(t, table) {
-        if let Some((x, y)) = project(point, canvas) {
-            frame.set(x, y, PLUME_COLOUR);
-            if point.wide {
-                frame.set(x + 1, y, PLUME_COLOUR);
-            }
+/// The pure projection-and-plot atom of the plume: project the point onto the canvas and, if it
+/// lands, light a pixel — a fat point lighting its neighbour too, the original's two-pixel dot that
+/// is the barbs' bright spine. The point is the frond already evaluated at the frame's phase; *how*
+/// it was computed — one core or two — is the caller's business (see
+/// [`FrondCompute`](crate::FrondCompute)), and this plot is identical either way.
+///
+/// One point at a time so a caller can stream a core's half straight from
+/// [`iter_range`](plume_core::PlumeField::iter_range) with no intermediate buffer — the plume's
+/// answer to the ESP32's tight heap.
+pub fn plot_point(frame: &mut Frame, point: FieldPoint, canvas: Size) {
+    if let Some((x, y)) = project(point, canvas) {
+        frame.set(x, y, PLUME_COLOUR);
+        if point.wide {
+            frame.set(x + 1, y, PLUME_COLOUR);
         }
     }
 }
@@ -113,5 +114,52 @@ mod tests {
         };
         let (x, _y): (i32, i32) = project(far, PORTRAIT).expect("a finite point projects");
         assert!(x as u32 >= PORTRAIT.width, "expected off the right edge");
+    }
+
+    /// Plot each of `points` into a fresh portrait frame and count the pixels lit — the plot's
+    /// whole observable effect.
+    fn lit_after_plotting(points: &[FieldPoint]) -> usize {
+        use platform_display::testing::Framebuffer;
+        let mut frame: Frame = Frame::new();
+        frame.reset(PORTRAIT, Rgb565::BLACK);
+        points
+            .iter()
+            .for_each(|&point: &FieldPoint| plot_point(&mut frame, point, PORTRAIT));
+        let mut fb: Framebuffer = Framebuffer::sized(PORTRAIT);
+        frame.blit(&mut fb).expect("a framebuffer blit cannot fail");
+        fb.lit_pixels()
+    }
+
+    /// Zero: the field's degenerate ∞ point lights nothing — plot drops it exactly as project does.
+    #[test]
+    fn an_infinite_point_lights_nothing() {
+        let gone: FieldPoint = FieldPoint {
+            x: f32::INFINITY,
+            y: 0.0,
+            wide: false,
+        };
+        assert_eq!(lit_after_plotting(&[gone]), 0);
+    }
+
+    /// One: a narrow point on the canvas lights exactly one pixel.
+    #[test]
+    fn a_narrow_point_lights_one_pixel() {
+        let p: FieldPoint = FieldPoint {
+            x: CANVAS_CENTRE_X,
+            y: CANVAS_CENTRE_Y,
+            wide: false,
+        };
+        assert_eq!(lit_after_plotting(&[p]), 1);
+    }
+
+    /// Many: a wide point lights two — itself and its right neighbour, the barbs' bright spine.
+    #[test]
+    fn a_wide_point_lights_its_neighbour_too() {
+        let p: FieldPoint = FieldPoint {
+            x: CANVAS_CENTRE_X,
+            y: CANVAS_CENTRE_Y,
+            wide: true,
+        };
+        assert_eq!(lit_after_plotting(&[p]), 2);
     }
 }
