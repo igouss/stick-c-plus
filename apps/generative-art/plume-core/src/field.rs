@@ -47,11 +47,13 @@ pub const START: u32 = 10_000;
 /// by [`index_of`]. On the 135×240 panel the dropped points overwhelmingly collided with a kept one,
 /// so the picture is the same creature for three fifths of the transcendentals and dots.
 ///
-/// Six thousand is the memory edge, not a round number: it is the densest frond that fits the
-/// ESP32's heap beside the two full-screen DMA buffers and the dual-core far buffer. Measured on the
-/// metal, 6500 points leaves no 16 KiB contiguous run for the display-thread stack (the field and
-/// buffers fragment it away) and aborts at bring-up; 7000 cannot allocate the field's 112 KiB at
-/// all. So this is set at the fullest frond the board will hold, checked on the glass.
+/// The count is a memory edge, not a round number: it is the densest frond that fits the ESP32's
+/// heap beside the two full-screen DMA buffers and the dual-core far buffer, and it is bounded by two
+/// separate walls the rest of this module is built to push back. The *contiguous* wall — one `Vec`
+/// of the whole field being a run the pool-fragmented heap cannot place — is lifted by storing the
+/// field in two halves ([`SPLIT`]). The *throughput* wall is the paint budget: past roughly seven
+/// and a half thousand points a frame's compute-and-plot crosses the 20 ms that holds 50 fps. So the
+/// budget is set at the fullest frond that stays under both, checked on the glass.
 pub const POINT_COUNT: u32 = 6_000;
 
 /// The field index of the `n`-th plotted point, for `n` in `1..=POINT_COUNT`.
@@ -175,6 +177,20 @@ fn precompute(i: u32, table: &SinTable) -> (Precomputed, bool) {
     (point, k * k > 15.0)
 }
 
+/// Where the field's storage is cut in two: the low half holds the precomputed records for
+/// positions `[0, SPLIT)`, the high half `[SPLIT, POINT_COUNT)`.
+///
+/// Splitting the cloud across two allocations rather than one is a *memory* decision, not a
+/// mathematical one. A single `Vec` of the whole field is one contiguous run, and the
+/// pool-fragmented ESP32 heap may not have a run that large: measured on the metal, seven thousand
+/// points is a lone 112 KiB block that cannot be placed even with ~150 KiB free, because the two
+/// full-screen DMA buffers have already carved up the one pool big enough to hold it. Two half-sized
+/// runs fit where one whole one does not, so the point budget can climb past the
+/// single-allocation ceiling. The cut is at the midpoint, which also lines it up with the dual-core
+/// near/far split ([`compute_range`](PlumeField::compute_range)) so each core's sweep stays inside
+/// one half — but correctness does not depend on that alignment, only a hair of locality does.
+const SPLIT: usize = POINT_COUNT as usize / 2;
+
 /// The frond as [`plume`], but built for the panel: the per-index invariants are precomputed
 /// once at [`new`](Self::new), so a frame costs only the three genuinely phase-dependent lookups
 /// — the swirl and `c`'s sine and cosine — instead of six lookups, a `sqrtf` and a division.
@@ -182,15 +198,21 @@ fn precompute(i: u32, table: &SinTable) -> (Precomputed, bool) {
 /// The saving is exactly the loop-invariant hoist the hardware brief calls for, and it changes
 /// nothing on the glass: [`frame`](Self::frame) regroups the *same* operations in the *same*
 /// order as [`point`], so it returns a bit-identical cloud (proven in the tests). It holds
-/// [`POINT_COUNT`] precomputed points on the heap — four `f32` each, 16 bytes — plus a one-bit-a-point
-/// `wide` bitset beside them, and like every panel-sized buffer here, never a stack temporary.
+/// [`POINT_COUNT`] precomputed points on the heap — four `f32` each, 16 bytes — split into two
+/// half-sized runs ([`SPLIT`]) so no single contiguous allocation bounds the point budget, plus a
+/// one-bit-a-point `wide` bitset beside them, and like every panel-sized buffer here, never a stack
+/// temporary.
 pub struct PlumeField {
-    /// The four-`f32` per-index invariants, one per point, at positions `0..POINT_COUNT`.
-    points: Vec<Precomputed>,
+    /// The four-`f32` per-index invariants for positions `[0, SPLIT)`.
+    lower: Vec<Precomputed>,
+    /// The four-`f32` per-index invariants for positions `[SPLIT, POINT_COUNT)`. Held as a second
+    /// allocation so the whole field is never one contiguous run — see [`SPLIT`].
+    upper: Vec<Precomputed>,
     /// The `wide` flag for each point, packed one bit per point (position `j`'s bit is
     /// `wide[j >> 5] & (1 << (j & 31))`). Kept out of [`Precomputed`] so that record stays a tight
     /// 16 bytes rather than a 20-byte padded one — ~20 KiB saved across the field, the headroom the
-    /// double buffer's second frame needs.
+    /// double buffer's second frame needs. One bit a point is under a kibibyte across the field, far
+    /// below any contiguous concern, so it stays a single allocation.
     wide: Vec<u32>,
 }
 
@@ -200,16 +222,40 @@ impl PlumeField {
     /// the render path. The `wide` flag each point yields is packed into the bitset as it is built.
     pub fn new(table: &SinTable) -> Self {
         let count: usize = POINT_COUNT as usize;
-        let mut points: Vec<Precomputed> = Vec::with_capacity(count);
+        let mut lower: Vec<Precomputed> = Vec::with_capacity(SPLIT);
+        let mut upper: Vec<Precomputed> = Vec::with_capacity(count - SPLIT);
         let mut wide: Vec<u32> = vec![0u32; count.div_ceil(u32::BITS as usize)];
         for j in 0..count {
             let (point, is_wide): (Precomputed, bool) = precompute(index_of(j as u32 + 1), table);
-            points.push(point);
+            if j < SPLIT {
+                lower.push(point);
+            } else {
+                upper.push(point);
+            }
             if is_wide {
                 wide[j >> 5] |= 1 << (j & 31);
             }
         }
-        Self { points, wide }
+        Self { lower, upper, wide }
+    }
+
+    /// The precomputed record at global position `i`, from whichever half holds it.
+    ///
+    /// Positions `[0, SPLIT)` live in [`lower`](Self::lower), the rest in [`upper`](Self::upper);
+    /// `lower.get(i)` picks the half in one predictable branch. On the dual-core path every sweep is
+    /// wholly inside one half (the ranges align to [`SPLIT`]), so the branch never even mispredicts;
+    /// the whole-field [`frame`](Self::frame) crosses it exactly once. Panics past the field, on the
+    /// `upper` index — a caller-side range bug, as [`iter_range`](Self::iter_range) documents.
+    fn precomputed_at(&self, i: usize) -> &Precomputed {
+        match self.lower.get(i) {
+            Some(point) => point,
+            None => &self.upper[i - self.lower.len()],
+        }
+    }
+
+    /// The number of points in the field — the two halves together.
+    fn len(&self) -> usize {
+        self.lower.len() + self.upper.len()
     }
 
     /// Whether the point at position `i` is drawn fat, read from the packed [`wide`](Self::wide)
@@ -228,7 +274,7 @@ impl PlumeField {
         t: f32,
         table: &'a SinTable,
     ) -> impl Iterator<Item = FieldPoint> + 'a {
-        self.iter_range(0, self.points.len(), t, table)
+        self.iter_range(0, self.len(), t, table)
     }
 
     /// The frond's points at indices `[start, start + len)`, at phase `t`, as an iterator.
@@ -250,10 +296,10 @@ impl PlumeField {
     ) -> impl Iterator<Item = FieldPoint> + 'a {
         let t2: f32 = 2.0 * t;
         // Iterate positions, not a `&Precomputed` slice, so each point can also read its `wide` bit
-        // from the packed bitset beside the record. Out-of-range `start + len` still panics on the
-        // `points` index, as documented.
+        // from the packed bitset beside the record, and so `precomputed_at` can pick the storage half.
+        // Out-of-range `start + len` still panics on the `upper` index, as documented.
         (start..start + len)
-            .map(move |i: usize| point_from(&self.points[i], self.is_wide(i), t, t2, table))
+            .map(move |i: usize| point_from(self.precomputed_at(i), self.is_wide(i), t, t2, table))
     }
 
     /// Fill `out` with the frond's points at indices `[start, start + out.len())`, at phase `t` —
