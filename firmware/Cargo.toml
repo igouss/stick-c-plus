@@ -43,9 +43,16 @@ members = [
 ]
 
 # Profiles live at the (virtual) workspace root; members may not set their own.
-# opt-level "s" everywhere — `-O0` overflows IRAM on the esp32.
+#
+# opt-level = 3 for release: the apps are small, so the extra flash `.text` is affordable (Rust app
+# code lands in flash, not the tight IRAM the `-O0` warning below is about), and under `lto = "fat"`
+# the ROOT opt-level is the one that actually reaches the hot path — a per-package override is washed
+# out by the final whole-graph LTO pass (measured). This compiles the plume's field loop for speed,
+# not size — and, measured on the board, its tighter codegen also lifted the render loop off a
+# flash-i-cache thrash the "s" layout had fallen into (95 ms → 32 ms/frame, steady). `-O0` still
+# overflows IRAM on the esp32, so dev stays at "s".
 [profile.release]
-opt-level = "s"
+opt-level = 3
 lto = "fat"
 codegen-units = 1
 
