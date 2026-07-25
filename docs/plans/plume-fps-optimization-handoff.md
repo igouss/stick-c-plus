@@ -10,11 +10,12 @@ Board: M5StickC Plus, ESP32 Xtensa LX6, `xtensa-esp32-espidf`, 2×240 MHz, ~520 
 
 ---
 
-## STATUS: two phases landed on the board, ~25 fps measured. Two levers remain.
+## STATUS: 30+ fps GOAL CLEARED — dual-core landed on the board at 33.3 fps. One lever (double-buffer) remains for the comfortable 40.
 
 Progress ladder (all measured on glass unless noted):
 `96 ms (mipidsi gather) → 73 (FastPanel blit) → 68 (SinTable mask) → 43/20fps (plume hoist) →
-35 ms / 25 fps (SPI 40 MHz + continuous phase, THIS SESSION)`. Target ≤ ~23 ms show → 40+ fps.
+35 ms / 25 fps (SPI 40 MHz + continuous phase) → 32 ms / 25 fps (memory keystone + root O3) →
+27 ms / 33.3 fps (dual-core, SESSION 5)`. Target ≤ ~23 ms show → 40+ fps (double-buffer next).
 
 ### DONE this session (uncommitted, host-green; goldens await bless)
 
@@ -304,6 +305,35 @@ Files: art-display `canvas.rs` (new) + `frame.rs`/`gallery.rs`/`plume.rs`/`place
 
 ---
 
+## SESSION 5 (2026-07-25): dual-core flipped on — 30 fps GOAL CLEARED at 33.3 fps on the glass.
+
+The memory keystone (SESSION 4) freed the heap the dual-core worker needed, so `dual-core` was
+flipped from opt-in to **default** and measured on the board:
+
+- **25.0 fps → 33.3 fps, steady** across 7 consecutive 5 s reports (33.3 fps over 167 frames each).
+- **paint 32 ms → 27 ms/frame** (avg == peak == 27 ms — dead flat, no jitter).
+- **Heap: 83,328 B free after all three buffers** (wire-canvas frame + worker far-half + 4 KiB
+  worker stack), largest DMA block 55,296 B. Comfortable; no fragmentation trouble.
+- Clean boot, no panic, no reboot loop, no watchdog. The far/near buffer ping-pong (SAFE, no lock,
+  no unsafe) held up in the field exactly as the host property proved.
+
+**Why 5 ms and not the ~9 ms the model predicted:** dual-core halves only the *field compute*; the
+*plot* of both halves and the *blit* stay serial on the render thread, and the barrier `recv()` eats
+a sliver of FreeRTOS wakeup latency. The near half's compute+plot overlaps the worker's far compute,
+so the win is `~min(far_compute, near_compute+near_plot)` ≈ 5 ms, not the full half of compute. The
+cost-model row below (`~26 ms`) was close; measured 27 ms.
+
+Landed: `firmware/apps/generative-art/bin/Cargo.toml` — `default = ["dual-core"]` + reworded the
+feature comment (now on by default, measured, fits since the keystone). No code change; `dual_core.rs`
+and the `#[cfg(feature)]` arm in `main.rs` were already in place from SESSION 2. Default build
+recompiles clean (13 s), flashes, runs. Task #10 done.
+
+**Next for the comfortable 40:** Lever B, the non-blocking DMA double-buffer (Task #16, unsafe,
+quarantined) — hides the ~13 ms blit under the next frame's compute+yield. Cost model projects
+dual-core + double-buffer → ~40 fps. See "NEXT: two levers" → "Lever B" below (design already scoped).
+
+---
+
 ## THE COST MODEL (measured, do not re-derive)
 
 `show()` at 40 MHz ≈ **35 ms** = compute ~21 (field ~18 + flood/project/plot ~3) + swap ~2.4 +
@@ -409,9 +439,10 @@ the estimator has been wrong before; instrument the split (paint/swap/spi) when 
 ## OPEN ITEMS
 - [x] Build Lever A (dual-core) — DONE, host-proven bit-identical, feature-gated `dual-core`. Blocked
       on device by the memory wall (see SESSION 2). Enable + measure once the buffers are unified.
-- [ ] **NEXT / keystone: unify the two full-screen buffers** (Frame + DMA → one wire-order DMA
-      buffer). Frees ~63 K + removes the 2.4 ms swap; unblocks both levers. Design in SESSION 2 above.
-- [ ] Then flip on `dual-core`, flash, measure (expect ~28–30 fps); then Lever B double-buffer (~40).
+- [x] **Keystone: unify the two full-screen buffers** (Frame + DMA → one wire-order DMA buffer).
+      DONE (SESSION 4). Freed ~40 K + removed the swap; unblocked both levers.
+- [x] Flip on `dual-core`, flash, measure — DONE (SESSION 5): **33.3 fps / 27 ms, 30+ goal cleared.**
+      Now default. Next: Lever B double-buffer for the comfortable ~40.
 - [ ] **The full arsenal is in SESSION 3 above, ranked payoff÷risk.** T0.1 (per-crate opt-level=3)
       was TRIED and is a NULL RESULT under fat-LTO — do not re-add. Start at the T0.2 keystone.
       Biggest single idea: T1.1 12-bit colour (frees SPI *and* heap, invisible on the white plume).
