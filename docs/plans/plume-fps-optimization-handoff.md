@@ -255,6 +255,55 @@ is fragile and out of scope — flagged here only so the ceiling's location is u
 
 ---
 
+## SESSION 4 (2026-07-24): the keystone is BUILT and frees the memory — but exposed a flash-i-cache fps cliff. UNCOMMITTED, fps-regressed, needs the IRAM fix before it can land.
+
+The keystone (Task #17) is implemented the clean hexagonal way you chose: a **`Canvas` port** in
+art-display (`src/canvas.rs`, `Rgb565` `set`/`reset`, panel-agnostic), the host `Frame` as one
+adapter, and a new **`wire-canvas` crate** (`apps/generative-art/wire-canvas`) as the device adapter
+that stores each pixel in the ST7789's big-endian wire order in a **borrowed** byte buffer — the one
+DMA buffer the gallery plots straight into and the panel streams with a bare `RAMWR`. `FastPanel`
+lost its owned buffer and the per-frame swap. **Host-green** (art-display 27 + plume-core 13 +
+wire-canvas 4) and **host-proven byte-identical**: a `wire-canvas` proptest asserts `WireCanvas` ==
+`Frame` byte-for-byte over random plots (the check the monochrome plume can't give on glass). The
+goldens fail only in the pre-existing continuous-phase set (plume 02/03/04) — the refactor changed
+**zero** pixels.
+
+**Memory win — CONFIRMED on device.** New boot log `heap after buffers`: **122,928 B free, largest
+DMA block 94,208 B** (with the ~63 K canvas + ~100 K field + 8 K table all live). Where two
+full-screen buffers had left it razor-thin, there is now real slack — dual-core's 30 K far buffer
+fits easily. This was the keystone's whole point and it delivered.
+
+**But fps REGRESSED to 95 ms / 10 fps (steady, three reports) — a flash instruction-cache cliff.**
+Diagnosis (measured, PM is OFF so it is not frequency scaling — `CONFIG_PM_ENABLE` unset, CPU fixed
+at **160 MHz**, not 240):
+- Adding a single per-frame `info!`/`Instant::now()` to `show()` drops it **95 ms → 36 ms**
+  (≈ the 35 ms baseline). A *code* change moving timing 2.6× while PM is off is the fingerprint of
+  **flash i-cache thrashing**: the new WireCanvas code shifted the hot loop into a cache-hostile
+  layout, and the extra code shifts it back out.
+- It is **not** the data path: in the instrumented build the split was `paint_into 22.8 ms + blit
+  13.2 ms`, i.e. plotting *into the DMA buffer is fast there*. Same DMA target, same plot code — only
+  the surrounding code layout differs. So the unified-buffer design is sound; the regression is
+  layout, not "DMA memory is slow to plot."
+- Heisenberg caveat: you cannot measure the slow build's internal split, because instrumenting it
+  makes it fast. Trust the mechanism, not a convenient in-loop timer.
+
+**RESOLVED by root `opt-level = 3`, not IRAM.** Setting `firmware/Cargo.toml [profile.release]
+opt-level` `"s" → 3` (the apps are small; Rust app code grows flash `.text`, not IRAM) cleared the
+cliff: **25 fps / paint 32 ms, steady over three reports**, memory win intact (122 K free). Under
+`lto = "fat"` the *root* opt-level reaches the hot path (a per-package override does not — Task #18),
+and its tighter codegen also relaid the render loop out of the thrash. Net **better than the 35 ms
+pre-keystone baseline** (swap removal + O3), with no IRAM in the domain crate — the cleaner fix. IRAM
+(arsenal T2.4) is therefore *not needed* for the keystone and stays a future lever only if a later
+change reintroduces a cliff.
+
+**State:** keystone + root-O3 verified on the board (25 fps, 32 ms, 122 K free, byte-identical
+picture by construction). Ready to commit, then flip `dual-core` (now fits) and measure toward 30+.
+Files: art-display `canvas.rs` (new) + `frame.rs`/`gallery.rs`/`plume.rs`/`placeholder.rs`/`lib.rs`/
+`scenes.rs`; new `wire-canvas` crate; `panel.rs` (FastPanel); bin `main.rs`/`Cargo.toml`; workspace
+`Cargo.toml` (+ member); `firmware/Cargo.toml` (root O3).
+
+---
+
 ## THE COST MODEL (measured, do not re-derive)
 
 `show()` at 40 MHz ≈ **35 ms** = compute ~21 (field ~18 + flood/project/plot ~3) + swap ~2.4 +
