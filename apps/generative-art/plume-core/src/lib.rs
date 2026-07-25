@@ -9,7 +9,9 @@
 //!
 //! - [`field`] — the parametric point field: [`point`] for one point, [`plume`] for the whole
 //!   frond at a phase, in the original 400×400 canvas space. A faithful port of a *Dwitter*,
-//!   with the point budget halved to what a 135×240 panel can show.
+//!   with the point budget halved to what a 135×240 panel can show. [`PlumeField`] is the same
+//!   frond built for speed: it precomputes every per-index invariant once, so a frame pays only
+//!   the three phase-dependent lookups — proven bit-identical to [`plume`].
 //! - [`phase`] — the animation clock: wall-clock milliseconds to a phase on the ring `[0, 2π)`,
 //!   reproducing the source's per-frame step and wrapping so an `f32` never loses precision.
 //! - [`SinTable`] — the startup-built sine table the field's trigonometry is read from, so the
@@ -30,10 +32,12 @@
 //! `libm`](SinTable::sin), the field [tracks an `f64` reference](field), the phase [stays on
 //! the ring](phase).
 
+extern crate alloc;
+
 mod field;
 mod phase;
 
-pub use field::{plume, point, FieldPoint, POINT_COUNT, START, STEP};
+pub use field::{plume, point, FieldPoint, PlumeField, POINT_COUNT, START, STEP};
 pub use phase::{phase, FRAME_MS, PERIOD_FRAMES, PHASE_PER_FRAME};
 
 // The sine table now lives in the shared platform, so every sketch in the gallery reads its
