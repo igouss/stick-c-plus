@@ -109,6 +109,12 @@ static SPI_BUFFER: StaticCell<[u8; BUFFER_LEN]> = StaticCell::new();
 /// a window armed once at bring-up.
 const RAMWR: u8 = 0x2C;
 
+/// The ST7789 "interface pixel format" (COLMOD) command. Its one argument selects how many bits a
+/// pixel takes over the bus — see [`PixelFormat`]. mipidsi sets it at bring-up; [`FastPanel::new`]
+/// re-issues it so the fast path's wire format is the adapter's own explicit choice, not an
+/// assumption inherited from the wrapper.
+const COLMOD: u8 = 0x3A;
+
 /// The init-time pixel-batch buffer a [`FastPanel`] hands mipidsi for its one-time bring-up.
 ///
 /// Small on purpose: it carries only the init command stream and the single clear that arms the
@@ -152,6 +158,20 @@ impl std::error::Error for St7789Error {}
 /// Wrap any `Debug` failure with the operation that produced it.
 fn fault<E: core::fmt::Debug>(op: &str, err: E) -> St7789Error {
     St7789Error(format!("ST7789 {op}: {err:?}"))
+}
+
+/// Issue a command byte and its arguments over the reclaimed raw bus: DC low for the command, high
+/// for the data. The seam for panel state mipidsi set at bring-up that the fast path overrides —
+/// today only COLMOD, once, in [`FastPanel::new`]. Not the hot path (that is [`FastPanel::blit`],
+/// which streams a whole frame); this carries only the odd single command.
+fn command(spi: &mut BusDevice, dc: &mut Dc, cmd: u8, args: &[u8]) -> Result<(), St7789Error> {
+    dc.set_low().map_err(|e| fault("command dc low", e))?;
+    spi.write(&[cmd]).map_err(|e| fault("command", e))?;
+    dc.set_high().map_err(|e| fault("command dc high", e))?;
+    if !args.is_empty() {
+        spi.write(args).map_err(|e| fault("command args", e))?;
+    }
+    Ok(())
 }
 
 /// Flatten a render function's failure into this adapter's error.
@@ -393,6 +413,33 @@ impl Panel {
     }
 }
 
+/// The wire pixel format a [`FastPanel`] drives the ST7789 in — its COLMOD (0x3A) argument.
+///
+/// The composition root chooses it and must wire the matching byte producer: the buffer it hands
+/// [`blit`](FastPanel::blit) has to be packed in this exact format, so the panel and the canvas that
+/// fills it agree. The adapter does not assume 16-bit; it issues whichever COLMOD this names.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PixelFormat {
+    /// 16 bits a pixel, `Rgb565` — two bytes each, most-significant byte first. mipidsi's default;
+    /// the value here matches what it writes, so selecting it changes nothing.
+    Rgb565,
+    /// 12 bits a pixel, RGB444 — three bytes per two pixels. 25% less across the bus and 25% less
+    /// heap per full-screen buffer than 16-bit, and the panel's smallest mode. The gallery's
+    /// wire canvas packs into it; on the monochrome plume the colour loss is nil.
+    Rgb444,
+}
+
+impl PixelFormat {
+    /// The COLMOD (0x3A) argument that selects this format on the ST7789. Both nibbles are set to
+    /// the same depth, matching the datasheet's convention and mipidsi's `0x55` for 16-bit.
+    const fn colmod(self) -> u8 {
+        match self {
+            PixelFormat::Rgb565 => 0x55, // RGB & MCU interface both 16 bit/pixel
+            PixelFormat::Rgb444 => 0x33, // RGB & MCU interface both 12 bit/pixel
+        }
+    }
+}
+
 /// The panel driven **below mipidsi** for a full-frame-every-frame app — a generative-art sketch.
 ///
 /// A plain [`Panel`] renders each picture through mipidsi's `fill_contiguous`, which is the right
@@ -427,10 +474,15 @@ impl FastPanel {
     /// Bring the panel up through mipidsi, pin it to `rotation`, then reclaim the bus for a
     /// direct DMA blit path.
     ///
-    /// `max_transfer` is the largest blit, in bytes — a whole `Rgb565` frame's `w·h·2`. It must be a
-    /// non-empty multiple of 4, and it caps the DMA transfer size so the frame goes out in one
-    /// transaction. The blit streams the caller's own wire-order buffer (see [`blit`](Self::blit)),
-    /// so no buffer is owned here. Requires the AXP192 LCD/TFT rails already powered.
+    /// `format` is the wire pixel format the panel is put in and the [`blit`](Self::blit) buffer
+    /// must be packed in — [`PixelFormat::Rgb444`] for the gallery, whose canvas packs 12-bit. It is
+    /// issued as a COLMOD write after mipidsi's bring-up, so the adapter owns the format explicitly.
+    ///
+    /// `max_transfer` is the largest blit, in bytes — a whole frame's packed size (`w·h·2` at 16-bit,
+    /// `w·h·3/2` at 12-bit). It must be a non-empty multiple of 4, and it caps the DMA transfer size
+    /// so the frame goes out in one transaction. The blit streams the caller's own wire-order buffer
+    /// (see [`blit`](Self::blit)), so no buffer is owned here. Requires the AXP192 LCD/TFT rails
+    /// already powered.
     ///
     /// `rotation` is applied once here — the app that uses a `FastPanel` is committing to a fixed
     /// orientation (there is no per-frame turn below mipidsi), which is exactly a pinned-portrait
@@ -444,6 +496,7 @@ impl FastPanel {
         dc: Gpio23<'static>,
         rst: Gpio18<'static>,
         rotation: ScreenRotation,
+        format: PixelFormat,
         max_transfer: usize,
     ) -> Result<Self, St7789Error> {
         debug_assert!(
@@ -468,7 +521,11 @@ impl FastPanel {
         // each frame. From here nothing else drives the bus, so that window persists and each
         // blit only re-issues RAMWR.
         panel.set_rotation(rotation)?;
-        let (spi, dc, rst): (BusDevice, Dc, Rst) = panel.into_parts();
+        let (mut spi, mut dc, rst): (BusDevice, Dc, Rst) = panel.into_parts();
+        // mipidsi armed the window and cleared it in 16-bit; the fast path streams `format`-packed
+        // bytes, so re-issue COLMOD now — after that init clear — and every subsequent RAMWR burst
+        // is read in this format. The window (CASET/RASET) is in pixel coordinates and is unaffected.
+        command(&mut spi, &mut dc, COLMOD, &[format.colmod()])?;
         Ok(Self {
             spi,
             dc,
@@ -479,13 +536,13 @@ impl FastPanel {
 
     /// Push a whole frame to the glass as one DMA burst.
     ///
-    /// `bytes` is the finished frame already in the panel's wire order (big-endian `Rgb565`,
-    /// row-major) — the wire-order canvas the gallery plotted into, streamed as-is. It must live in
-    /// **DMA-capable** memory (the gallery's canvas is a `dma_mem` buffer) and be no larger than the
-    /// `max_transfer` the panel was built with. A [`RAMWR`] resets the write pointer to the armed
-    /// window's origin, then the whole slice streams out in one transaction. There is no swap: the
-    /// bytes are already what the wire wants, which is the whole point of the wire-order canvas —
-    /// the per-frame `Rgb565`→wire copy is gone.
+    /// `bytes` is the finished frame already in the panel's wire order — packed in the
+    /// [`PixelFormat`] the panel was built with (12-bit RGB444 for the gallery), row-major, the
+    /// wire-order canvas the gallery plotted into, streamed as-is. It must live in **DMA-capable**
+    /// memory (the gallery's canvas is a `dma_mem` buffer) and be no larger than the `max_transfer`
+    /// the panel was built with. A [`RAMWR`] resets the write pointer to the armed window's origin,
+    /// then the whole slice streams out in one transaction. There is no conversion pass: the bytes
+    /// are already what the wire wants, which is the whole point of the wire-order canvas.
     pub fn blit(&mut self, bytes: &[u8]) -> Result<(), St7789Error> {
         debug_assert!(
             bytes.len() <= self.max_transfer,

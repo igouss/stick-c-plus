@@ -47,7 +47,8 @@ pub use button::GpioButton;
 pub use buzzer::LedcBuzzer;
 pub use imu::Mpu6886Imu;
 pub use panel::{
-    FastPanel, Fixed, Panel, PanelScreen, PanelTarget, RotationPolicy, St7789Error, Turning,
+    FastPanel, Fixed, Panel, PanelScreen, PanelTarget, PixelFormat, RotationPolicy, St7789Error,
+    Turning,
 };
 pub use pdm_mic::PdmMic;
 pub use power_button::PekButton;

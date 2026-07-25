@@ -67,7 +67,7 @@ use esp_idf_hal::i2c::I2cDriver;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::log::EspLogger;
 use log::info;
-use platform_adapters::{FastPanel, GpioButton, St7789Error};
+use platform_adapters::{FastPanel, GpioButton, PixelFormat, St7789Error};
 use platform_core::{Screen, ScreenRotation, Tick};
 use platform_runtime::{spawn_display, DisplayConfig, LitFlag, Monotonic};
 use std::time::Duration;
@@ -142,11 +142,16 @@ fn main() {
     // per-pixel gather — the frame ceiling on a full-screen sketch. The gallery plots straight into
     // this **one** buffer already in the panel's wire order (a `WireCanvas`), so there is no second
     // frame and no per-frame swap. The DMA engine can only read DMA-capable RAM, so the buffer
-    // (`w·h·2` bytes) comes from `dma_mem`, the one place that asks ESP-IDF for such memory; a null
-    // means it did not fit. A non-DMA-capable buffer would not run slow but double-fault before
-    // frame one. It is claimed here, first, so its contiguous run is taken before the frond's field
-    // (~100 KiB) carves up the pools.
-    const FRAME_BYTES: usize = (SCREEN_SIZE.width * SCREEN_SIZE.height * 2) as usize;
+    // comes from `dma_mem`, the one place that asks ESP-IDF for such memory; a null means it did not
+    // fit. A non-DMA-capable buffer would not run slow but double-fault before frame one. It is
+    // claimed here, first, so its contiguous run is taken before the frond's field (~100 KiB) carves
+    // up the pools.
+    //
+    // The panel is driven in 12-bit RGB444 (see `PixelFormat::Rgb444` below), so a pixel is 1.5 bytes
+    // and a full frame is `w·h·3/2` — 25% less than 16-bit across the bus and in heap. That smaller
+    // buffer is what lets a *second* full-screen buffer fit DMA-capable RAM for the double-buffer;
+    // on the monochrome plume the 12-bit colour loss is nil. `w·h` is even, so the halving is exact.
+    const FRAME_BYTES: usize = (SCREEN_SIZE.width * SCREEN_SIZE.height) as usize / 2 * 3;
     let frame_buffer: &'static mut [u8] =
         dma_mem::dma_buffer(FRAME_BYTES).expect("DMA-capable panel frame buffer");
     let canvas: WireCanvas<'static> = WireCanvas::new(frame_buffer);
@@ -163,6 +168,7 @@ fn main() {
         peripherals.pins.gpio23, // DC
         peripherals.pins.gpio18, // RST
         PORTRAIT,
+        PixelFormat::Rgb444,
         FRAME_BYTES,
     )
     .expect("ST7789 panel bring-up");
@@ -183,10 +189,11 @@ fn main() {
         canvas,
         panel,
     };
-    // Headroom with every big buffer live — the one wire canvas (~63 KiB), the frond's field
-    // (~100 KiB) and its table (8 KiB). Unifying the frame and DMA buffer into the one canvas left
-    // this comfortable where two full-screen buffers had made it razor-thin; the slack is what the
-    // `dual-core` feature's worker buffer now lands in.
+    // Headroom with every big buffer live — the one 12-bit wire canvas (~48 KiB), the frond's field
+    // (~100 KiB) and its table (8 KiB). Unifying the frame and DMA buffer into the one canvas, then
+    // packing it 12-bit, left this comfortable where two 16-bit full-screen buffers had made it
+    // razor-thin; the slack is what the `dual-core` worker buffer lands in, and what the double-buffer
+    // will draw its second canvas from.
     info!(
         "heap after buffers: {} B free (default), largest DMA block {} B",
         dma_mem::free_default(),
