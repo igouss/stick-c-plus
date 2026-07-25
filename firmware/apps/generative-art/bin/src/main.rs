@@ -40,7 +40,7 @@
 //!
 //! ## How the frond is evaluated
 //!
-//! The plume streams its ~5000-point cloud through a [`FrondCompute`](art_display::FrondCompute)
+//! The plume streams its ~6000-point cloud through a [`FrondCompute`](art_display::FrondCompute)
 //! port injected here — the cloud is never buffered, it flows point-by-point straight into the
 //! frame. By default the port is the one-core evaluator. With the `dual-core` feature it is a
 //! two-core one (`src/dual_core.rs`): a worker pinned to Core1 fills the far half of the cloud while
@@ -183,7 +183,7 @@ fn main() {
     .expect("ST7789 panel bring-up");
 
     // The renderer, built on a frond-compute port injected here at the composition root. The plume
-    // streams its ~5000-point cloud through that port straight into the wire canvas — never buffered
+    // streams its ~6000-point cloud through that port straight into the wire canvas — never buffered
     // — so the gallery domain stays single-threaded and framework-free. With the `dual-core` feature
     // the port is the two-core evaluator (a Core1 worker fills the far half while the render thread
     // streams the near half, roughly halving the frame's dominant cost, bit-identically); by default

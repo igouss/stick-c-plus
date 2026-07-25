@@ -30,7 +30,7 @@
 //! - [`REPAINT_MS`] — the gallery's repaint-cadence ceiling, so the composition root drives the
 //!   loop as fast as a frame's work allows rather than at a fixed rate.
 //!
-//! ## One transaction a frame, not five thousand
+//! ## One transaction a frame, not six thousand
 //!
 //! Every sketch is a full-screen picture that changes each frame. Drawing each cell or dot
 //! straight onto the panel would be thousands of tiny addressed SPI writes a frame — unwatchable.

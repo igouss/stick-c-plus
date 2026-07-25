@@ -22,10 +22,11 @@
 //! Two things change for the panel, both decided *here* because both are about the shape of
 //! the computation rather than the shape of the glass:
 //!
-//! - **Half the points.** The original plots ten thousand; on a canvas a fifth of the area
-//!   most of them land on a pixel another already lit. [`POINT_COUNT`] is five thousand — every
-//!   other index — which was checked against the ten-thousand render to preserve the frond. See
-//!   [`STEP`].
+//! - **Fewer points.** The original plots ten thousand; on a canvas a fifth of the area most of
+//!   them land on a pixel another already lit. [`POINT_COUNT`] is six thousand — three fifths of the
+//!   original, subsampled uniformly across the whole index range ([`index_of`]) — the densest frond
+//!   the ESP32's heap holds beside the two full-screen DMA buffers and the dual-core far buffer,
+//!   and faithful to the ten-thousand render the frond was checked against.
 //! - **Table trigonometry, `f32` throughout.** Every `sin`/`cos` is read from the
 //!   [`SinTable`](crate::SinTable); every value is single-precision, for the ESP32's FPU. The
 //!   one thing that is *not* a table lookup is `mag`, a genuine `sqrtf` — the honest magnitude
@@ -39,16 +40,32 @@ use platform_numerics::SinTable;
 /// The index the original loop counts down from — the widest `x` the field is evaluated at.
 pub const START: u32 = 10_000;
 
-/// The stride between evaluated indices: every other one.
+/// How many points make up one frame of the frond.
 ///
-/// This is the point-budget optimisation in one number. The original steps by one; stepping by
-/// two halves the transcendentals and the dots for a picture the eye cannot tell apart at
-/// 135×240, because on that canvas the discarded points overwhelmingly collided with a kept
-/// one. Widening it further (three, four) starts to thin the barbs — two is the edge.
-pub const STEP: u32 = 2;
+/// This is the point-budget optimisation in one number. The original *Dwitter* plots [`START`] (ten
+/// thousand); this renders six thousand of them, subsampled uniformly across the whole index range
+/// by [`index_of`]. On the 135×240 panel the dropped points overwhelmingly collided with a kept one,
+/// so the picture is the same creature for three fifths of the transcendentals and dots.
+///
+/// Six thousand is the memory edge, not a round number: it is the densest frond that fits the
+/// ESP32's heap beside the two full-screen DMA buffers and the dual-core far buffer. Measured on the
+/// metal, 6500 points leaves no 16 KiB contiguous run for the display-thread stack (the field and
+/// buffers fragment it away) and aborts at bring-up; 7000 cannot allocate the field's 112 KiB at
+/// all. So this is set at the fullest frond the board will hold, checked on the glass.
+pub const POINT_COUNT: u32 = 6_000;
 
-/// How many points make up one frame of the frond: [`START`] / [`STEP`].
-pub const POINT_COUNT: u32 = START / STEP;
+/// The field index of the `n`-th plotted point, for `n` in `1..=POINT_COUNT`.
+///
+/// The original evaluates every integer index in `1..=START`; this subsamples that range uniformly
+/// to [`POINT_COUNT`] samples, `n·START/POINT_COUNT`. It always maps the last point to `START` and
+/// the first near `1`, so the frond spans its full width at any budget — no barb is truncated, only
+/// thinned. When `POINT_COUNT` is exactly half of `START` it reduces to "every other index"; between
+/// the round divisors it is a rational stride, which is what lets the budget be set by the memory
+/// edge rather than by an integer factor of ten thousand.
+#[inline]
+fn index_of(n: u32) -> u32 {
+    n * START / POINT_COUNT
+}
 
 /// One point of the frond, in the original's 400×400 canvas coordinates.
 ///
@@ -105,13 +122,13 @@ pub fn point(i: u32, t: f32, table: &SinTable) -> FieldPoint {
     }
 }
 
-/// Every point of the frond at phase `t`: [`point`] over the strided index range.
+/// Every point of the frond at phase `t`: [`point`] over the subsampled index range.
 ///
-/// [`POINT_COUNT`] points at indices `STEP, 2·STEP, …, START`. Borrows `table` for the life of
-/// the iterator, which is exactly the render loop's shape: build the table once, then sweep it
+/// [`POINT_COUNT`] points at indices [`index_of`]`(1..=POINT_COUNT)`. Borrows `table` for the life
+/// of the iterator, which is exactly the render loop's shape: build the table once, then sweep it
 /// each frame.
 pub fn plume<'a>(t: f32, table: &'a SinTable) -> impl Iterator<Item = FieldPoint> + 'a {
-    (1..=POINT_COUNT).map(move |n: u32| point(n * STEP, t, table))
+    (1..=POINT_COUNT).map(move |n: u32| point(index_of(n), t, table))
 }
 
 /// The per-index invariants of one field point, computed once and reloaded every frame.
@@ -186,7 +203,7 @@ impl PlumeField {
         let mut points: Vec<Precomputed> = Vec::with_capacity(count);
         let mut wide: Vec<u32> = vec![0u32; count.div_ceil(u32::BITS as usize)];
         for j in 0..count {
-            let (point, is_wide): (Precomputed, bool) = precompute((j as u32 + 1) * STEP, table);
+            let (point, is_wide): (Precomputed, bool) = precompute(index_of(j as u32 + 1), table);
             points.push(point);
             if is_wide {
                 wide[j >> 5] |= 1 << (j & 31);

@@ -2,7 +2,7 @@
 //!
 //! The plume is two halves — *evaluate* the parametric field into a cloud of points, then *plot*
 //! that cloud onto the panel. The plot is cheap and pure ([`plume::plot`](crate::sketch::plume));
-//! the evaluation is the frame's dominant cost, ~5000 points of table trigonometry. This port is
+//! the evaluation is the frame's dominant cost, ~6000 points of table trigonometry. This port is
 //! the seam under the evaluation, so *how* the cloud is computed is a decision the composition root
 //! makes, not the renderer:
 //!

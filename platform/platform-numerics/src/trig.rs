@@ -1,7 +1,7 @@
 //! The sine table — the plume's answer to a chip with no fast transcendental.
 //!
-//! The field ([`crate::field`]) evaluates six sines and cosines per point, five thousand
-//! points a frame: thirty thousand transcendentals every repaint. `libm::sinf` is honest but
+//! The field ([`crate::field`]) evaluates six sines and cosines per point, six thousand
+//! points a frame: thirty-six thousand transcendentals every repaint. `libm::sinf` is honest but
 //! it is *software* — the ESP32's FPU multiplies and adds in hardware but has no sine — so
 //! computing them the obvious way spends the whole frame budget inside libm.
 //!

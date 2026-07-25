@@ -5,9 +5,9 @@ Feature: The plume field
   scenarios guard those domain rules at the boundary; the numeric fidelity of the port lives
   in the property tests next to the code.
 
-  Scenario: the frond is the halved point budget
+  Scenario: the frond is the subsampled point budget
     Given the plume clock at 0 milliseconds
-    Then the frond is made of 5000 points
+    Then the frond is made of 6000 points
 
   Scenario: a well-behaved point sits on the canvas
     Given the plume clock at 0 milliseconds
