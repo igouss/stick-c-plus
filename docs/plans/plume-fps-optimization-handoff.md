@@ -10,7 +10,7 @@ Board: M5StickC Plus, ESP32 Xtensa LX6, `xtensa-esp32-espidf`, 2×240 MHz, ~520 
 
 ---
 
-## STATUS: 50 fps ON THE GLASS, at a *fuller* frond — 6000 points (was 5000), same 50 fps. The 100 fps cliff was probed to its floor and declined on purpose (SESSION 7). 2× the 25 fps this branch started at, past the 30 fps goal.
+## STATUS: 50 fps ON THE GLASS, at a *much* fuller frond — **7500 points** (was 6000, was 5000), still 50 fps. SESSION 8 spent a memory campaign turning the paint headroom into +25% density: display stack sized from measurement, field storage chunked, and the frond-compute port reshaped to hand projected pixels. The 100 fps cliff stays closed (SESSION 7). 2× the 25 fps this branch started at, past the 30 fps goal.
 
 Progress ladder (all measured on glass unless noted):
 `96 ms (mipidsi gather) → 73 (FastPanel blit) → 68 (SinTable mask) → 43/20fps (plume hoist) →
@@ -18,11 +18,47 @@ Progress ladder (all measured on glass unless noted):
 27 ms / 33.3 fps (dual-core) → 23.6 ms / 33.3 fps (12-bit RGB444) →
 14 ms / 50.0 fps (double-buffer + field shrink, SESSION 6) →
 13.1 ms / 50 fps (fast reset, SESSION 7) → 16 ms / 50 fps @ 6000 points (density raised to the
-memory edge, SESSION 7)`.
+memory edge, SESSION 7) → 17.9 ms / 50 fps @ **7500 points** (memory campaign, SESSION 8)`.
 
 **The 100 fps question is closed.** The next tick line is 10 ms → 100 fps. SESSION 7 measured why
 that line can't be crossed at full fidelity, and *proved* it can be crossed by thinning the frond —
 then chose fidelity. See SESSION 7 for the cost model and the two null experiments.
+
+---
+
+## SESSION 8 — the memory campaign: 6000 → 7500 points (+25%), still 50 fps
+
+Directive: "memory is a priority — fight fragmentation, optimise stack sizes, show as many points as
+fast as we can." Arenas were evaluated and **declined** (they beat fragmentation but not total RAM,
+and cost an unsafe allocator crate). The density ceiling was two walls; each got its own lever, all
+measured on the glass.
+
+1. **Display stack sized from measurement** (`esp-metrics::minimum_free_stack`, a safe
+   `uxTaskGetStackHighWaterMark` wrapper — returns *bytes* on this port, `StackType_t = u8`). The
+   render thread peaks at ~3.6 KiB; the 16 KiB was inherited from the host monitor's network
+   preemption. Cut to **8 KiB**. Frees 8 KiB and, more to the point, halves the *contiguous* run the
+   stack must find — the fragmentation that aborted 6500 (largest hole had shrunk to 14336 B). Zero
+   fps cost.
+2. **Field storage chunked** (`Vec<Vec<Precomputed>>`, 1024-point/16 KiB chunks, shift+mask index).
+   A single field `Vec` — or even two halves — is one big contiguous run the pool-fragmented heap
+   can't place past ~6800 (a 56 KiB half aborts). 16 KiB chunks always fit, so the budget is bounded
+   by paint and total RAM, not by any one allocation. (Superseded an intermediate two-halves split.)
+3. **Frond-compute port reshaped to hand projected pixels.** `FrondCompute::evaluate` now takes the
+   canvas size and yields `ScreenPoint`s (i16 x/y + wide) already on the panel, not canvas
+   `FieldPoint`s. Two wins: the dual-core far buffer is `Option<ScreenPoint>` (6 B, the `wide` bool's
+   niche carries `None`) not `FieldPoint` (12 B) — **frees ~18 KiB** and doubles the largest DMA
+   block; and the ~3000 far-half projections move onto the idle Core1 — **paint 16.3 → 14.2 ms at
+   6000**. Picture-identical: same projection, only relocated; the `f32→i16` cast saturates so a
+   far-off finite point stays off-canvas and clipped. Every golden matched unchanged.
+
+**Landed: 7500 points, measured on the glass — 17.87 ms median paint, 19.06 ms worst case over 1312
+frames, 0 over the 20 ms/50 fps cliff, ~1 ms jitter headroom, 49.8 fps.** 7800 also boots and holds
+50 fps but leaves only 0.35 ms margin — too thin for a default against thermal drift, so 7500 sits
+one step back. The wall now is paint throughput (~8000 crosses 20 ms), not memory.
+
+What did **not** help (measured): the i16 SinTable (frees 4 KiB but adds ~1–2 ms/frame of int→float
+on the hot path — a net loss near the ceiling); memory arenas (beat fragmentation, ~6000→~6800, but
+never total RAM, and need an unsafe crate). Both were correctly declined.
 
 ### DONE this session (uncommitted, host-green; goldens await bless)
 
