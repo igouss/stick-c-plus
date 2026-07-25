@@ -10,14 +10,19 @@ Board: M5StickC Plus, ESP32 Xtensa LX6, `xtensa-esp32-espidf`, 2×240 MHz, ~520 
 
 ---
 
-## STATUS: 50 fps ON THE GLASS. Full arsenal landed — SPI 40 MHz + dual-core + 12-bit + double-buffer. 2× the 25 fps this branch started at, and past the 30 fps goal.
+## STATUS: 50 fps ON THE GLASS, at a *fuller* frond — 6000 points (was 5000), same 50 fps. The 100 fps cliff was probed to its floor and declined on purpose (SESSION 7). 2× the 25 fps this branch started at, past the 30 fps goal.
 
 Progress ladder (all measured on glass unless noted):
 `96 ms (mipidsi gather) → 73 (FastPanel blit) → 68 (SinTable mask) → 43/20fps (plume hoist) →
 35 ms / 25 fps (SPI 40 MHz + continuous phase) → 32 ms / 25 fps (memory keystone + root O3) →
 27 ms / 33.3 fps (dual-core) → 23.6 ms / 33.3 fps (12-bit RGB444) →
-14 ms / 50.0 fps (double-buffer + field shrink, SESSION 6)`. Ceiling essentially reached for this
-picture (next tick line is 10 ms → 100 fps, far below the ~14 ms compute floor).
+14 ms / 50.0 fps (double-buffer + field shrink, SESSION 6) →
+13.1 ms / 50 fps (fast reset, SESSION 7) → 16 ms / 50 fps @ 6000 points (density raised to the
+memory edge, SESSION 7)`.
+
+**The 100 fps question is closed.** The next tick line is 10 ms → 100 fps. SESSION 7 measured why
+that line can't be crossed at full fidelity, and *proved* it can be crossed by thinning the frond —
+then chose fidelity. See SESSION 7 for the cost model and the two null experiments.
 
 ### DONE this session (uncommitted, host-green; goldens await bless)
 
@@ -371,6 +376,83 @@ cheaper field — diminishing returns. 50 fps is the clean stopping point.
 safe because `DoubleBuffer` alone advances the ping-pong index and never lends the in-flight buffer,
 and the buffers are `'static` — no dangling, no tearing. `unsafe impl Send` is justified: moved to
 the display thread, used only there (same guarantee esp-idf-hal makes for `SpiDeviceDriver`).
+
+---
+
+## SESSION 7 (2026-07-25): the 100 fps cliff — probed to its floor, proved reachable only by thinning the frond, and declined. Density raised to 6000 instead.
+
+User directive: keep optimizing past 50 fps "for the love of the game." The one remaining tick line
+is 10 ms → 100 fps. The steady paint was **14.57 ms**; crossing 10 ms needs a ~3.1 ms cut. This
+session found where those milliseconds are and why they won't move at full fidelity.
+
+**The measured breakdown (temporary `Instant` instrumentation in `evaluate` / `show`), steady state:**
+`paint_into 14.54 ms` + `present 0.23 ms`. Inside `evaluate`:
+
+| phase | cost | note |
+| --- | --- | --- |
+| reset (flood 48.6 KB) | ~1.47 ms | byte-wise `chunks_exact_mut(3)` |
+| near compute + plot (2500 pts) | 9.55 ms | render thread: ~6 ms compute + ~3.5 ms plot |
+| barrier-wait | **0.003 ms** | Core1's far-compute is *fully hidden* — Core1 idles ~7 ms/frame |
+| far-plot (2500 pts) | 3.51 ms | plot only |
+
+Per-point: plot ~1.4 µs (~225 cyc for ~50 insns → ~4.5 CPI), compute ~2.4 µs. Both stall-heavy.
+Total essential work ≈ compute 12 + plot 7 + reset 1.5 ≈ **20.5 ms**. Two cores → ~10.25 ms floor —
+**and the plot (7 ms) can't be split** (points scatter across the whole frame by index, and the
+RGB444 middle byte is shared, so two cores racing it corrupt pixels). So ~10.25 ms is the 2-core
+floor: still 50 fps. Sub-10 ms needs *less work*, not more parallelism.
+
+**Win that landed — fast reset (committed).** The ground is black, so the flood is a plain `fill(0)`
+(memset the compiler vectorises), not a per-3-byte stamp. General: any `r==g==b` ground (black, white)
+collapses to one repeated byte. **Reset ~1.5 → ~0.4 ms; paint 14.57 → 13.1 ms**, pixel-identical
+(wire-canvas proptest). Still 50 fps (13.1 ms is in the 20 ms tick bucket) — headroom, not a cliff
+crossing. `apps/generative-art/wire-canvas/src/lib.rs`.
+
+**Two null experiments (both reverted — do not re-attempt without new evidence):**
+- **IRAM the hot loop.** `#[cfg_attr(target_arch="xtensa", link_section=".iram1.text")]` on `evaluate`
+  moved ~7 KB into IRAM (free IRAM 71 → 64 KB, so it *did* relocate) — near-compute **9490 vs 9550 µs,
+  noise**. The loop is **not** instruction-fetch bound; it's FPU/dependency-chain bound. This kills the
+  "2.6× code-layout swing" theory (`flash-icache-cliff-code-layout` memory) *for this loop* — that swing
+  belonged to an earlier configuration and does not reproduce here. Release is already `opt-level=3`.
+- **Buffer the near half to pipeline it.** Streaming plots via an opaque `dyn FnMut` between every
+  compute — a suspected optimizer barrier to cross-point ILP. Computing the near half into a Vec first
+  (no call between points) gave near-compute **6195 vs 5940 µs** and paint **rose** to 14.4 ms (the
+  buffer round-trip cost ~0.9 ms for zero ILP gain). At `opt-level=3` LLVM already extracts the
+  available ILP; the FPU latency is genuinely exposed. Structural pipelining won't help.
+
+**What *does* cross 10 ms — fewer points (proved on glass).** Point count scales both compute and
+plot. STEP=3 (5000→3333 pts) → **paint 9.0 ms → 100.0 fps, steady**, +heap. So 100 fps is real —
+but it is the *only* lever with enough leverage, and it visibly **thins the frond's barbs**. And the
+100 fps is itself invisible (panel refresh ~30 fps). Trading a *seen* downgrade for an *unseen*
+number. User declined the trophy.
+
+**The memory ceiling (measured, arena question answered).** Instead, density was raised as far as RAM
+allows. Field = 16 B/pt, far buffer = 6 B/pt ⇒ ~22 B/pt; fixed costs (two 48.6 KB DMA buffers, 8 KB
+table, 16 KB display stack, 4 KB worker stack) leave ~151 KB for points ⇒ hard ceiling **~6900 pts**.
+
+| points | field | result |
+| --- | --- | --- |
+| 10000 (STEP=1) | 160 KB | OOM — field alloc fails (`allocation of 160000 bytes failed`) |
+| 7000 | 112 KB | OOM — no contiguous field run |
+| 6500 | 104 KB | field fits, then **16 KB display stack** can't (largest run 14 KB) → abort |
+| **6000** | 96 KB | boots, 50 fps (paint 16 ms), 48 KB free, 16 KB stack fits |
+
+An **arena** (packing the big buffers to defragment) would push ~6000 → ~6800 (+13%, beats
+fragmentation) but **never near 10000** — that needs ~220 KB for field+far vs ~151 KB available; the
+wall is total RAM, not fragmentation, and only sacrificing the double-buffer or dual-core would free
+it (and tank the fps). Judged not worth an allocator for +800 points on a throwaway.
+
+**Committed: 6000 points (was 5000), 50 fps.** Denser, more faithful frond (3/5 of the original
+10000, vs 1/2), same fps bucket (16 ms < 20 ms tick). `STEP` (integer stride) is replaced by
+`field::index_of` — a rational stride `n·START/POINT_COUNT` that hits any budget across the full
+index range (reduces to "every other index" at 5000). Goldens re-blessed (`art-plume-01..04`), the
+`5000 points` cucumber scenario updated to `6000`, docs swept for `~5000`/`STEP`. Glass: 49.9 fps
+steady, paint 16 ms, no panic.
+
+**If anyone revisits 100 fps at full density:** the only untried structural idea is getting the
+*plot* off the render thread — but it can't be split by point index (scatter + shared RGB444 byte).
+A spatial (top/bottom-half) split would need per-frame binning of points into regions; unproven it
+pays. The compute is FPU-bound and already dual-cored + hoisted. Realistically, 50 fps at 6000 is
+the honest ceiling for this picture on this board.
 
 ---
 
