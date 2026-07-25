@@ -1,21 +1,33 @@
-# Handoff — the `generative-art` gallery: two sketches left (orbits, willow)
+# Handoff — the `generative-art` gallery: one sketch left (willow)
 
-> **STATUS 2026-07-25 (SESSION 9).** The skeleton is flashed and verified, and **two of the four
-> sketches are built, on glass, and merged to `main`**: **squares** (Dwitter A — breathing
-> nested-square frames, 100 fps) and **fan** (Dwitter B — folding hue-by-distance triangles, 50 fps
-> after an integer edge-stepping fill). Each is a vertical slice: a `*-core` domain crate
-> (`squares-core`, `fan-core`) with proptest + cucumber, a rasteriser under
-> `art-display/src/sketch/`, and a real arm in the `Gallery` match; a shared `colour` module turns a
-> domain hue into `Rgb565`. The selector gained a `starting_at(sketch)` seam and the firmware a
-> `START_SKETCH` constant, so a flash can open straight onto the piece under development (it is back
-> at `Sketch::Plume` for release). **Remaining: orbits and willow.** The fill lesson paid for on the
-> metal — keep floating point and division out of the per-pixel path on this soft-divide FPU;
-> step linear edge functions by integer addition (see the `fan:` fill commit).
+> **STATUS 2026-07-25 (SESSION 10).** The skeleton is flashed and verified, and **three of the four
+> sketches are built and on glass**: **squares** (Dwitter A — breathing nested-square frames,
+> 100 fps) and **fan** (Dwitter B — folding hue-by-distance triangles, 50 fps) are merged to `main`;
+> **orbits** (Dwitter C — a grainy grey comet of thirty L1 diamond blooms, **rock-solid 50 fps**) is
+> built, glass-confirmed, and committed (branch `generative-art-sketches`). Each is a vertical slice:
+> a `*-core` domain crate (`squares-core`, `fan-core`, `orbits-core`) with proptest + cucumber, a
+> rasteriser under `art-display/src/sketch/`, and a real arm in the `Gallery` match; a shared
+> `colour` module turns a domain hue/brightness into `Rgb565`. The selector's `starting_at(sketch)`
+> seam and the firmware `START_SKETCH` constant open a flash straight onto the piece under
+> development (back at `Sketch::Plume` for release). **Remaining: willow — an original frond, not a
+> port.**
+>
+> **Lessons paid for on the metal.** The fan: keep floating point and division out of the per-pixel
+> path on this soft-divide FPU; step linear edge functions by integer addition. The orbits, the
+> expensive one, taught three: `acos(cos θ)` **is a triangle wave** (no transcendentals); the thirty
+> orbit centres are **frame-invariant** — hoist them out of the per-cell loop the source rebuilds
+> them in; and the L1 distance **separates** — its x-part is constant down a column, and an orbit
+> whose diamond cannot reach a column is dropped exactly. Those three folds took orbits from 28 ms
+> (33 fps) to **10.7 ms (rock-solid 50 fps)** with no dual-core and no heap — a second persistent
+> Core1 worker (the plume's trick) will **not** fit the ~8.8 KB free heap the plume already leaves,
+> so algebra beat threads here. The crop matters too: fill-height projection hides ~40% of the grid
+> off-panel, and the display walks only the visible column band (`orbits_core::for_each_cell` takes
+> a `cols` range) so the bloom is never paid for a cell it won't show.
 
 You are picking up mid-stream on the **stick-c-plus** board platform (M5StickC Plus, Rust,
 std/ESP-IDF, hexagonal/ECB). The gallery **skeleton is built and on-glass-ready**; the plume,
-squares and fan are real, and your job is to fill in the **two remaining sketches** — **orbits**
-then **willow** — one commit each, then close out the docs.
+squares, fan and orbits are real, and your job is to fill in the **one remaining sketch** —
+**willow** — one commit, then close out the docs.
 
 Read these first, in order:
 - `CLAUDE.md` (laconic voice, hexagonal/ECB, no unsafe, Gherkin, distrust convenient greens).

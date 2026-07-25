@@ -1,0 +1,38 @@
+[package]
+name = "orbits-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Framework-free orbits domain for the M5StickC Plus: a grid of grey cells lit by the max over thirty sweeping L1 (diamond) blooms, grained by a static noise texture, as a pure function of a virtual frame. A faithful port of a Dwitter — but its acos(cos(.)) orbit centres are recognised as a triangle wave (no transcendentals) and hoisted out of the per-cell loop the source recomputes them in. Every value f32 for the ESP32's single-precision FPU. no_std, host-tested, no unsafe."
+
+[lib]
+name = "orbits_core"
+path = "src/lib.rs"
+
+# The pure heart of the orbits sketch: the thirty diamond blooms as a function of a virtual frame,
+# in the source's 500x500 canvas space, and the clock that animates it. No pixels, no framework, no
+# I/O — the grey ramp to Rgb565 and the projection onto the panel are the display crate's business.
+# context = "generative-art" — one piece in the gallery, beside art-core, plume-core, squares-core
+# and fan-core. Unlike them it needs no sine table: acos(cos(.)) is a triangle wave, so the centres
+# cost only a floor and an abs, which libm supplies.
+[package.metadata.hex-arch]
+role = "domain"
+context = "generative-art"
+
+[dependencies]
+# `floorf`/`fabsf` in no_std: the triangle wave's wrap onto [0, 2pi) and the diamond's L1 distance.
+# libm is pure computation — no allocator, no I/O — so it does not make this crate impure. There is
+# no sine here at all: the orbit centres are a triangle wave, not a sinusoid.
+libm = "0.2"
+
+# Host-only. These link std and never reach the Xtensa build (a dependent excludes them).
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run under the default
+# harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false

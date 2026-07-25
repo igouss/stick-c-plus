@@ -59,11 +59,19 @@ pub fn scenes() -> Vec<Screen> {
             elapsed: n * FRAMES_APART * FRAME_MS,
         })
         .collect();
-    for sketch in [Sketch::Squares, Sketch::Fan, Sketch::Orbits, Sketch::Willow] {
+    // Most stills sit at the start of their motion; the orbits' origin frame is a sparse corner, so
+    // it is pinned a little in, where the comet is on-panel and the still tells its whole story.
+    let stills: [(Sketch, Tick); 4] = [
+        (Sketch::Squares, 0),
+        (Sketch::Fan, 0),
+        (Sketch::Orbits, 700),
+        (Sketch::Willow, 0),
+    ];
+    for (sketch, elapsed) in stills {
         screens.push(Screen {
             file: format!("art-{}.png", slug(sketch)),
             sketch,
-            elapsed: 0,
+            elapsed,
         });
     }
     screens

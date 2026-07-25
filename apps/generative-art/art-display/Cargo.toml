@@ -27,6 +27,9 @@ plume-core = { path = "../plume-core" }
 squares-core = { path = "../squares-core" }
 # The fan domain: the folding triangles the fan sketch projects and colours, and its phase clock.
 fan-core = { path = "../fan-core" }
+# The orbits domain: the grid of grey cells the orbits sketch tiles, its diamond blooms, and its
+# virtual-frame clock. It reads no sine table — its acos(cos(.)) centres are a triangle wave.
+orbits-core = { path = "../orbits-core" }
 # The board-generic kernel: the Animated contract the view implements, Tick, and the
 # ScreenRotation that decides the canvas shape.
 platform-core = { path = "../../../platform/platform-core" }

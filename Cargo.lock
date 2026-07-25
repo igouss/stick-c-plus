@@ -92,6 +92,7 @@ dependencies = [
  "fan-core",
  "golden-screens",
  "libm",
+ "orbits-core",
  "platform-core",
  "platform-display",
  "platform-numerics",
@@ -1411,6 +1412,16 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
+
+[[package]]
+name = "orbits-core"
+version = "0.1.0"
+dependencies = [
+ "cucumber",
+ "libm",
+ "proptest",
+ "tokio",
+]
 
 [[package]]
 name = "orientation-core"

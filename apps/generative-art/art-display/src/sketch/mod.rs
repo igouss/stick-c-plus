@@ -12,10 +12,13 @@
 //!   into the panel.
 //! - [`fan`] — the folding, hue-by-distance triangles, projecting `fan_core`'s cells onto the panel
 //!   and filling each in its colour.
+//! - [`orbits`] — the comet of diamond blooms, tiling `orbits_core`'s grid of cells onto the panel
+//!   and filling each lit one in its grey.
 //! - [`placeholder`] — the honest stand-in every not-yet-built piece draws: its title and
 //!   "coming soon", so the gallery cycles distinct, truthful screens before all five exist.
 
 pub mod fan;
+pub mod orbits;
 pub mod placeholder;
 pub mod plume;
 pub mod squares;

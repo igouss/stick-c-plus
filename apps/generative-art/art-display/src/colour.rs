@@ -38,6 +38,16 @@ pub fn hsv_to_rgb565(hue: f32) -> Rgb565 {
     rgb565(r, g, b)
 }
 
+/// A neutral grey as an [`Rgb565`], for a brightness `level` in `[0, 1]`.
+///
+/// Equal parts of all three channels, so `0.0` is black, `1.0` is white, and between them a true
+/// grey — the ramp the orbits sketch's `fill(c · noise)` wants, where a cell's colour is a single
+/// brightness and not a hue. A `level` outside `[0, 1]` is clamped by [`rgb565`], so a caller's
+/// over-range brightness saturates at black or white rather than wrapping.
+pub fn grey_to_rgb565(level: f32) -> Rgb565 {
+    rgb565(level, level, level)
+}
+
 /// Pack three `[0, 1]` channel intensities into an [`Rgb565`], rounding each to its field width
 /// (five bits of red and blue, six of green).
 fn rgb565(r: f32, g: f32, b: f32) -> Rgb565 {
@@ -75,5 +85,27 @@ mod tests {
     #[test]
     fn the_wheel_wraps_at_one() {
         assert_eq!(hsv_to_rgb565(0.2), hsv_to_rgb565(1.2));
+    }
+
+    /// Zero: no brightness is black — the orbits ground, where no diamond reaches.
+    #[test]
+    fn grey_zero_is_black() {
+        assert_eq!(grey_to_rgb565(0.0), Rgb565::BLACK);
+    }
+
+    /// One: full brightness is white — a cell saturated at the source's fill ceiling.
+    #[test]
+    fn grey_one_is_white() {
+        assert_eq!(grey_to_rgb565(1.0), Rgb565::WHITE);
+    }
+
+    /// A grey is truly grey — its three channels sit at the same fraction of their fields, so it has
+    /// no colour cast, only a brightness. Half brightness reaches roughly half of each field.
+    #[test]
+    fn a_grey_has_no_colour_cast() {
+        let half: Rgb565 = grey_to_rgb565(0.5);
+        assert_eq!(half.r(), 16, "red {}", half.r());
+        assert_eq!(half.g(), 32, "green {}", half.g());
+        assert_eq!(half.b(), 16, "blue {}", half.b());
     }
 }
