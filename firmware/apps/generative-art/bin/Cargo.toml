@@ -11,6 +11,14 @@ default-run = "generative-art"
 name = "generative-art"
 path = "src/main.rs"
 
+[features]
+# Off by default. Evaluates the plume's field on both cores via a Core1 worker (see
+# `src/dual_core.rs`, which is the only user of the `plume-core` dependency). Proven bit-identical
+# to the one-core path on the host, but its worker's far-half buffer plus stack currently exceed the
+# heap that the two full-screen frame buffers already fill — it lands once those buffers are unified
+# into one. See docs/plans/plume-fps-optimization-handoff.md.
+dual-core = ["dep:plume-core"]
+
 # The imperative shell's outermost layer: it composes adapters and owns effects, so it is the
 # one crate the effect-audit `domain` gate must never tag.
 [package.metadata.hex-arch]
@@ -45,6 +53,10 @@ platform-core = { path = "../../../../platform/platform-core" }
 platform-runtime = { path = "../../../../platform/platform-runtime" }
 art-display = { path = "../../../../apps/generative-art/art-display" }
 art-shell = { path = "../../../../apps/generative-art/art-shell" }
+# The plume's field, needed only to build the two-core frond evaluator (the `dual-core` feature):
+# the composition root wires a Core1 worker over `PlumeField::compute_range` and injects it behind
+# art-display's FrondCompute. Optional so the default one-core build does not carry it.
+plume-core = { path = "../../../../apps/generative-art/plume-core", optional = true }
 
 [build-dependencies]
 # Emits the ESP-IDF sysenv link/search flags for the final link (via ldproxy).

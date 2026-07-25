@@ -933,6 +933,7 @@ dependencies = [
  "platform-adapters",
  "platform-core",
  "platform-runtime",
+ "plume-core",
 ]
 
 [[package]]
