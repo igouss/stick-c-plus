@@ -129,13 +129,17 @@ note:** two famous tricks are *traps on this chip* and are listed as such (Tier 
 
 ### Tier 0 — free & structural, do first (they unblock or amplify everything below)
 
-- **T0.1 Per-crate `opt-level = 3` for `plume-core`.** `[SAFE][BIT-IDENTICAL]` · attacks compute (~18 ms).
-  `firmware/Cargo.toml:48` is `opt-level = "s"` — the whole release build, *including the hot field
-  loop*, is optimized for **size**. Add `[profile.release.package.plume-core] opt-level = 3` (and
-  consider `art-display`) so the loop is unrolled/inlined for speed while the rest of the firmware
-  stays small. Rust does not auto-contract to FMA and applies no fast-math, so bits should not move —
-  **confirm against the existing `the_fast_field_is_bit_identical_to_plume` proptest** (if it stays
-  green, it's free). Expected 10–25 % off the field loop. Cost: a few KB of flash. Measure the split.
+- **T0.1 Per-crate `opt-level = 3` for `plume-core`/`art-display`.** ~~`[SAFE][BIT-IDENTICAL]` ·
+  attacks compute~~ — **TRIED 2026-07-24, NULL RESULT, reverted. Do not re-add.** Adding
+  `[profile.release.package.{plume-core,art-display}] opt-level = 3` to `firmware/Cargo.toml`,
+  rebuilt and flashed, measured **25.0 fps / paint 35.0 ms — bit-for-bit identical to the `"s"`
+  baseline.** The cause is `lto = "fat"`: the whole dependency graph's IR is merged and re-optimized
+  as a single module at the **root** profile's `opt-level` (`"s"`), so a per-package override on the
+  initial codegen is washed out by the final LTO pass. The *only* way to force `opt-level=3` onto the
+  hot path is to raise the **root** `[profile.release] opt-level`, which fights the deliberate
+  "`s` everywhere — `-O0` overflows IRAM" convention (line 46) and bloats the whole firmware — and the
+  null targeted result is evidence the tight hoisted field loop isn't codegen-bound anyway (it's
+  table-lookup + FPU bound). **Skip it; the real compute win is dual-core (T1.2), not the optimizer.**
 - **T0.2 THE KEYSTONE — unify Frame + DMA into one wire-order buffer** (Task #17, full design in
   SESSION 2). `[SAFE][BIT-IDENTICAL pixels][MEMORY]` · attacks swap (2.4 ms) + memory wall. Frees
   **~63 KB** (dual-core's 30 KB + stacks then fit with room) and deletes the 2.4 ms byte-swap. This
@@ -359,9 +363,10 @@ the estimator has been wrong before; instrument the split (paint/swap/spi) when 
 - [ ] **NEXT / keystone: unify the two full-screen buffers** (Frame + DMA → one wire-order DMA
       buffer). Frees ~63 K + removes the 2.4 ms swap; unblocks both levers. Design in SESSION 2 above.
 - [ ] Then flip on `dual-core`, flash, measure (expect ~28–30 fps); then Lever B double-buffer (~40).
-- [ ] **The full arsenal is in SESSION 3 above, ranked payoff÷risk.** Do-first free wins: T0.1
-      per-crate `opt-level=3` for `plume-core`, then the T0.2 keystone. Biggest single idea: T1.1
-      12-bit colour (frees SPI *and* heap, invisible on the white plume). Projected ceiling ~45–50 fps.
+- [ ] **The full arsenal is in SESSION 3 above, ranked payoff÷risk.** T0.1 (per-crate opt-level=3)
+      was TRIED and is a NULL RESULT under fat-LTO — do not re-add. Start at the T0.2 keystone.
+      Biggest single idea: T1.1 12-bit colour (frees SPI *and* heap, invisible on the white plume).
+      Projected ceiling ~45–50 fps.
 - [ ] User: bless goldens + confirm 40 MHz glass is clean/smooth. (Streaming refactor did NOT change
       pixels — `SerialFrond` is bit-identical to `field.frame`; the 3 red goldens are still only the
       continuous-phase shift from Session 1.)
