@@ -26,7 +26,29 @@
 
 use core::slice;
 
-use esp_idf_sys::{heap_caps_malloc, MALLOC_CAP_8BIT, MALLOC_CAP_DMA};
+use esp_idf_sys::{
+    heap_caps_get_free_size, heap_caps_get_largest_free_block, heap_caps_malloc, MALLOC_CAP_8BIT,
+    MALLOC_CAP_DEFAULT, MALLOC_CAP_DMA,
+};
+
+/// Free bytes in the general-purpose internal heap — the pool `Vec`/`Box` draw from.
+///
+/// A read-only capability query, safe to expose: it forms no reference and frees nothing, so the
+/// one place that speaks to the heap allocator can also report how much of it is left. Handy when a
+/// bring-up is up against the ESP32's ~300 KiB data ceiling and a caller wants to log the headroom
+/// before committing a large buffer.
+pub fn free_default() -> usize {
+    // SAFETY: `heap_caps_get_free_size` reads a heap counter for the given capability mask and
+    // returns a byte count; it dereferences nothing of ours and cannot fail.
+    unsafe { heap_caps_get_free_size(MALLOC_CAP_DEFAULT) }
+}
+
+/// The largest single contiguous DMA-capable block free right now — the ceiling on one
+/// [`dma_buffer`] call, which fails once no run this large remains even if the total free is larger.
+pub fn largest_free_dma() -> usize {
+    // SAFETY: as [`free_default`] — a read-only capability query, no references formed.
+    unsafe { heap_caps_get_largest_free_block(MALLOC_CAP_DMA) }
+}
 
 /// Allocate `len` bytes of zeroed, DMA-capable internal RAM, leaked to `'static`.
 ///
