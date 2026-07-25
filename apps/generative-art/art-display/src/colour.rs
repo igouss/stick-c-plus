@@ -1,0 +1,79 @@
+//! Colour helpers: turn a sketch's abstract colour (a hue, a brightness) into an [`Rgb565`] the
+//! [`Canvas`](crate::Canvas) port speaks.
+//!
+//! The domains deal in colour as a *quantity* — the fan's hue is a distance on `[0, 1)` — never in
+//! a panel's pixel encoding. This module is the seam that turns those quantities into [`Rgb565`],
+//! so the panel's colour depth is a fact of the adapter and never of the domain. The panel is
+//! driven in 12-bit RGB444 on the board, but the [`Canvas`](crate::Canvas) port is [`Rgb565`] and
+//! the wire adapter narrows it, so full `Rgb565` precision is produced here.
+
+use embedded_graphics::pixelcolor::Rgb565;
+
+/// The hue wheel as a full-saturation, full-value [`Rgb565`], for a hue in `[0, 1)`.
+///
+/// The `HSB(1)` colour the fan is authored in with `S = V = 1`: the hue alone names the colour. The
+/// wheel is the six-segment ramp — red, yellow, green, cyan, blue, magenta and back — so a hue
+/// sweeping `0 → 1` sweeps the spectrum once. A hue at or past `1.0` (which the fan's wrap should
+/// never produce, but a caller might) folds back onto the wheel rather than running off its end.
+pub fn hsv_to_rgb565(hue: f32) -> Rgb565 {
+    let wrapped: f32 = hue - libm::floorf(hue); // onto [0, 1)
+    let sector_pos: f32 = wrapped * 6.0;
+    let sector: i32 = libm::floorf(sector_pos) as i32;
+    let frac: f32 = sector_pos - sector as f32;
+
+    // Full S and V collapse the general HSB→RGB to a ramp of `frac` and `1 - frac` between the two
+    // channels the current sector rides; the third is pinned at 0 or 1.
+    let rise: f32 = frac;
+    let fall: f32 = 1.0 - frac;
+    let (r, g, b): (f32, f32, f32) = match sector {
+        0 => (1.0, rise, 0.0),
+        1 => (fall, 1.0, 0.0),
+        2 => (0.0, 1.0, rise),
+        3 => (0.0, fall, 1.0),
+        4 => (rise, 0.0, 1.0),
+        // Sector 5 and the `wrapped == 0` degenerate that `floorf` can round to 6 both land here;
+        // at the wrap boundary `frac` is ~0, so this is red either way, matching sector 0.
+        _ => (1.0, 0.0, fall),
+    };
+    rgb565(r, g, b)
+}
+
+/// Pack three `[0, 1]` channel intensities into an [`Rgb565`], rounding each to its field width
+/// (five bits of red and blue, six of green).
+fn rgb565(r: f32, g: f32, b: f32) -> Rgb565 {
+    let quantise =
+        |channel: f32, max: f32| -> u8 { libm::roundf(channel.clamp(0.0, 1.0) * max) as u8 };
+    Rgb565::new(quantise(r, 31.0), quantise(g, 63.0), quantise(b, 31.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use embedded_graphics::prelude::RgbColor;
+
+    /// Zero: hue zero is pure red — the fan's centre, and the wheel's origin.
+    #[test]
+    fn hue_zero_is_red() {
+        assert_eq!(hsv_to_rgb565(0.0), Rgb565::RED);
+    }
+
+    /// One: a third of the way round the wheel is pure green — the primary at sector two's start.
+    #[test]
+    fn hue_a_third_is_green() {
+        assert_eq!(hsv_to_rgb565(1.0 / 3.0), Rgb565::GREEN);
+    }
+
+    /// Two-thirds round is pure blue — the last primary, so the three equal thirds of the wheel are
+    /// the three primaries.
+    #[test]
+    fn hue_two_thirds_is_blue() {
+        assert_eq!(hsv_to_rgb565(2.0 / 3.0), Rgb565::BLUE);
+    }
+
+    /// The wheel wraps: a hue one full turn on is the same colour as the hue itself, so a caller's
+    /// out-of-range hue never runs off the end of the ramp.
+    #[test]
+    fn the_wheel_wraps_at_one() {
+        assert_eq!(hsv_to_rgb565(0.2), hsv_to_rgb565(1.2));
+    }
+}

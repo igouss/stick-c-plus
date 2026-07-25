@@ -25,6 +25,8 @@ art-core = { path = "../art-core" }
 plume-core = { path = "../plume-core" }
 # The squares domain: the breathing grid the squares sketch rasterises, and its phase clock.
 squares-core = { path = "../squares-core" }
+# The fan domain: the folding triangles the fan sketch projects and colours, and its phase clock.
+fan-core = { path = "../fan-core" }
 # The board-generic kernel: the Animated contract the view implements, Tick, and the
 # ScreenRotation that decides the canvas shape.
 platform-core = { path = "../../../platform/platform-core" }

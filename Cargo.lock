@@ -89,6 +89,7 @@ dependencies = [
  "art-core",
  "embedded-graphics",
  "embedded-graphics-simulator",
+ "fan-core",
  "golden-screens",
  "libm",
  "platform-core",
@@ -798,6 +799,17 @@ dependencies = [
  "log",
  "prost",
  "serde_json",
+]
+
+[[package]]
+name = "fan-core"
+version = "0.1.0"
+dependencies = [
+ "cucumber",
+ "libm",
+ "platform-numerics",
+ "proptest",
+ "tokio",
 ]
 
 [[package]]

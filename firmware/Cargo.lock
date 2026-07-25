@@ -55,6 +55,7 @@ version = "0.1.0"
 dependencies = [
  "art-core",
  "embedded-graphics",
+ "fan-core",
  "libm",
  "platform-core",
  "platform-display",
@@ -817,6 +818,14 @@ version = "0.1.0"
 dependencies = [
  "esphome-api",
  "log",
+]
+
+[[package]]
+name = "fan-core"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "platform-numerics",
 ]
 
 [[package]]

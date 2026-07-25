@@ -55,6 +55,7 @@
 extern crate alloc;
 
 mod canvas;
+mod colour;
 mod frame;
 mod frond;
 mod gallery;

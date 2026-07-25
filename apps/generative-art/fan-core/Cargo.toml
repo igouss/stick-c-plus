@@ -1,0 +1,41 @@
+[package]
+name = "fan-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Framework-free fan domain for the M5StickC Plus: radial columns of folding triangles that fold open and closed in a wave from the centre, hued by distance, as a pure function of an animation phase. A faithful port of a Dwitter — one table sine folds each triangle, a startup-free sqrt sets its hue — with every value f32 for the ESP32's single-precision FPU. no_std, host-tested, no unsafe."
+
+[lib]
+name = "fan_core"
+path = "src/lib.rs"
+
+# The pure heart of the fan sketch: the folding triangles as a function of a phase, in the
+# source's 500x500 canvas space, and the phase clock that animates it. No pixels, no framework, no
+# I/O — the colour and the projection onto the panel are the display crate's business. context =
+# "generative-art" — one piece in the gallery, beside art-core and plume-core. It depends on the
+# shared sine table and libm's sqrt for the honest radial distance the hue and the fold turn on.
+[package.metadata.hex-arch]
+role = "domain"
+context = "generative-art"
+
+[dependencies]
+# The startup-built sine table, shared across every sketch in the gallery. context = "shared",
+# so this dependency is not a context violation.
+platform-numerics = { path = "../../../platform/platform-numerics" }
+
+# `sqrtf`/`floorf` in no_std: the fan's distance from the centre (which sets both a triangle's hue
+# and its fold's phase) and the hue's wrap onto [0, 1). libm is pure computation — no allocator, no
+# I/O — so it does not make this crate impure. The sines do not go through it: they are table reads.
+libm = "0.2"
+
+# Host-only. These link std and never reach the Xtensa build (a dependent excludes them).
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run under the default
+# harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false

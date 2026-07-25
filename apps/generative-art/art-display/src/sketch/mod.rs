@@ -10,9 +10,12 @@
 //!   `plume_core`'s 400×400 point field onto the panel.
 //! - [`squares`] — the breathing grid of nested-square frames, rasterising `squares_core`'s cells
 //!   into the panel.
+//! - [`fan`] — the folding, hue-by-distance triangles, projecting `fan_core`'s cells onto the panel
+//!   and filling each in its colour.
 //! - [`placeholder`] — the honest stand-in every not-yet-built piece draws: its title and
 //!   "coming soon", so the gallery cycles distinct, truthful screens before all five exist.
 
+pub mod fan;
 pub mod placeholder;
 pub mod plume;
 pub mod squares;

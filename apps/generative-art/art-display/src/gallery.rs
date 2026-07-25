@@ -10,9 +10,9 @@
 //! renderer, two adapters, one picture.
 //!
 //! The dispatch is a single exhaustive match on the selected [`Sketch`]: each arm draws one piece.
-//! Today the plume and the squares are rasterised for real; the other three draw their honest
-//! [`placeholder`](crate::sketch::placeholder). Because the match is exhaustive, adding a sketch to
-//! the running order forces a new arm here — a new piece cannot be silently left undrawn.
+//! Today the plume, the squares and the fan are rasterised for real; the other two draw their
+//! honest [`placeholder`](crate::sketch::placeholder). Because the match is exhaustive, adding a
+//! sketch to the running order forces a new arm here — a new piece cannot be silently left undrawn.
 
 use alloc::boxed::Box;
 
@@ -26,7 +26,7 @@ use plume_core::phase;
 use crate::canvas::Canvas;
 use crate::frond::{FrondCompute, SerialFrond};
 use crate::sketch::plume::ScreenPoint;
-use crate::sketch::{placeholder, plume, squares};
+use crate::sketch::{fan, placeholder, plume, squares};
 use crate::view::GalleryView;
 
 /// The colour the plume's frond is drawn in — re-exported from the plume sketch so a caller
@@ -121,7 +121,7 @@ impl Gallery {
                 });
             }
             Sketch::Squares => squares::render(canvas, &self.table, elapsed, size),
-            Sketch::Fan => placeholder::render(canvas, Sketch::Fan, size),
+            Sketch::Fan => fan::render(canvas, &self.table, elapsed, size),
             Sketch::Orbits => placeholder::render(canvas, Sketch::Orbits, size),
             Sketch::Willow => placeholder::render(canvas, Sketch::Willow, size),
         }
