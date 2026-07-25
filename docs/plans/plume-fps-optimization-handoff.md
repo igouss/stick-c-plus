@@ -10,12 +10,14 @@ Board: M5StickC Plus, ESP32 Xtensa LX6, `xtensa-esp32-espidf`, 2×240 MHz, ~520 
 
 ---
 
-## STATUS: 30+ fps GOAL CLEARED — dual-core landed on the board at 33.3 fps. One lever (double-buffer) remains for the comfortable 40.
+## STATUS: 50 fps ON THE GLASS. Full arsenal landed — SPI 40 MHz + dual-core + 12-bit + double-buffer. 2× the 25 fps this branch started at, and past the 30 fps goal.
 
 Progress ladder (all measured on glass unless noted):
 `96 ms (mipidsi gather) → 73 (FastPanel blit) → 68 (SinTable mask) → 43/20fps (plume hoist) →
 35 ms / 25 fps (SPI 40 MHz + continuous phase) → 32 ms / 25 fps (memory keystone + root O3) →
-27 ms / 33.3 fps (dual-core, SESSION 5)`. Target ≤ ~23 ms show → 40+ fps (double-buffer next).
+27 ms / 33.3 fps (dual-core) → 23.6 ms / 33.3 fps (12-bit RGB444) →
+14 ms / 50.0 fps (double-buffer + field shrink, SESSION 6)`. Ceiling essentially reached for this
+picture (next tick line is 10 ms → 100 fps, far below the ~14 ms compute floor).
 
 ### DONE this session (uncommitted, host-green; goldens await bless)
 
@@ -334,6 +336,44 @@ dual-core + double-buffer → ~40 fps. See "NEXT: two levers" → "Lever B" belo
 
 ---
 
+## SESSION 6 (2026-07-25): 12-bit RGB444 + non-blocking double buffer → 50 fps. The ceiling.
+
+Two levers landed on top of dual-core, plus the memory work that made the second fit.
+
+**12-bit RGB444 (Task #19, committed 43069f2).** COLMOD 0x33; the wire canvas packs two pixels per
+three bytes (`[R0 G0][B0 R1][G1 B1]`). A frame is 48,600 B, 25% less than 16-bit. On the monochrome
+plume the colour loss is nil (white 0xFFFF → 0xFFF). **fps stayed 33.3** — cadence is
+FreeRTOS-tick-quantised (30 ms = 3 ticks), and 27 ms and 23.6 ms paint fall in the same 20–30 ms
+bucket. Its payoff is not fps but (a) heap: buffer 64.8 → 48.6 KiB, and (b) it makes the
+double-buffer's *second* full-screen buffer fittable at all. Host-proven byte-identical to the
+12-bit-quantised Frame (wire-canvas proptest); glass confirmed correct by the user.
+
+**Field shrink (Task #21, committed b26fdca).** `Precomputed`'s `bool wide` padded the 4-`f32` record
+16 → 20 B; moved to a 1-bit-per-point bitset → field 100 → 80 KiB, freeing ~19 KiB. Bit-identical
+(the plume-core properties stay green). This was the unblock: without it the double-buffer's second
+48.6 KiB buffer left too little contiguous heap for the 16 KiB display-thread stack — `pthread:
+Failed to create task!`, boot loop. With it, heap-after-buffers 50,976 → 70,336 B free.
+
+**Non-blocking double buffer (Task #16, committed 2ef93dd).** New quarantine crate `spi-dma`
+(`DoubleBuffer`) queues the transfer on interrupts (`spi_device_queue_trans`/`get_trans_result` on
+the raw handle) and ping-pongs two buffers. FastPanel keeps RAMWR + DC; `present()` = reap-prior +
+RAMWR + queue-current. The prior transfer runs under this frame's compute, so the reap is instant.
+**paint 23.6 → 14.0 ms → 50.0 fps**, steady, no tearing (glass), clean boot, 70 KiB free. 14 ms
+crosses below the 20 ms tick line — that step is the whole gain (see the tick-quantisation note in
+the cost model / the `freertos-tick-floors-thread-cadence` memory).
+
+**Why this is the ceiling for the plume.** Cadence snaps to 10 ms tick lines. To beat 50 fps (20 ms)
+the render thread must drop under 10 ms, but its floor is the ~14 ms of near-half compute + plot +
+present. Getting there would need the *plot* off the render thread too (a third stage) or a much
+cheaper field — diminishing returns. 50 fps is the clean stopping point.
+
+**Soundness note (spi-dma).** The `unsafe` is the two C calls, contained. `queue`/`reap`/`back` are
+safe because `DoubleBuffer` alone advances the ping-pong index and never lends the in-flight buffer,
+and the buffers are `'static` — no dangling, no tearing. `unsafe impl Send` is justified: moved to
+the display thread, used only there (same guarantee esp-idf-hal makes for `SpiDeviceDriver`).
+
+---
+
 ## THE COST MODEL (measured, do not re-derive)
 
 `show()` at 40 MHz ≈ **35 ms** = compute ~21 (field ~18 + flood/project/plot ~3) + swap ~2.4 +
@@ -442,15 +482,16 @@ the estimator has been wrong before; instrument the split (paint/swap/spi) when 
 - [x] **Keystone: unify the two full-screen buffers** (Frame + DMA → one wire-order DMA buffer).
       DONE (SESSION 4). Freed ~40 K + removed the swap; unblocked both levers.
 - [x] Flip on `dual-core`, flash, measure — DONE (SESSION 5): **33.3 fps / 27 ms, 30+ goal cleared.**
-      Now default. Next: Lever B double-buffer for the comfortable ~40.
-- [ ] **The full arsenal is in SESSION 3 above, ranked payoff÷risk.** T0.1 (per-crate opt-level=3)
-      was TRIED and is a NULL RESULT under fat-LTO — do not re-add. Start at the T0.2 keystone.
-      Biggest single idea: T1.1 12-bit colour (frees SPI *and* heap, invisible on the white plume).
-      Projected ceiling ~45–50 fps.
-- [ ] User: bless goldens + confirm 40 MHz glass is clean/smooth. (Streaming refactor did NOT change
-      pixels — `SerialFrond` is bit-identical to `field.frame`; the 3 red goldens are still only the
-      continuous-phase shift from Session 1.)
-- [ ] Branch is `generative-art`. After it all lands: docs + on-device fps note (Task #11); remaining
-      sketches Tasks #6–9.
-- [ ] Whole session is UNCOMMITTED (13+ files + new frond.rs/dual_core.rs). Commit when the user asks;
-      also includes prior banked wins (SinTable mask, PlumeField hoist, FastPanel seam).
+      Now default.
+- [x] **12-bit RGB444** (Task #19, SESSION 6, 43069f2). Frees SPI + heap; invisible on the white
+      plume. fps unchanged (tick bucket) but the enabler for the double buffer's second frame.
+- [x] **Field shrink** (Task #21, SESSION 6, b26fdca). `wide` bool → bitset, −19 KiB. Unblocked the
+      second buffer's heap.
+- [x] **Non-blocking double buffer** (Task #16, SESSION 6, 2ef93dd). New `spi-dma` quarantine crate.
+      **paint 14 ms → 50.0 fps.** The ceiling for this picture.
+- [ ] User: bless goldens (the 3 continuous-phase-shift plume goldens 02/03/04 from Session 1) +
+      confirm 50 fps glass is clean/smooth/no-tearing. (The double buffer's contents are host-proven
+      byte-identical; tearing/sync is the one glass-only question.)
+- [ ] Branch is `generative-art`. Remaining: docs + on-device fps note + merge to main (Task #11);
+      the four placeholder sketches (Tasks #6–9); Task #20 compute micro-opts (only if chasing >50).
+- [x] All SESSION 3–6 work COMMITTED (dd4d56d..2ef93dd). Tree clean but for `.claude/`.
