@@ -50,9 +50,9 @@ pub const START: u32 = 10_000;
 /// The count is a memory edge, not a round number: it is the densest frond that fits the ESP32's
 /// heap beside the two full-screen DMA buffers and the dual-core far buffer, and it is bounded by two
 /// separate walls the rest of this module is built to push back. The *contiguous* wall — one `Vec`
-/// of the whole field being a run the pool-fragmented heap cannot place — is lifted by storing the
-/// field in two halves ([`SPLIT`]). The *throughput* wall is the paint budget: past roughly seven
-/// and a half thousand points a frame's compute-and-plot crosses the 20 ms that holds 50 fps. So the
+/// of the whole field being a run the pool-fragmented heap cannot place — is lifted by chunking the
+/// field into [`CHUNK_LEN`]-point runs. The *throughput* wall is the paint budget: past roughly
+/// eight thousand points a frame's compute-and-plot crosses the 20 ms that holds 50 fps. So the
 /// budget is set at the fullest frond that stays under both, checked on the glass.
 pub const POINT_COUNT: u32 = 6_000;
 
@@ -173,19 +173,31 @@ fn precompute(i: u32, table: &SinTable) -> (Precomputed, bool) {
     (point, k * k > 15.0)
 }
 
-/// Where the field's storage is cut in two: the low half holds the precomputed records for
-/// positions `[0, SPLIT)`, the high half `[SPLIT, POINT_COUNT)`.
+/// How many points each chunk of the field holds. A power of two, so splitting a global point index
+/// into a chunk index and an offset is a shift and a mask, not a division the ESP32 emulates in
+/// software.
 ///
-/// Splitting the cloud across two allocations rather than one is a *memory* decision, not a
+/// Chunking the cloud into fixed pieces rather than one `Vec` is a *memory* decision, not a
 /// mathematical one. A single `Vec` of the whole field is one contiguous run, and the
-/// pool-fragmented ESP32 heap may not have a run that large: measured on the metal, seven thousand
-/// points is a lone 112 KiB block that cannot be placed even with ~150 KiB free, because the two
-/// full-screen DMA buffers have already carved up the one pool big enough to hold it. Two half-sized
-/// runs fit where one whole one does not, so the point budget can climb past the
-/// single-allocation ceiling. The cut is at the midpoint, which also lines it up with the dual-core
-/// near/far split (two [`iter_range`](PlumeField::iter_range) sweeps) so each core's sweep stays
-/// inside one half — but correctness does not depend on that alignment, only a hair of locality does.
-const SPLIT: usize = POINT_COUNT as usize / 2;
+/// pool-fragmented ESP32 heap may not have a run that large: measured on the metal, a lone 112 KiB
+/// (seven-thousand-point) block cannot be placed even with ~150 KiB free, because the two
+/// full-screen DMA buffers have already carved up the one pool big enough to hold it — and even two
+/// half-sized runs hit the same wall past ~6800 points, each half wanting a ~55 KiB run the pools no
+/// longer hold. A thousand points is a 16 KiB run, small enough that the fragmented pools always
+/// have several, so the budget is bounded by paint throughput and total RAM rather than by any one
+/// allocation. The dual-core near/far split ([`iter_range`](PlumeField::iter_range)) is independent
+/// of this: a sweep crosses chunk boundaries freely, [`precomputed_at`](PlumeField::precomputed_at)
+/// resolving each point to its chunk on the way.
+const CHUNK_LEN: usize = 1024;
+
+/// `log2(CHUNK_LEN)`: the shift that turns a global point index into its chunk index, the low
+/// [`CHUNK_BITS`] bits (masked by `CHUNK_LEN - 1`) being the offset within that chunk.
+const CHUNK_BITS: usize = CHUNK_LEN.trailing_zeros() as usize;
+
+// The (chunk, offset) split is a shift and a mask, which is only the index arithmetic when CHUNK_LEN
+// is a power of two — pin it so a careless retune to a non-power-of-two fails the build rather than
+// silently reintroducing a software division on the hot path.
+const _: () = assert!(CHUNK_LEN.is_power_of_two());
 
 /// The frond as [`plume`], but built for the panel: the per-index invariants are precomputed
 /// once at [`new`](Self::new), so a frame costs only the three genuinely phase-dependent lookups
@@ -194,16 +206,16 @@ const SPLIT: usize = POINT_COUNT as usize / 2;
 /// The saving is exactly the loop-invariant hoist the hardware brief calls for, and it changes
 /// nothing on the glass: [`frame`](Self::frame) regroups the *same* operations in the *same*
 /// order as [`point`], so it returns a bit-identical cloud (proven in the tests). It holds
-/// [`POINT_COUNT`] precomputed points on the heap — four `f32` each, 16 bytes — split into two
-/// half-sized runs ([`SPLIT`]) so no single contiguous allocation bounds the point budget, plus a
+/// [`POINT_COUNT`] precomputed points on the heap — four `f32` each, 16 bytes — chunked into
+/// [`CHUNK_LEN`]-point runs so no single contiguous allocation bounds the point budget, plus a
 /// one-bit-a-point `wide` bitset beside them, and like every panel-sized buffer here, never a stack
 /// temporary.
 pub struct PlumeField {
-    /// The four-`f32` per-index invariants for positions `[0, SPLIT)`.
-    lower: Vec<Precomputed>,
-    /// The four-`f32` per-index invariants for positions `[SPLIT, POINT_COUNT)`. Held as a second
-    /// allocation so the whole field is never one contiguous run — see [`SPLIT`].
-    upper: Vec<Precomputed>,
+    /// The four-`f32` per-index invariants, chunked into [`CHUNK_LEN`]-point runs (16 KiB each) so no
+    /// single allocation is large enough to be un-placeable on the fragmented heap. Chunk `c` holds
+    /// positions `[c·CHUNK_LEN, (c+1)·CHUNK_LEN)`; the last chunk is short when [`POINT_COUNT`] is not
+    /// a whole multiple of [`CHUNK_LEN`].
+    chunks: Vec<Vec<Precomputed>>,
     /// The `wide` flag for each point, packed one bit per point (position `j`'s bit is
     /// `wide[j >> 5] & (1 << (j & 31))`). Kept out of [`Precomputed`] so that record stays a tight
     /// 16 bytes rather than a 20-byte padded one — ~20 KiB saved across the field, the headroom the
@@ -215,43 +227,46 @@ pub struct PlumeField {
 impl PlumeField {
     /// Pay for the frond's per-index invariants once: the six-lookups-a-point,
     /// `sqrtf`-and-division cost of [`point`] is spent here, at construction, and never again on
-    /// the render path. The `wide` flag each point yields is packed into the bitset as it is built.
+    /// the render path. The records are built chunk by chunk into [`CHUNK_LEN`]-point runs, and the
+    /// `wide` flag each point yields is packed into the bitset as it is built.
     pub fn new(table: &SinTable) -> Self {
         let count: usize = POINT_COUNT as usize;
-        let mut lower: Vec<Precomputed> = Vec::with_capacity(SPLIT);
-        let mut upper: Vec<Precomputed> = Vec::with_capacity(count - SPLIT);
+        let chunk_count: usize = count.div_ceil(CHUNK_LEN);
+        let mut chunks: Vec<Vec<Precomputed>> = Vec::with_capacity(chunk_count);
         let mut wide: Vec<u32> = vec![0u32; count.div_ceil(u32::BITS as usize)];
-        for j in 0..count {
-            let (point, is_wide): (Precomputed, bool) = precompute(index_of(j as u32 + 1), table);
-            if j < SPLIT {
-                lower.push(point);
-            } else {
-                upper.push(point);
+        for c in 0..chunk_count {
+            let start: usize = c * CHUNK_LEN;
+            let end: usize = (start + CHUNK_LEN).min(count);
+            let mut chunk: Vec<Precomputed> = Vec::with_capacity(end - start);
+            for j in start..end {
+                let (point, is_wide): (Precomputed, bool) =
+                    precompute(index_of(j as u32 + 1), table);
+                chunk.push(point);
+                if is_wide {
+                    wide[j >> 5] |= 1 << (j & 31);
+                }
             }
-            if is_wide {
-                wide[j >> 5] |= 1 << (j & 31);
-            }
+            chunks.push(chunk);
         }
-        Self { lower, upper, wide }
+        Self { chunks, wide }
     }
 
-    /// The precomputed record at global position `i`, from whichever half holds it.
+    /// The precomputed record at global position `i`, from the chunk that holds it.
     ///
-    /// Positions `[0, SPLIT)` live in [`lower`](Self::lower), the rest in [`upper`](Self::upper);
-    /// `lower.get(i)` picks the half in one predictable branch. On the dual-core path every sweep is
-    /// wholly inside one half (the ranges align to [`SPLIT`]), so the branch never even mispredicts;
-    /// the whole-field [`frame`](Self::frame) crosses it exactly once. Panics past the field, on the
-    /// `upper` index — a caller-side range bug, as [`iter_range`](Self::iter_range) documents.
+    /// The index splits into a chunk and an offset — `(i >> CHUNK_BITS, i & (CHUNK_LEN - 1))` — both
+    /// cheap integer ops, no division. A sweep crosses a chunk boundary every [`CHUNK_LEN`] points,
+    /// costing only the next chunk's base load. Panics past the field on the chunk or the offset
+    /// index — a caller-side range bug, as [`iter_range`](Self::iter_range) documents.
     fn precomputed_at(&self, i: usize) -> &Precomputed {
-        match self.lower.get(i) {
-            Some(point) => point,
-            None => &self.upper[i - self.lower.len()],
-        }
+        &self.chunks[i >> CHUNK_BITS][i & (CHUNK_LEN - 1)]
     }
 
-    /// The number of points in the field — the two halves together.
+    /// The number of points in the field — every chunk together.
     fn len(&self) -> usize {
-        self.lower.len() + self.upper.len()
+        self.chunks
+            .iter()
+            .map(|chunk: &Vec<Precomputed>| chunk.len())
+            .sum()
     }
 
     /// Whether the point at position `i` is drawn fat, read from the packed [`wide`](Self::wide)
