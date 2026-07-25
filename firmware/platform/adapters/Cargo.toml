@@ -26,6 +26,10 @@ platform-display = { path = "../../../platform/platform-display" }
 # The BSP (infra): Axp192PowerSource wraps the board-support AXP192 driver to read the VBUS
 # status bit, so the driven power-source adapter builds on the board bring-up beneath it.
 board-support = { path = "../board-support" }
+# The non-blocking double-buffered SPI presenter (infra): FastPanel hands it the raw device handle
+# and two DMA buffers, and it ping-pongs them so a frame transfers while the next is drawn. The
+# quarantine crate for the raw SPI transaction queue — the unsafe stays there, not here.
+spi-dma = { path = "../spi-dma" }
 # mipidsi drives the ST7789 over SPI; embedded-graphics supplies Rgb565 + DrawTarget;
 # embedded-hal names the SPI mode; static-cell gives the pixel buffer a 'static home.
 mipidsi = "0.10"

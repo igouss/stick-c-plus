@@ -76,19 +76,18 @@ use wire_canvas::WireCanvas;
 /// The quarter turn the gallery is drawn at — the board stood on its USB-C port.
 const PORTRAIT: ScreenRotation = ScreenRotation::Deg90;
 
-/// The gallery's [`Screen`]: plot the selected sketch into the one wire-order canvas, then stream
-/// that canvas to the panel as one DMA burst.
+/// The gallery's [`Screen`]: plot the selected sketch into the panel's idle wire buffer, then queue
+/// it to the glass while the next frame is drawn into the other.
 ///
 /// This is the seam the fast blit needs. The generic `PanelScreen` hands a mipidsi draw target to a
 /// render closure — the per-pixel `fill_contiguous` path, whose gather is the frame ceiling. Below
-/// mipidsi there is no draw target, so the render loop drives this instead: [`Gallery::paint_into`]
-/// plots straight into the [`WireCanvas`] — a single DMA-capable buffer already in the panel's wire
-/// order — and [`FastPanel::blit`] streams its bytes with no swap and no second buffer. The three
-/// fields are disjoint, so plotting (gallery + canvas) and streaming (panel + canvas bytes) do not
-/// contend.
+/// mipidsi there is no draw target, so the render loop drives this instead: [`FastPanel::back`]
+/// hands out the idle DMA buffer, [`Gallery::paint_into`] plots straight into a [`WireCanvas`] over
+/// it — already in the panel's wire order — and [`FastPanel::present`] queues it as a non-blocking
+/// DMA burst that runs on the DMA engine while the next frame is computed. The canvas is a per-frame
+/// wrapper (it holds no state between frames), so it is built here each `show`, not stored.
 struct GalleryScreen {
     gallery: Gallery,
-    canvas: WireCanvas<'static>,
     panel: FastPanel,
 }
 
@@ -101,9 +100,14 @@ impl Screen<GalleryView> for GalleryScreen {
         elapsed: Tick,
         rotation: ScreenRotation,
     ) -> Result<(), St7789Error> {
-        self.gallery
-            .paint_into(&mut self.canvas, view, elapsed, rotation);
-        self.panel.blit(self.canvas.bytes())
+        // Plot into the idle buffer through a wire canvas, then drop the canvas so its borrow of the
+        // panel ends before the panel is asked to present.
+        {
+            let mut canvas: WireCanvas = WireCanvas::new(self.panel.back());
+            self.gallery
+                .paint_into(&mut canvas, view, elapsed, rotation);
+        }
+        self.panel.present()
     }
 }
 
@@ -140,26 +144,30 @@ fn main() {
     // Every frame here is a whole-screen blit, so the panel is driven **below mipidsi** over SPI
     // DMA (see `FastPanel`): the finished frame streams in one DMA transaction, skipping mipidsi's
     // per-pixel gather — the frame ceiling on a full-screen sketch. The gallery plots straight into
-    // this **one** buffer already in the panel's wire order (a `WireCanvas`), so there is no second
-    // frame and no per-frame swap. The DMA engine can only read DMA-capable RAM, so the buffer
-    // comes from `dma_mem`, the one place that asks ESP-IDF for such memory; a null means it did not
-    // fit. A non-DMA-capable buffer would not run slow but double-fault before frame one. It is
-    // claimed here, first, so its contiguous run is taken before the frond's field (~100 KiB) carves
-    // up the pools.
+    // a buffer already in the panel's wire order (a `WireCanvas`), so there is no offscreen frame and
+    // no per-frame conversion. The DMA engine can only read DMA-capable RAM, so the buffers come from
+    // `dma_mem`, the one place that asks ESP-IDF for such memory; a null means one did not fit. A
+    // non-DMA-capable buffer would not run slow but double-fault before frame one. They are claimed
+    // here, first, so their contiguous runs are taken before the frond's field (~100 KiB) carves up
+    // the pools.
     //
-    // The panel is driven in 12-bit RGB444 (see `PixelFormat::Rgb444` below), so a pixel is 1.5 bytes
-    // and a full frame is `w·h·3/2` — 25% less than 16-bit across the bus and in heap. That smaller
-    // buffer is what lets a *second* full-screen buffer fit DMA-capable RAM for the double-buffer;
-    // on the monochrome plume the 12-bit colour loss is nil. `w·h` is even, so the halving is exact.
+    // **Two** such buffers, for the non-blocking double buffer: the panel transfers one over DMA
+    // while the gallery draws the next into the other, so the ~10 ms transfer hides under the frame's
+    // compute instead of stalling the render thread after it. The panel is driven in 12-bit RGB444
+    // (see `PixelFormat::Rgb444` below), so a pixel is 1.5 bytes and a full frame is `w·h·3/2` — 25%
+    // less than 16-bit across the bus and in heap, which is what lets the *second* full-screen buffer
+    // fit DMA-capable RAM at all. On the monochrome plume the 12-bit colour loss is nil. `w·h` is
+    // even, so the halving is exact.
     const FRAME_BYTES: usize = (SCREEN_SIZE.width * SCREEN_SIZE.height) as usize / 2 * 3;
-    let frame_buffer: &'static mut [u8] =
-        dma_mem::dma_buffer(FRAME_BYTES).expect("DMA-capable panel frame buffer");
-    let canvas: WireCanvas<'static> = WireCanvas::new(frame_buffer);
+    let front_buffer: &'static mut [u8] =
+        dma_mem::dma_buffer(FRAME_BYTES).expect("DMA-capable panel front buffer");
+    let back_buffer: &'static mut [u8] =
+        dma_mem::dma_buffer(FRAME_BYTES).expect("DMA-capable panel back buffer");
 
     // The panel, pinned to portrait once at bring-up: mipidsi runs the delicate init and arms the
-    // full-screen window, then the bus is reclaimed for the direct DMA blit path. It streams the
-    // gallery's own canvas buffer, so it owns none itself — only the `FRAME_BYTES` transfer cap. No
-    // per-frame turn — the gallery is a fixed-portrait picture.
+    // full-screen window, then the bus is reclaimed for the direct DMA path. It owns the two wire
+    // buffers and ping-pongs them; each frame the gallery draws into the idle one and the panel
+    // queues it. No per-frame turn — the gallery is a fixed-portrait picture.
     let panel: FastPanel = FastPanel::new(
         peripherals.spi2,
         peripherals.pins.gpio13, // SCLK
@@ -169,7 +177,8 @@ fn main() {
         peripherals.pins.gpio18, // RST
         PORTRAIT,
         PixelFormat::Rgb444,
-        FRAME_BYTES,
+        front_buffer,
+        back_buffer,
     )
     .expect("ST7789 panel bring-up");
 
@@ -178,22 +187,17 @@ fn main() {
     // — so the gallery domain stays single-threaded and framework-free. With the `dual-core` feature
     // the port is the two-core evaluator (a Core1 worker fills the far half while the render thread
     // streams the near half, roughly halving the frame's dominant cost, bit-identically); by default
-    // it is the one-core `SerialFrond`. The frond's field is built here, after the frame buffer is
-    // claimed above, so the big buffer takes its pool run first.
+    // it is the one-core `SerialFrond`. The frond's field is built here, after the frame buffers are
+    // claimed above, so the big buffers take their pool runs first.
     #[cfg(feature = "dual-core")]
     let gallery: Gallery = Gallery::with_frond(Box::new(dual_core::DualCoreFrond::new()));
     #[cfg(not(feature = "dual-core"))]
     let gallery: Gallery = Gallery::new();
-    let screen: GalleryScreen = GalleryScreen {
-        gallery,
-        canvas,
-        panel,
-    };
-    // Headroom with every big buffer live — the one 12-bit wire canvas (~48 KiB), the frond's field
-    // (~100 KiB) and its table (8 KiB). Unifying the frame and DMA buffer into the one canvas, then
-    // packing it 12-bit, left this comfortable where two 16-bit full-screen buffers had made it
-    // razor-thin; the slack is what the `dual-core` worker buffer lands in, and what the double-buffer
-    // will draw its second canvas from.
+    let screen: GalleryScreen = GalleryScreen { gallery, panel };
+    // Headroom with every big buffer live — the two 12-bit wire buffers (~48 KiB each), the frond's
+    // field (~100 KiB) and its table (8 KiB), plus the `dual-core` worker's far-half buffer. Packing
+    // the buffers 12-bit is what let the second full-screen one fit at all: two 16-bit buffers would
+    // not, but two 48.6 KiB ones do, with room to spare.
     info!(
         "heap after buffers: {} B free (default), largest DMA block {} B",
         dma_mem::free_default(),

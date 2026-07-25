@@ -1,0 +1,24 @@
+[package]
+name = "spi-dma"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "A non-blocking double-buffered SPI presenter — the one crate that queues raw SPI DMA transactions so a frame transfers while the next is drawn."
+
+[lib]
+name = "spi_dma"
+path = "src/lib.rs"
+
+# `infra` — it wraps the raw `spi_device_queue_trans` / `spi_device_get_trans_result` C calls and
+# nothing else. Per the hex-lint matrix `infra` may depend only on `infra`, which is exactly the
+# containment wanted: nothing domain-shaped can leak in, and the `unsafe` cannot leak out. The third
+# crate (beside `dma-mem` and `esp-metrics`) allowed to speak raw C.
+[package.metadata.hex-arch]
+role = "infra"
+
+[dependencies]
+# The generated ESP-IDF bindings, for the interrupt-driven SPI transaction queue
+# (`spi_device_queue_trans` / `spi_device_get_trans_result`) — esp-idf-hal only exposes the blocking
+# polling transmit; the non-blocking queue that lets a transfer overlap the next frame's compute is
+# reachable only through the raw handle (`SpiDeviceDriver::device()`) and these C calls.
+esp-idf-sys = "0.37"

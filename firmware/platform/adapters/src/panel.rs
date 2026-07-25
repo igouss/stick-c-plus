@@ -52,6 +52,7 @@ use mipidsi::options::{ColorInversion, ColorOrder, Orientation, Rotation};
 use mipidsi::{interface::SpiInterface, Builder, Display};
 use platform_core::{Screen, ScreenRotation, Tick};
 use platform_display::{RenderError, SCREEN_SIZE};
+use spi_dma::DoubleBuffer;
 use static_cell::StaticCell;
 
 use core::marker::PhantomData;
@@ -105,7 +106,7 @@ static SPI_BUFFER: StaticCell<[u8; BUFFER_LEN]> = StaticCell::new();
 
 /// The ST7789 "memory write" (RAMWR) command. It resets the RAM address pointer to the origin of
 /// the window last set by CASET/RASET and takes pixel data until the next command. mipidsi issues
-/// it inside every `fill_contiguous`; [`FastPanel::blit`] issues it directly, once per frame, over
+/// it inside every `fill_contiguous`; [`FastPanel::present`] issues it directly, once per frame, over
 /// a window armed once at bring-up.
 const RAMWR: u8 = 0x2C;
 
@@ -452,37 +453,44 @@ impl PixelFormat {
 /// `fill_contiguous` is exactly `set_address_window` + [`RAMWR`] + a per-pixel byte stream, and
 /// the gallery's window never changes (it is pinned portrait). So [`new`](Self::new) lets mipidsi
 /// do the delicate bring-up and arm the full-screen window **once**, then reclaims the bus; and
-/// [`blit`](Self::blit) re-issues only [`RAMWR`] and streams a whole frame — the *same* bytes, in
-/// the *same* order, into the *same* window as `fill_contiguous`, with the per-pixel gather
-/// replaced by a tight big-endian swap and one DMA burst. Same picture, provably; only faster.
+/// each frame re-issues only [`RAMWR`] and streams a whole frame — the *same* bytes, in the *same*
+/// order, into the *same* window as `fill_contiguous`, with the per-pixel gather replaced by one
+/// DMA burst. Same picture, provably; only faster.
+///
+/// The blit is **double-buffered and non-blocking**. Two wire buffers ping-pong through a
+/// [`DoubleBuffer`]: [`back`](Self::back) hands out the idle one to draw into, and
+/// [`present`](Self::present) reaps the previous frame's transfer, arms [`RAMWR`], and *queues* the
+/// freshly drawn one — returning before the DMA finishes. So a frame's transfer runs on the DMA
+/// engine while the next frame is drawn on the CPU, and the frame costs `max(draw, transfer)`
+/// rather than their sum. The panel knowledge (RAMWR, the DC line) stays here; the raw transaction
+/// queue is quarantined in `spi-dma`.
 pub struct FastPanel {
-    /// The raw SPI device, reclaimed from mipidsi after init. Built DMA-configured, so a
-    /// whole-frame write crosses the bus as one hardware-fed burst.
+    /// The two wire buffers and the raw transaction queue that ping-pongs them. Declared first so it
+    /// drops before `spi`, whose device its raw handle borrows.
+    presenter: DoubleBuffer,
+    /// The raw SPI device, reclaimed from mipidsi after init. Built DMA-configured; kept alive so
+    /// the presenter's raw handle stays valid, and used directly to issue the per-frame `RAMWR`.
     spi: BusDevice,
     /// The data/command pin: low for a command byte, high for pixel data.
     dc: Dc,
     /// The reset pin, held for the panel's life so the controller stays initialised. Never
     /// toggled after bring-up — hence the leading underscore.
     _rst: Rst,
-    /// The DMA transfer cap set at bring-up — the frame's byte length. The blit streams a caller's
-    /// buffer directly, so this is the safety net that catches a burst larger than the one the SPI
-    /// device was configured for, here rather than deep in the driver.
-    max_transfer: usize,
 }
 
 impl FastPanel {
     /// Bring the panel up through mipidsi, pin it to `rotation`, then reclaim the bus for a
     /// direct DMA blit path.
     ///
-    /// `format` is the wire pixel format the panel is put in and the [`blit`](Self::blit) buffer
+    /// `format` is the wire pixel format the panel is put in and the [`back`](Self::back) buffers
     /// must be packed in — [`PixelFormat::Rgb444`] for the gallery, whose canvas packs 12-bit. It is
     /// issued as a COLMOD write after mipidsi's bring-up, so the adapter owns the format explicitly.
     ///
-    /// `max_transfer` is the largest blit, in bytes — a whole frame's packed size (`w·h·2` at 16-bit,
-    /// `w·h·3/2` at 12-bit). It must be a non-empty multiple of 4, and it caps the DMA transfer size
-    /// so the frame goes out in one transaction. The blit streams the caller's own wire-order buffer
-    /// (see [`blit`](Self::blit)), so no buffer is owned here. Requires the AXP192 LCD/TFT rails
-    /// already powered.
+    /// `front` and `back` are the two full-frame wire buffers the double buffer ping-pongs — each a
+    /// whole frame's packed size (`w·h·2` at 16-bit, `w·h·3/2` at 12-bit), equal length, a non-empty
+    /// multiple of 4, in **DMA-capable** memory (`dma_mem`). Their length caps the DMA transfer so a
+    /// frame goes out in one transaction. The panel plots into one and transfers the other; see
+    /// [`back`](Self::back) / [`present`](Self::present). Requires the AXP192 LCD/TFT rails powered.
     ///
     /// `rotation` is applied once here — the app that uses a `FastPanel` is committing to a fixed
     /// orientation (there is no per-frame turn below mipidsi), which is exactly a pinned-portrait
@@ -497,11 +505,18 @@ impl FastPanel {
         rst: Gpio18<'static>,
         rotation: ScreenRotation,
         format: PixelFormat,
-        max_transfer: usize,
+        front: &'static mut [u8],
+        back: &'static mut [u8],
     ) -> Result<Self, St7789Error> {
+        let max_transfer: usize = front.len();
         debug_assert!(
             max_transfer != 0 && max_transfer.is_multiple_of(4),
             "a DMA transfer size must be a non-zero multiple of 4"
+        );
+        debug_assert_eq!(
+            front.len(),
+            back.len(),
+            "the two wire buffers must be the same size"
         );
         // Run the delicate ST7789 bring-up through mipidsi with DMA on, using a small init batch
         // buffer — the animation path never uses it. `max_transfer` becomes the DMA transfer cap.
@@ -519,40 +534,51 @@ impl FastPanel {
         // Turn to the app's rotation. `set_rotation` clears, which sets the CGRAM address window
         // to the full screen for that orientation — the exact window `fill_contiguous` would set
         // each frame. From here nothing else drives the bus, so that window persists and each
-        // blit only re-issues RAMWR.
+        // frame only re-issues RAMWR.
         panel.set_rotation(rotation)?;
         let (mut spi, mut dc, rst): (BusDevice, Dc, Rst) = panel.into_parts();
         // mipidsi armed the window and cleared it in 16-bit; the fast path streams `format`-packed
         // bytes, so re-issue COLMOD now — after that init clear — and every subsequent RAMWR burst
         // is read in this format. The window (CASET/RASET) is in pixel coordinates and is unaffected.
         command(&mut spi, &mut dc, COLMOD, &[format.colmod()])?;
+        // The raw handle is a stable ESP-IDF device pointer, unaffected by moving the Rust wrapper
+        // into `Self`; `spi` is held for the panel's life, so it stays valid for the presenter.
+        let presenter: DoubleBuffer = DoubleBuffer::new(spi.device(), front, back);
         Ok(Self {
+            presenter,
             spi,
             dc,
             _rst: rst,
-            max_transfer,
         })
     }
 
-    /// Push a whole frame to the glass as one DMA burst.
+    /// The idle wire buffer to draw the next frame into — the one not being transferred.
     ///
-    /// `bytes` is the finished frame already in the panel's wire order — packed in the
-    /// [`PixelFormat`] the panel was built with (12-bit RGB444 for the gallery), row-major, the
-    /// wire-order canvas the gallery plotted into, streamed as-is. It must live in **DMA-capable**
-    /// memory (the gallery's canvas is a `dma_mem` buffer) and be no larger than the `max_transfer`
-    /// the panel was built with. A [`RAMWR`] resets the write pointer to the armed window's origin,
-    /// then the whole slice streams out in one transaction. There is no conversion pass: the bytes
-    /// are already what the wire wants, which is the whole point of the wire-order canvas.
-    pub fn blit(&mut self, bytes: &[u8]) -> Result<(), St7789Error> {
-        debug_assert!(
-            bytes.len() <= self.max_transfer,
-            "a frame larger than the DMA transfer cap"
-        );
-        // Command: RAMWR with DC low; then the pixel burst with DC high.
+    /// The caller plots a whole frame into this (the gallery's `WireCanvas` wraps it), then calls
+    /// [`present`](Self::present) to show it. It is the panel's own DMA-capable memory, so drawing
+    /// into it and streaming from it are the *same* bytes — no copy, no conversion.
+    pub fn back(&mut self) -> &mut [u8] {
+        self.presenter.back()
+    }
+
+    /// Show the frame just drawn into [`back`](Self::back): reap the previous transfer, arm the
+    /// window, and queue this one — returning before it finishes.
+    ///
+    /// The reap waits for the *previous* frame's transfer, which has been running on the DMA engine
+    /// throughout this frame's draw, so it is almost always already done and returns at once — that
+    /// is where the transfer hides. Then [`RAMWR`] resets the write pointer to the armed window's
+    /// origin (DC low for the command, high for the data that follows), and the freshly drawn buffer
+    /// is queued for a non-blocking burst. There is no conversion pass: the bytes are already what
+    /// the wire wants, which is the whole point of the wire-order canvas.
+    pub fn present(&mut self) -> Result<(), St7789Error> {
+        // Reap the prior transfer first, so the bus is idle for the polling RAMWR and the device's
+        // one-deep transaction queue has room for the new burst.
+        self.presenter.reap().map_err(|e| fault("reap", e))?;
+        // Command: RAMWR with DC low; then hand the burst to the presenter with DC high.
         self.dc.set_low().map_err(|e| fault("dc low", e))?;
         self.spi.write(&[RAMWR]).map_err(|e| fault("ramwr", e))?;
         self.dc.set_high().map_err(|e| fault("dc high", e))?;
-        self.spi.write(bytes).map_err(|e| fault("blit", e))?;
+        self.presenter.queue().map_err(|e| fault("queue", e))?;
         Ok(())
     }
 }
