@@ -10,10 +10,10 @@
 //! renderer, two adapters, one picture.
 //!
 //! The dispatch is a single exhaustive match on the selected [`Sketch`]: each arm draws one piece.
-//! All five are rasterised for real now — the plume, the squares, the fan, the orbits and the willow;
-//! the gallery is complete and there are no placeholders left. Because the match is exhaustive,
-//! adding a sketch to the running order forces a new arm here — a new piece cannot be silently left
-//! undrawn.
+//! All six are rasterised for real — the plume, the squares, the fan, the orbits, the willow curtain
+//! and the weeping-willow tree; the gallery is complete and there are no placeholders left. Because
+//! the match is exhaustive, adding a sketch to the running order forces a new arm here — a new piece
+//! cannot be silently left undrawn.
 
 use alloc::boxed::Box;
 
@@ -27,8 +27,9 @@ use plume_core::phase;
 use crate::canvas::Canvas;
 use crate::frond::{FrondCompute, SerialFrond};
 use crate::sketch::plume::ScreenPoint;
-use crate::sketch::{fan, orbits, plume, squares, willow};
+use crate::sketch::{fan, orbits, plume, squares, weeping_willow, willow};
 use crate::view::GalleryView;
+use weeping_willow_core::{Swarm, Tree};
 use willow_core::Curtain;
 
 /// The colour the plume's frond is drawn in — re-exported from the plume sketch so a caller
@@ -77,6 +78,18 @@ pub struct Gallery {
     /// once at construction and swept each frame. Small fixed arrays, held here for the app's life so
     /// a willow frame pays only its sway, never the fold.
     curtain: Curtain,
+    /// The weeping-willow tree's phase-invariant frame — its wood and its fronds' depth-shape —
+    /// folded once at construction and swept each frame. Its capital lives on the heap inside the
+    /// [`Tree`](weeping_willow_core::Tree) itself (built there without a large stack temporary, since
+    /// the [`Gallery`] is constructed on the composition root's 8 KiB main task — see
+    /// `large-buffer-heap-not-stack`), so this field is just a handful of pointers. A tree frame pays
+    /// only its sway, never the fold.
+    tree: Tree,
+    /// The weeping-willow scene's firefly swarm — every bug's folded wander — drifting through the
+    /// canopy each frame. Its bugs live on the heap inside the [`Swarm`](weeping_willow_core::Swarm),
+    /// for the same reason as the [`tree`](Self::tree), so this field too is just a pointer. A frame
+    /// pays only the drift, never the fold.
+    swarm: Swarm,
 }
 
 impl Gallery {
@@ -92,6 +105,8 @@ impl Gallery {
             frond,
             table: SinTable::new(),
             curtain: Curtain::new(),
+            tree: Tree::new(),
+            swarm: Swarm::new(),
         }
     }
 
@@ -132,6 +147,9 @@ impl Gallery {
             Sketch::Fan => fan::render(canvas, &self.table, elapsed, size),
             Sketch::Orbits => orbits::render(canvas, elapsed, size),
             Sketch::Willow => willow::render(canvas, &self.curtain, &self.table, elapsed, size),
+            Sketch::WeepingWillow => {
+                weeping_willow::render(canvas, &self.tree, &self.swarm, &self.table, elapsed, size)
+            }
         }
     }
 }

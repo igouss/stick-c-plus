@@ -14,11 +14,15 @@
 //!   and filling each in its colour.
 //! - [`orbits`] — the comet of diamond blooms, tiling `orbits_core`'s grid of cells onto the panel
 //!   and filling each lit one in its grey.
-//! - [`willow`] — the gallery's one original piece: a curtain of hanging tendrils, plotting
+//! - [`willow`] — the gallery's first original piece: a curtain of hanging tendrils, plotting
 //!   `willow_core`'s swaying points onto the panel in their foliage greens.
+//! - [`weeping_willow`] — the gallery's second original piece, and a tree where the willow is a
+//!   curtain: it strokes `weeping_willow_core`'s wood in bark, then plots its swaying canopy of
+//!   fronds over it in the same foliage greens.
 
 pub mod fan;
 pub mod orbits;
 pub mod plume;
 pub mod squares;
+pub mod weeping_willow;
 pub mod willow;

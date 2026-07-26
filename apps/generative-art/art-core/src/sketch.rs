@@ -24,20 +24,23 @@ pub enum Sketch {
     Fan,
     /// An `acos`/`cos` distance-field bloom over a static noise texture.
     Orbits,
-    /// An original frond — designed for this pipeline from the first line, not ported.
+    /// An original curtain of hanging tendrils — designed for this pipeline, not ported.
     Willow,
+    /// An original weeping-willow *tree* — a trunk forking into boughs, a canopy of swaying fronds.
+    WeepingWillow,
 }
 
 impl Sketch {
     /// Every sketch, once, in gallery order. The single source of the running order: the
     /// [`Selector`](crate::Selector) cycles this and the display matches on it, so neither can
     /// hold an order that disagrees with the other.
-    pub const ALL: [Sketch; 5] = [
+    pub const ALL: [Sketch; 6] = [
         Sketch::Plume,
         Sketch::Squares,
         Sketch::Fan,
         Sketch::Orbits,
         Sketch::Willow,
+        Sketch::WeepingWillow,
     ];
 
     /// This sketch's position in the running order.
@@ -71,19 +74,24 @@ mod tests {
     /// it at runtime.
     #[test]
     fn all_lists_every_variant_exactly_once() {
-        let every_variant: [Sketch; 5] = [
+        let every_variant: [Sketch; 6] = [
             Sketch::Plume,
             Sketch::Squares,
             Sketch::Fan,
             Sketch::Orbits,
             Sketch::Willow,
+            Sketch::WeepingWillow,
         ];
         // The witness above must itself cover the enum: adding a variant makes this match
         // non-exhaustive and the test stops compiling until the witness (and `ALL`) are updated.
         fn is_exhaustive(sketch: Sketch) {
             match sketch {
-                Sketch::Plume | Sketch::Squares | Sketch::Fan | Sketch::Orbits | Sketch::Willow => {
-                }
+                Sketch::Plume
+                | Sketch::Squares
+                | Sketch::Fan
+                | Sketch::Orbits
+                | Sketch::Willow
+                | Sketch::WeepingWillow => {}
             }
         }
         every_variant.into_iter().for_each(is_exhaustive);
@@ -116,7 +124,7 @@ mod tests {
     /// The last wraps to the first — the property the gallery is built on.
     #[test]
     fn the_last_sketch_wraps_to_the_first() {
-        assert_eq!(Sketch::Willow.next(), Sketch::Plume);
+        assert_eq!(Sketch::WeepingWillow.next(), Sketch::Plume);
     }
 
     /// Many: `next` applied `ALL.len()` times is the identity, visiting every sketch exactly

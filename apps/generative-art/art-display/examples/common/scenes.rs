@@ -7,8 +7,8 @@
 //! example and the goldens can never drift.
 //!
 //! The catalog samples the plume across its breath (a clock-driven animation, so a set of stills is
-//! the only way to pin its shape) and takes one still of each of the other four sketches, at a moment
-//! that shows its motion. All five are real now; when any sketch's picture changes on purpose, its
+//! the only way to pin its shape) and takes one still of each of the other five sketches, at a moment
+//! that shows its motion. All six are real; when any sketch's picture changes on purpose, its
 //! golden is re-blessed — the bless is the human's record that the change was intended.
 
 use std::path::Path;
@@ -59,13 +59,15 @@ pub fn scenes() -> Vec<Screen> {
         })
         .collect();
     // Most stills sit at the start of their motion; the orbits' origin frame is a sparse corner and
-    // the willow's is its calmest, so both are pinned a little in — the orbits where the comet is
-    // on-panel, the willow where the wind has bent the tendrils — so each still tells its whole story.
-    let stills: [(Sketch, Tick); 4] = [
+    // the two willows' are their calmest, so those are pinned a little in — the orbits where the comet
+    // is on-panel, the willows where the wind has bent the fronds — so each still tells its whole
+    // story.
+    let stills: [(Sketch, Tick); 5] = [
         (Sketch::Squares, 0),
         (Sketch::Fan, 0),
         (Sketch::Orbits, 700),
         (Sketch::Willow, 1_400),
+        (Sketch::WeepingWillow, 1_300),
     ];
     for (sketch, elapsed) in stills {
         screens.push(Screen {
@@ -85,6 +87,7 @@ fn slug(sketch: Sketch) -> &'static str {
         Sketch::Fan => "fan",
         Sketch::Orbits => "orbits",
         Sketch::Willow => "willow",
+        Sketch::WeepingWillow => "weeping-willow",
     }
 }
 

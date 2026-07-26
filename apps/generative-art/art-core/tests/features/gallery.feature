@@ -15,7 +15,7 @@ Feature: The gallery running order
 
   Scenario: the running order wraps after the last piece
     Given a fresh gallery
-    When the button is pressed 5 times
+    When the button is pressed 6 times
     Then the sketch on the glass is the plume
 
   Scenario: every piece is reachable by pressing the button
