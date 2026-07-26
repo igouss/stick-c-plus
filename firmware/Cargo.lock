@@ -63,6 +63,7 @@ dependencies = [
  "platform-numerics",
  "plume-core",
  "squares-core",
+ "weeping-willow-core",
  "willow-core",
 ]
 
@@ -2155,6 +2156,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc1b4cb0cc549fcf58d7dfc081778139b3d283a081644e833e84682ad71cea24"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "weeping-willow-core"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "platform-numerics",
 ]
 
 [[package]]

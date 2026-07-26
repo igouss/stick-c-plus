@@ -1,0 +1,44 @@
+[package]
+name = "weeping-willow-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Framework-free weeping-willow-tree domain for the M5StickC Plus: a rooted tree — a trunk that forks into arcing boughs, from which a canopy of slender fronds cascades down and sways in a travelling wind-wave — as a pure function of an animation phase. An original generative piece (not a port), authored native to the panel in [0, 1] fractions: the wood is a fixed skeleton folded once at startup, and each frond is one table-sine per point with every per-anchor and per-node invariant hoisted into that startup fold. Every value f32 for the ESP32's single-precision FPU. no_std, host-tested, no unsafe."
+
+[lib]
+name = "weeping_willow_core"
+path = "src/lib.rs"
+
+# The pure heart of the weeping-willow-tree sketch: the wood (a trunk forking into arcing boughs) and
+# the foliage (fronds hanging from the boughs and swaying), both in normalised [0, 1] canvas fractions
+# — it is original, so it is authored for no particular pixel size and the display scales it onto the
+# panel. No pixels, no framework, no I/O — the bark and foliage colours and the stroke of the wood are
+# the display crate's business. context = "generative-art" — one piece in the gallery, beside
+# art-core, plume-core, squares-core, fan-core, orbits-core and willow-core (the curtain; this is the
+# tree). It reads the shared sine table for its one sway sine and libm for the startup fold.
+[package.metadata.hex-arch]
+role = "domain"
+context = "generative-art"
+
+[dependencies]
+# The startup-built sine table, shared across every sketch in the gallery. context = "shared", so
+# this dependency is not a context violation. The sway of every frond point is one lookup in it.
+platform-numerics = { path = "../../../platform/platform-numerics" }
+
+# `sqrtf`/`sinf`/`floorf` in no_std: the foliage's tip-streaming gain (`s^1.5`), the ragged-hem length
+# hash, and the bough Bézier sampling — all paid once at startup, never per frame. libm is pure
+# computation — no allocator, no I/O — so it does not make this crate impure. The per-frame sways do
+# not go through it: they are table reads.
+libm = "0.2"
+
+# Host-only. These link std and never reach the Xtensa build (a dependent excludes them).
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run under the default
+# harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false
