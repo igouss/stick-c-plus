@@ -1,29 +1,51 @@
-# Handoff — the `generative-art` gallery: COMPLETE, all five sketches real
+# Handoff — the `generative-art` gallery: COMPLETE, six sketches real
 
-> **STATUS 2026-07-25 (SESSION 10). The gallery is complete — all five sketches are built, on glass,
-> and committed.** squares (Dwitter A, 100 fps) and fan (Dwitter B, 50 fps) are on `main`; **orbits**
-> (Dwitter C — a grainy grey comet of thirty L1 diamond blooms, rock-solid 50 fps) and **willow**
-> (the original piece — a curtain of swaying green tendrils, rock-solid 50 fps @ 12.8 ms) are on
-> branch `generative-art-sketches`, both glass-confirmed, awaiting merge to `main`. The `placeholder`
-> module is **gone** — with nothing left to stub, it was dead code. Each sketch is a vertical slice: a
-> `*-core` domain crate (`squares-core`, `fan-core`, `orbits-core`, `willow-core`) with proptest +
-> cucumber, a rasteriser under `art-display/src/sketch/`, and a real arm in the `Gallery` match; a
-> shared `colour` module turns a domain hue/brightness/depth into `Rgb565`. The selector's
-> `starting_at(sketch)` seam and the firmware `START_SKETCH` constant open a flash straight onto the
-> piece under development (back at `Sketch::Plume` for release).
+> **STATUS 2026-07-25 (SESSION 11). The gallery is complete — all six sketches are built, on glass,
+> and committed.** The running order is now `Plume, Squares, Fan, Orbits, Willow, WeepingWillow`.
+> squares (Dwitter A, 100 fps), fan (Dwitter B, 50 fps), orbits (Dwitter C — a grainy grey comet, 50
+> fps) and willow (the original curtain of swaying tendrils, 50 fps @ 12.8 ms) are on `main`. **New
+> this session: `WeepingWillow`** — a second original piece and a *tree* where the willow is a curtain:
+> a trunk forking into arcing boughs, a canopy of slender fronds that cascade and sway, **fireflies**
+> drifting behind and in front, and a **moon with moonlight** in the night sky. Glass-confirmed (moon +
+> glow, swaying tree + drifting bugs), **rock-solid 50 fps @ 19.7 ms**. The `placeholder` module is
+> **gone**. Each sketch is a vertical slice: a `*-core` domain crate (`squares-core`, `fan-core`,
+> `orbits-core`, `willow-core`, `weeping-willow-core`) with proptest + cucumber, a rasteriser under
+> `art-display/src/sketch/`, and a real arm in the `Gallery` match; a shared `colour` module turns a
+> domain hue/brightness/depth into `Rgb565`. The selector's `starting_at(sketch)` seam and the firmware
+> `START_SKETCH` constant open a flash straight onto the piece under development (back at
+> `Sketch::Plume` for release).
 >
-> **Remaining housekeeping:** merge `generative-art-sketches` → `main` and push; record on-device fps
-> per sketch in the README/justfile docs.
+> **Remaining housekeeping:** record on-device fps per sketch in the README/justfile docs.
 >
-> **Parked willow variants (the user liked these, for later — NOT yet built):**
-> 1. *Solid strands.* Same curtain but heavier: fewer, thicker, continuous strands drawn as connected
->    line segments (Bresenham between consecutive points) rather than bridged points — a bolder
->    willow silhouette, slightly more paint.
-> 2. *A weeping-willow tree.* A different structure entirely: a trunk near the top with boughs that
->    arc up then cascade down in long drooping curves — more literally a willow tree than a curtain.
->    The design challenge is keeping the branching cheap and the motion fluid.
+> **Parked willow variant (the user liked this, for later — NOT yet built):**
+> 1. *Solid strands.* The `Willow` curtain but heavier: fewer, thicker, continuous strands drawn as
+>    connected line segments (Bresenham between consecutive points) rather than bridged points — a
+>    bolder willow silhouette, slightly more paint. (The *weeping-willow tree*, the other parked idea,
+>    is now built as `WeepingWillow`.)
 >
-> **Lessons paid for on the metal.** The fan: keep floating point and division out of the per-pixel
+> **Lessons paid for on the metal — the weeping-willow tree (SESSION 11).** Three traps, none visible
+> on a green host, all found by flashing and watching serial:
+> 1. **Multi-KB capital must be built on the heap, not the stack.** The tree/swarm capital as fixed
+>    `[T; N]` arrays made the `Gallery`'s construction temporaries overflow the composition root's
+>    **8 KiB main task** frame — `SP` underflowed into the heap at `main` *entry*, so the *first*
+>    `malloc` (in the first `info!`) crashed in `tlsf_malloc` on corrupt free-list metadata, a reboot
+>    loop before a line of our code ran. Boxing the *storage* was not enough — `Box::new(Tree::new())`
+>    still builds `Tree` on the stack. Fix: `collect` the capital onto the heap element by element, so
+>    no N-sized array is ever a stack temporary (see `large-buffer-heap-not-stack`; `plume-core`
+>    already did this for its field). The crate uses `alloc`; it stays a pure functional core.
+> 2. **The moon's per-pixel `blend` is the whole cost on this FPU.** A radial moonlight glow with a
+>    per-pixel `sqrt` + `blend` (three soft `roundf`s) over ~8 k pixels took paint from 12.7 ms to
+>    **44.6 ms**. Fix: pre-blend the glow into a small `[Rgb565; 40]` table once per frame, compare
+>    *squared* distances (no per-pixel `sqrt`), and hoist the divide to one reciprocal — a glow pixel
+>    is then a multiply, a cast and a table lookup. Back to ~19.7 ms.
+> 3. **A thick line is a perpendicular brush, not a square stamp.** Stroking the wood with a
+>    `(2r+1)²` square per step overdraws ~10×; laying only the *perpendicular* run of width `2r`
+>    costs the limb's area, not its bounding box. (Also: draw the scene through `#[inline(never)]`
+>    layer functions so no two layers' locals sum on the display thread's 8 KiB stack — though the
+>    measured 140 B high-water proved constant across builds, i.e. a common-path/logging baseline the
+>    shipped willow already lives in, not this sketch's render.)
+>
+> **Lessons paid for on the metal — the earlier sketches.** The fan: keep floating point and division out of the per-pixel
 > path on this soft-divide FPU; step linear edge functions by integer addition. The orbits, the
 > expensive one, taught three: `acos(cos θ)` **is a triangle wave** (no transcendentals); the thirty
 > orbit centres are **frame-invariant** — hoist them out of the per-cell loop the source rebuilds
@@ -39,7 +61,8 @@
 > frame is one table-sine per point — it lands blit-bound at 12.8 ms with no strain.
 
 The gallery is done. The rest of this document is the original brief and the how-to for adding a
-sketch, kept as the record of how each of the five was built.
+sketch, kept as the record of how each was built (it was written for the first five; the
+weeping-willow tree, the sixth, followed the same vertical-slice recipe).
 
 Read these first, in order:
 - `CLAUDE.md` (laconic voice, hexagonal/ECB, no unsafe, Gherkin, distrust convenient greens).
