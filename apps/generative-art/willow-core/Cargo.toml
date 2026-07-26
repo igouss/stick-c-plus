@@ -1,0 +1,43 @@
+[package]
+name = "willow-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Framework-free willow domain for the M5StickC Plus: a curtain of hanging tendrils that sway in a travelling wind-wave, as a pure function of an animation phase. An original generative frond — not a port — authored native to the panel in [0, 1] fractions, its every strand one table-sine per point with all per-index and per-strand invariants hoisted into a startup-built curtain. Every value f32 for the ESP32's single-precision FPU. no_std, host-tested, no unsafe."
+
+[lib]
+name = "willow_core"
+path = "src/lib.rs"
+
+# The pure heart of the willow sketch: a curtain of hanging tendrils as a function of a phase, in
+# normalised [0, 1] canvas fractions (it is original, so it is authored for no particular pixel size
+# and the display scales it to the panel), and the phase clock that sways it. No pixels, no
+# framework, no I/O — the colour ramp and the projection onto the panel are the display crate's
+# business. context = "generative-art" — one piece in the gallery, beside art-core, plume-core,
+# squares-core, fan-core and orbits-core. It reads the shared sine table for its one sway sine and
+# libm's sqrt to shape the droop once at startup.
+[package.metadata.hex-arch]
+role = "domain"
+context = "generative-art"
+
+[dependencies]
+# The startup-built sine table, shared across every sketch in the gallery. context = "shared", so
+# this dependency is not a context violation. The sway of every tendril point is one lookup in it.
+platform-numerics = { path = "../../../platform/platform-numerics" }
+
+# `sqrtf`/`sinf` in no_std: the curtain's droop shaping (`s^1.5`) and the per-strand length hash,
+# both paid once at startup, not per frame. libm is pure computation — no allocator, no I/O — so it
+# does not make this crate impure. The per-frame sways do not go through it: they are table reads.
+libm = "0.2"
+
+# Host-only. These link std and never reach the Xtensa build (a dependent excludes them).
+[dev-dependencies]
+proptest = "1"
+cucumber = "0.21"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The Gherkin plumbing test needs its own harness; unit + property tests run under the default
+# harness alongside it.
+[[test]]
+name = "cucumber"
+harness = false

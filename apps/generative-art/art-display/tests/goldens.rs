@@ -8,8 +8,8 @@
 //! or a regression (and reverts).
 //!
 //! It pins the plume's shape across its breath — the frond has no state machine to unit-test, just
-//! a clock and some trigonometry — and pins each not-yet-built sketch's placeholder, so the day a
-//! placeholder becomes a real sketch the change is a blessed golden, not a silent one.
+//! a clock and some trigonometry — and pins one still of each other sketch, so any change to a
+//! sketch's picture is a blessed golden, not a silent one.
 //!
 //! Re-bless after an *intended* change:
 //! ```sh

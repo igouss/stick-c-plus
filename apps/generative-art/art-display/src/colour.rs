@@ -48,6 +48,20 @@ pub fn grey_to_rgb565(level: f32) -> Rgb565 {
     rgb565(level, level, level)
 }
 
+/// Blend between two `[0, 1]` RGB colours by `t`, as an [`Rgb565`] — `from` at `t = 0`, `to` at
+/// `t = 1`, a straight line per channel between.
+///
+/// The ramp a sketch wears along a gradient: the willow's tendrils run from a deep green root to a
+/// light tip as `t` (a point's depth) climbs `0 → 1`. Blended in full `f32` channels and quantised
+/// once at the end, so the ramp is smooth rather than stepping between two coarse `Rgb565`
+/// endpoints. `t` outside `[0, 1]` is clamped, so a caller's over-range gradient parameter rests at
+/// an endpoint rather than overshooting the colours.
+pub fn blend(from: (f32, f32, f32), to: (f32, f32, f32), t: f32) -> Rgb565 {
+    let t: f32 = t.clamp(0.0, 1.0);
+    let lerp = |a: f32, b: f32| -> f32 { a + (b - a) * t };
+    rgb565(lerp(from.0, to.0), lerp(from.1, to.1), lerp(from.2, to.2))
+}
+
 /// Pack three `[0, 1]` channel intensities into an [`Rgb565`], rounding each to its field width
 /// (five bits of red and blue, six of green).
 fn rgb565(r: f32, g: f32, b: f32) -> Rgb565 {
@@ -107,5 +121,25 @@ mod tests {
         assert_eq!(half.r(), 16, "red {}", half.r());
         assert_eq!(half.g(), 32, "green {}", half.g());
         assert_eq!(half.b(), 16, "blue {}", half.b());
+    }
+
+    /// Zero: a blend at `t = 0` is the `from` colour — the willow's root end of its ramp.
+    #[test]
+    fn blend_at_zero_is_from() {
+        assert_eq!(blend((1.0, 0.0, 0.0), (0.0, 0.0, 1.0), 0.0), Rgb565::RED);
+    }
+
+    /// One: a blend at `t = 1` is the `to` colour — the willow's tip end of its ramp.
+    #[test]
+    fn blend_at_one_is_to() {
+        assert_eq!(blend((1.0, 0.0, 0.0), (0.0, 0.0, 1.0), 1.0), Rgb565::BLUE);
+    }
+
+    /// A blend sits between its endpoints: halfway from black to white reaches roughly half of each
+    /// field, the same midpoint a grey does — so the ramp is a true interpolation, not a jump.
+    #[test]
+    fn blend_halfway_is_the_midpoint() {
+        let mid: Rgb565 = blend((0.0, 0.0, 0.0), (1.0, 1.0, 1.0), 0.5);
+        assert_eq!((mid.r(), mid.g(), mid.b()), (16, 32, 16));
     }
 }

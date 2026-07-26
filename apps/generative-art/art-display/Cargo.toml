@@ -30,6 +30,9 @@ fan-core = { path = "../fan-core" }
 # The orbits domain: the grid of grey cells the orbits sketch tiles, its diamond blooms, and its
 # virtual-frame clock. It reads no sine table — its acos(cos(.)) centres are a triangle wave.
 orbits-core = { path = "../orbits-core" }
+# The willow domain: the curtain of swaying tendrils the willow sketch plots — the gallery's one
+# original piece — its phase-invariant curtain and its sway clock.
+willow-core = { path = "../willow-core" }
 # The board-generic kernel: the Animated contract the view implements, Tick, and the
 # ScreenRotation that decides the canvas shape.
 platform-core = { path = "../../../platform/platform-core" }

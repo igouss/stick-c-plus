@@ -16,8 +16,8 @@
 //! needs no diff of what changed.
 //!
 //! The frame is a [`DrawTarget`] in its own right, so a sketch may either plot pixels straight in
-//! ([`set`](Frame::set)) or draw through `embedded-graphics` primitives (the not-yet-built
-//! sketches render their placeholder text this way) — both land in the same buffer, blitted once.
+//! ([`set`](Frame::set)) or draw through `embedded-graphics` primitives — both land in the same
+//! buffer, blitted once.
 
 use alloc::vec;
 use alloc::vec::Vec;

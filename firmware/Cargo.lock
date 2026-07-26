@@ -63,6 +63,7 @@ dependencies = [
  "platform-numerics",
  "plume-core",
  "squares-core",
+ "willow-core",
 ]
 
 [[package]]
@@ -2166,6 +2167,14 @@ dependencies = [
  "home",
  "once_cell",
  "rustix 0.38.44",
+]
+
+[[package]]
+name = "willow-core"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "platform-numerics",
 ]
 
 [[package]]

@@ -6,11 +6,10 @@
 //! `#[path]`-include this file, so the stills and the rasterisation are defined **once** — the
 //! example and the goldens can never drift.
 //!
-//! The catalog samples the plume across its breath (a clock-driven animation, so a set of stills
-//! is the only way to pin its shape) and takes one still of each not-yet-built sketch's
-//! placeholder (static, so one frame tells the whole story). When a sketch's real rasterisation
-//! lands, its still stops being a placeholder and the golden is re-blessed — the bless is the
-//! human's record that the picture changed on purpose.
+//! The catalog samples the plume across its breath (a clock-driven animation, so a set of stills is
+//! the only way to pin its shape) and takes one still of each of the other four sketches, at a moment
+//! that shows its motion. All five are real now; when any sketch's picture changes on purpose, its
+//! golden is re-blessed — the bless is the human's record that the change was intended.
 
 use std::path::Path;
 
@@ -48,9 +47,9 @@ pub struct Screen {
     pub elapsed: Tick,
 }
 
-/// The stills of the gallery: the plume across its breath, then one of each unbuilt placeholder.
-/// Adding or moving one changes which moments are looked at — and, through the goldens, which are
-/// pinned.
+/// The stills of the gallery: the plume across its breath, then one of each other sketch at a moment
+/// that shows its motion. Adding or moving one changes which moments are looked at — and, through the
+/// goldens, which are pinned.
 pub fn scenes() -> Vec<Screen> {
     let mut screens: Vec<Screen> = (0..PLUME_STILLS)
         .map(|n: u64| Screen {
@@ -59,13 +58,14 @@ pub fn scenes() -> Vec<Screen> {
             elapsed: n * FRAMES_APART * FRAME_MS,
         })
         .collect();
-    // Most stills sit at the start of their motion; the orbits' origin frame is a sparse corner, so
-    // it is pinned a little in, where the comet is on-panel and the still tells its whole story.
+    // Most stills sit at the start of their motion; the orbits' origin frame is a sparse corner and
+    // the willow's is its calmest, so both are pinned a little in — the orbits where the comet is
+    // on-panel, the willow where the wind has bent the tendrils — so each still tells its whole story.
     let stills: [(Sketch, Tick); 4] = [
         (Sketch::Squares, 0),
         (Sketch::Fan, 0),
         (Sketch::Orbits, 700),
-        (Sketch::Willow, 0),
+        (Sketch::Willow, 1_400),
     ];
     for (sketch, elapsed) in stills {
         screens.push(Screen {

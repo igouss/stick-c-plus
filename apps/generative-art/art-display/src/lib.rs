@@ -40,13 +40,14 @@
 //! what makes the animation self-erasing — nothing of the last frame survives, so a moving picture
 //! never smears.
 //!
-//! ## Not every piece is built yet
+//! ## Five pieces, all real
 //!
-//! The gallery's running order names five sketches; the plume is ported and the other four are
-//! still to come. Rather than hide the unbuilt ones, the render draws each an **honest named
-//! placeholder** — its title and "coming soon" — so the button genuinely cycles five distinct
-//! screens on the glass, and a placeholder is never mistaken for a finished piece. Each sketch's
-//! own commit replaces its placeholder with its real rasterisation.
+//! The gallery's running order names five sketches and all five are rasterised for real: the plume's
+//! feathered frond, the squares' breathing grid, the fan's folding hue-triangles, the orbits' grey
+//! comet, and the willow's swaying curtain. The button cycles five distinct finished pictures on the
+//! glass; there are no placeholders left. Each sketch arrived behind its own commit, and the
+//! [`Gallery`]'s exhaustive match means a sixth could not be added to the running order without a
+//! render to draw it.
 //!
 //! Like every screen here, this is renderable on the host: `cargo run -p art-display
 //! --example gallery-screenshots` writes a PNG of each sketch — drawn by the same code the panel

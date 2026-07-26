@@ -28,6 +28,7 @@ members = [
     "apps/generative-art/squares-core",
     "apps/generative-art/fan-core",
     "apps/generative-art/orbits-core",
+    "apps/generative-art/willow-core",
     "apps/generative-art/art-display",
     "apps/generative-art/wire-canvas",
     "apps/generative-art/art-shell",

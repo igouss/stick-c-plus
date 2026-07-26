@@ -1,16 +1,27 @@
-# Handoff — the `generative-art` gallery: one sketch left (willow)
+# Handoff — the `generative-art` gallery: COMPLETE, all five sketches real
 
-> **STATUS 2026-07-25 (SESSION 10).** The skeleton is flashed and verified, and **three of the four
-> sketches are built and on glass**: **squares** (Dwitter A — breathing nested-square frames,
-> 100 fps) and **fan** (Dwitter B — folding hue-by-distance triangles, 50 fps) are merged to `main`;
-> **orbits** (Dwitter C — a grainy grey comet of thirty L1 diamond blooms, **rock-solid 50 fps**) is
-> built, glass-confirmed, and committed (branch `generative-art-sketches`). Each is a vertical slice:
-> a `*-core` domain crate (`squares-core`, `fan-core`, `orbits-core`) with proptest + cucumber, a
-> rasteriser under `art-display/src/sketch/`, and a real arm in the `Gallery` match; a shared
-> `colour` module turns a domain hue/brightness into `Rgb565`. The selector's `starting_at(sketch)`
-> seam and the firmware `START_SKETCH` constant open a flash straight onto the piece under
-> development (back at `Sketch::Plume` for release). **Remaining: willow — an original frond, not a
-> port.**
+> **STATUS 2026-07-25 (SESSION 10). The gallery is complete — all five sketches are built, on glass,
+> and committed.** squares (Dwitter A, 100 fps) and fan (Dwitter B, 50 fps) are on `main`; **orbits**
+> (Dwitter C — a grainy grey comet of thirty L1 diamond blooms, rock-solid 50 fps) and **willow**
+> (the original piece — a curtain of swaying green tendrils, rock-solid 50 fps @ 12.8 ms) are on
+> branch `generative-art-sketches`, both glass-confirmed, awaiting merge to `main`. The `placeholder`
+> module is **gone** — with nothing left to stub, it was dead code. Each sketch is a vertical slice: a
+> `*-core` domain crate (`squares-core`, `fan-core`, `orbits-core`, `willow-core`) with proptest +
+> cucumber, a rasteriser under `art-display/src/sketch/`, and a real arm in the `Gallery` match; a
+> shared `colour` module turns a domain hue/brightness/depth into `Rgb565`. The selector's
+> `starting_at(sketch)` seam and the firmware `START_SKETCH` constant open a flash straight onto the
+> piece under development (back at `Sketch::Plume` for release).
+>
+> **Remaining housekeeping:** merge `generative-art-sketches` → `main` and push; record on-device fps
+> per sketch in the README/justfile docs.
+>
+> **Parked willow variants (the user liked these, for later — NOT yet built):**
+> 1. *Solid strands.* Same curtain but heavier: fewer, thicker, continuous strands drawn as connected
+>    line segments (Bresenham between consecutive points) rather than bridged points — a bolder
+>    willow silhouette, slightly more paint.
+> 2. *A weeping-willow tree.* A different structure entirely: a trunk near the top with boughs that
+>    arc up then cascade down in long drooping curves — more literally a willow tree than a curtain.
+>    The design challenge is keeping the branching cheap and the motion fluid.
 >
 > **Lessons paid for on the metal.** The fan: keep floating point and division out of the per-pixel
 > path on this soft-divide FPU; step linear edge functions by integer addition. The orbits, the
@@ -22,12 +33,13 @@
 > Core1 worker (the plume's trick) will **not** fit the ~8.8 KB free heap the plume already leaves,
 > so algebra beat threads here. The crop matters too: fill-height projection hides ~40% of the grid
 > off-panel, and the display walks only the visible column band (`orbits_core::for_each_cell` takes
-> a `cols` range) so the bloom is never paid for a cell it won't show.
+> a `cols` range) so the bloom is never paid for a cell it won't show. The willow: being *original*,
+> it is authored in normalised `[0, 1]` fractions (the display applies the aspect), so there is no
+> square source to fit or crop; and every phase-invariant is folded into a startup `Curtain`, so a
+> frame is one table-sine per point — it lands blit-bound at 12.8 ms with no strain.
 
-You are picking up mid-stream on the **stick-c-plus** board platform (M5StickC Plus, Rust,
-std/ESP-IDF, hexagonal/ECB). The gallery **skeleton is built and on-glass-ready**; the plume,
-squares, fan and orbits are real, and your job is to fill in the **one remaining sketch** —
-**willow** — one commit, then close out the docs.
+The gallery is done. The rest of this document is the original brief and the how-to for adding a
+sketch, kept as the record of how each of the five was built.
 
 Read these first, in order:
 - `CLAUDE.md` (laconic voice, hexagonal/ECB, no unsafe, Gherkin, distrust convenient greens).

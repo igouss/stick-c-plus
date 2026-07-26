@@ -14,11 +14,11 @@
 //!   and filling each in its colour.
 //! - [`orbits`] — the comet of diamond blooms, tiling `orbits_core`'s grid of cells onto the panel
 //!   and filling each lit one in its grey.
-//! - [`placeholder`] — the honest stand-in every not-yet-built piece draws: its title and
-//!   "coming soon", so the gallery cycles distinct, truthful screens before all five exist.
+//! - [`willow`] — the gallery's one original piece: a curtain of hanging tendrils, plotting
+//!   `willow_core`'s swaying points onto the panel in their foliage greens.
 
 pub mod fan;
 pub mod orbits;
-pub mod placeholder;
 pub mod plume;
 pub mod squares;
+pub mod willow;

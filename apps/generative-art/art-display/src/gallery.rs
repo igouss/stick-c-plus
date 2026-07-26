@@ -10,8 +10,8 @@
 //! renderer, two adapters, one picture.
 //!
 //! The dispatch is a single exhaustive match on the selected [`Sketch`]: each arm draws one piece.
-//! Today the plume, the squares, the fan and the orbits are rasterised for real; only the willow
-//! draws its honest [`placeholder`](crate::sketch::placeholder). Because the match is exhaustive,
+//! All five are rasterised for real now — the plume, the squares, the fan, the orbits and the willow;
+//! the gallery is complete and there are no placeholders left. Because the match is exhaustive,
 //! adding a sketch to the running order forces a new arm here — a new piece cannot be silently left
 //! undrawn.
 
@@ -27,8 +27,9 @@ use plume_core::phase;
 use crate::canvas::Canvas;
 use crate::frond::{FrondCompute, SerialFrond};
 use crate::sketch::plume::ScreenPoint;
-use crate::sketch::{fan, orbits, placeholder, plume, squares};
+use crate::sketch::{fan, orbits, plume, squares, willow};
 use crate::view::GalleryView;
+use willow_core::Curtain;
 
 /// The colour the plume's frond is drawn in — re-exported from the plume sketch so a caller
 /// recolouring the frond has one place to look.
@@ -67,10 +68,15 @@ pub struct Gallery {
     /// for the life of the app because a parallel implementation owns a persistent worker.
     frond: Box<dyn FrondCompute>,
     /// The sine table the non-plume sketches read their trigonometry from, built once and shared by
-    /// every sketch that breathes on a table sine (the squares' grid, and the colour sketches to
-    /// come). The plume carries its own inside its [`frond`](Self::frond) port, which owns it for
-    /// the worker thread; this is the one the render thread lends the rest.
+    /// every sketch that breathes on a table sine (the squares' grid, the fan's fold, the willow's
+    /// sway). The plume carries its own inside its [`frond`](Self::frond) port, which owns it for
+    /// the worker thread; this is the one the render thread lends the rest. The orbits reads no
+    /// table — its centres are a triangle wave — so it takes nothing from here.
     table: SinTable,
+    /// The willow's phase-invariant curtain — its strands' anchors and its points' shapes — folded
+    /// once at construction and swept each frame. Small fixed arrays, held here for the app's life so
+    /// a willow frame pays only its sway, never the fold.
+    curtain: Curtain,
 }
 
 impl Gallery {
@@ -85,6 +91,7 @@ impl Gallery {
         Self {
             frond,
             table: SinTable::new(),
+            curtain: Curtain::new(),
         }
     }
 
@@ -124,7 +131,7 @@ impl Gallery {
             Sketch::Squares => squares::render(canvas, &self.table, elapsed, size),
             Sketch::Fan => fan::render(canvas, &self.table, elapsed, size),
             Sketch::Orbits => orbits::render(canvas, elapsed, size),
-            Sketch::Willow => placeholder::render(canvas, Sketch::Willow, size),
+            Sketch::Willow => willow::render(canvas, &self.curtain, &self.table, elapsed, size),
         }
     }
 }
